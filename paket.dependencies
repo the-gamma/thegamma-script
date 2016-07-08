@@ -1,0 +1,6 @@
+source https://www.nuget.org/api/v2
+nuget FAKE
+nuget Suave
+
+git https://github.com/fsprojects/Fable.git master build: "build.cmd", OS: windows
+git https://github.com/fsprojects/Fable.git master build: "build.sh", OS: mono

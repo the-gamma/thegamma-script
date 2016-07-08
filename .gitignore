@@ -1,0 +1,11 @@
+.paket/paket.exe
+node_modules/
+paket-files/
+packages/
+
+out/
+
+obj
+bin
+.vs
+*.suo

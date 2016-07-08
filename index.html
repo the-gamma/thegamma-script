@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+	<meta http-equiv="Content-Type" content="text/html;charset=utf-8" >
+</head>
+<body>
+
+<div id="container" style="width:800px;height:600px;border:1px solid grey"></div>
+
+<!-- <script src="node_modules/core-js/client/core.min.js"></script> -->
+<script src="node_modules/requirejs/require.js"></script>
+<script>
+	require.config({
+		paths: { 'vs': 'node_modules/monaco-editor/dev/vs' },
+		map: {
+			"*": {
+				"monaco": "vs/editor/editor.main",
+				"fable-core": "paket-files/github.com/fsprojects/Fable/src/fable/Fable.Core/fable-core.min.js"
+			}
+    }})
+	require(["out/main"])
+</script>
+</body>
+</html>
