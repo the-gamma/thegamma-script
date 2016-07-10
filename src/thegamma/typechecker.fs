@@ -1,89 +1,143 @@
 ﻿module TheGamma.TypeChecker
 
 open TheGamma
+open Fable.Extensions
 
 type CheckingContext = 
-  { Globals : Map<string, Type> }
+  { Variables : Map<string, Type> }
+
+type CheckingResult = 
+  { Errors : Error list }
+
+let addError e ctx = { ctx with Errors = e::ctx.Errors }
+let addVariable k v ctx = { ctx with Variables = Map.add k v ctx.Variables }
 
 let awaitFuture (f:Future<'T>) = Async.FromContinuations(fun (cont, _, _) ->
   f.Then(cont))
 
-let rec asObjectType t = async {
+type ObjectMembers = 
+  | Members of Member list
+  | NotAnObject
+  | SilentError
+
+let rec getObjectMembers t = async {
   match t with
   | Type.Delayed f ->
       let! t = awaitFuture f
-      return! asObjectType t 
-  | Type.Object o -> return o
-  | Type.Primitive _ -> return failwith "Expected object type" }
+      return! getObjectMembers t 
+  | Type.Object o -> return Members(o.Members)
+  | Type.Unit
+  | Type.Primitive _ -> return NotAnObject
+  | Type.Any _ -> return SilentError }
 
-let rec asyncMap f l = async {
+let rec asyncFoldMap f st l = async {
   match l with
   | x::xs ->
-      let! y = f x
-      let! ys = asyncMap f xs
-      return y::ys
-  | [] -> return [] }
+      let! st, y = f st x
+      let! st, ys = asyncFoldMap f st xs
+      return st, y::ys
+  | [] -> return st, [] }
 
-let rec typeCheck ctx (expr:Expr<unit>) = async {
+let rec asyncFold f st l = async {
+  match l with
+  | x::xs ->
+      let! st = f st x
+      return! asyncFold f st xs 
+  | [] -> return st }
+
+let rec typeCheckExpr ctx res (expr:Expr<unit>) = async {
   match expr.Expr with
-  | ExprKind.Variable(v) when ctx.Globals.ContainsKey v ->  
-      return { Expr = ExprKind.Variable v; Type = ctx.Globals.[v]; Range = expr.Range }
+  | ExprKind.Unit ->
+      return { Expr = ExprKind.Unit; Type = Type.Unit; Range = expr.Range }, res
+  | ExprKind.Empty ->
+      return { Expr = ExprKind.Empty; Type = Type.Any; Range = expr.Range }, res
+  | ExprKind.Variable(v) when ctx.Variables.ContainsKey v.Name ->  
+      return { Expr = ExprKind.Variable v; Type = ctx.Variables.[v.Name]; Range = expr.Range }, res
   | ExprKind.Variable(v) ->
-      return failwith (sprintf "Variable '%s' is not global" v)
+      return 
+        { Expr = ExprKind.Variable v; Type = Type.Any; Range = expr.Range }, 
+        res |> addError (Errors.TypeChecker.variableNotInScope expr.Range v.Name)
   | ExprKind.Number n -> 
-      return { Expr = ExprKind.Number n; Type = Type.Primitive "num"; Range = expr.Range }
+      return { Expr = ExprKind.Number n; Type = Type.Primitive "num"; Range = expr.Range }, res
   | ExprKind.Boolean b -> 
-      return { Expr = ExprKind.Boolean b; Type = Type.Primitive "bool"; Range = expr.Range }
+      return { Expr = ExprKind.Boolean b; Type = Type.Primitive "bool"; Range = expr.Range }, res
+
   | ExprKind.Property(e, name) ->
-      let! typed = typeCheck ctx e
-      let! objTyp = asObjectType typed.Type 
-      let resTypOpt = objTyp.Members |> Seq.tryPick (function Member.Property(n, r) when n = name -> Some r | _ -> None)
-      let resTyp = 
-        match resTypOpt with
-        | Some(resTyp) -> resTyp
-        | _ -> failwith (sprintf "Could not find property '%s' in '%A'" name objTyp.Members)
-      return { Expr = ExprKind.Property(typed, name); Type = resTyp; Range = expr.Range }
+      let! typed, res = typeCheckExpr ctx res e
+      let! members = getObjectMembers typed.Type 
+      let resTyp, res = 
+        match members with
+        | ObjectMembers.Members members ->
+            match members |> Seq.tryPick (function Member.Property(n, r) when n = name.Name -> Some r | _ -> None) with
+            | Some resTyp -> resTyp, res
+            | _ -> Type.Any, res |> addError (Errors.TypeChecker.propertyMissing name.Range name.Name members)
+        | ObjectMembers.SilentError -> Type.Any, res
+        | ObjectMembers.NotAnObject -> Type.Any, res |> addError (Errors.TypeChecker.notAnObject e.Range typed.Type)
+      return { Expr = ExprKind.Property(typed, name); Type = resTyp; Range = expr.Range }, res
 
   | ExprKind.Call(e, name, args) ->
-      let! typed = typeCheck ctx e
-      let! objTyp = asObjectType typed.Type 
-      let callOpt = objTyp.Members |> Seq.tryPick (function Member.Method(n, r, args) when n = name -> Some(r, args) | _ -> None)
-      let methArgs, resTyp = 
-        match callOpt with
-        | Some(methArgs, resTyp) -> methArgs, resTyp
-        | _ -> failwith (sprintf "Could not find method '%s' in '%A'" name objTyp.Members)
+      let! typed, res = typeCheckExpr ctx res e
+      let! members = getObjectMembers typed.Type 
 
-      let! typedArgs = 
-        args |> asyncMap (fun arg -> async {
-          let! t = typeCheck ctx arg.Value
-          return { Name = arg.Name; Value = t } })
-      // TODO: Check arguments
+      let! res, typedArgs = 
+        args |> asyncFoldMap (fun res arg -> async {
+          let! t, res = typeCheckExpr ctx res arg.Value
+          return res, { Name = arg.Name; Value = t } }) res
 
-      return { Expr = ExprKind.Call(typed, name, typedArgs); Type = resTyp; Range = expr.Range } }
+      let resTyp, res = 
+        match members with
+        | ObjectMembers.Members members ->
+            match members |> Seq.tryPick (function Member.Method(n, args, r) when n = name.Name -> Some(r, args) | _ -> None) with
+            | Some(resTyp, args) -> 
+                // TODO: check arguments
+                resTyp, res
+            | _ -> Type.Any, res |> addError (Errors.TypeChecker.methodMissing name.Range name.Name members)
+        | ObjectMembers.SilentError -> Type.Any, res
+        | ObjectMembers.NotAnObject -> Type.Any, res |> addError (Errors.TypeChecker.notAnObject e.Range typed.Type)
 
+      return { Expr = ExprKind.Call(typed, name, typedArgs); Type = resTyp; Range = expr.Range }, res }
 
+let rec typeCheckCmd ctx res cmds = async {
+  match cmds with
+  | ({ Command = CommandKind.Let(name, expr) } as cmd)::cmds ->
+      let! typed, res = typeCheckExpr ctx res expr
+      let! cmds, res = typeCheckCmd (addVariable name.Name typed.Type ctx) res cmds
+      return { Command = CommandKind.Let(name, typed); Range = cmd.Range}::cmds, res
+  | ({ Command = CommandKind.Expr(expr) } as cmd)::cmds ->      
+      let! typed, res = typeCheckExpr ctx res expr
+      let! cmds, res = typeCheckCmd ctx res cmds
+      return { Command = CommandKind.Expr(typed); Range = cmd.Range}::cmds, res
+  | [] -> 
+      return [], res }
 
+type EditorInfo = 
+  { Completions : list<Range * Member list> }
 
-let subExpressions expr = 
+let withCompletion r t ctx = async {
+  let! members = getObjectMembers t
+  match members with
+  | Members members -> return { ctx with Completions = (r, members)::ctx.Completions }
+  | _ -> return ctx }
+
+let rec collectExprInfo ctx expr = async {
   match expr.Expr with
-  | ExprKind.Property(e, _) -> [e]
-  | ExprKind.Call(e1, _, args) -> e1 :: (List.map (fun a -> a.Value) args)
+  | ExprKind.Property(inst, n) -> 
+      let! ctx = collectExprInfo ctx inst
+      return! withCompletion n.Range inst.Type ctx
+  | ExprKind.Call(inst, n, args) ->
+      let! ctx = collectExprInfo ctx inst
+      let! ctx = args |> asyncFold (fun ctx arg -> collectExprInfo ctx arg.Value) ctx
+      return! withCompletion n.Range inst.Type ctx 
+  | ExprKind.Empty
+  | ExprKind.Unit
   | ExprKind.Number _
   | ExprKind.Boolean _
-  | ExprKind.Variable _ -> []
+  | ExprKind.Variable _ -> return ctx }
 
-let rec typeBefore loc best expr = 
-  let sub = subExpressions expr
-  let best = 
-    expr::sub
-    |> List.filter (fun e -> e.Range.End <= loc)
-    |> List.fold (fun best e ->   
-        match best with
-        | None -> Some e
-        | Some best when e.Range.End > best.Range.End -> Some e 
-        | best -> best ) best
-  
-  sub
-  |> List.filter (fun e -> e.Range.Start <= loc && e.Range.End >= loc)
-  |> List.fold (fun best e -> typeBefore loc best e) best
-
+let rec collectCmdInfo ctx cmds = async {
+  match cmds with
+  | [] -> return ctx
+  | { Command = CommandKind.Let(_, expr) }::cmds 
+  | { Command = CommandKind.Expr(expr) }::cmds ->
+      let! ctx = collectExprInfo ctx expr
+      return! collectCmdInfo ctx cmds }

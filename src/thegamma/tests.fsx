@@ -2,21 +2,23 @@
 #r "bin/Debug/thegamma.dll"
 open TheGamma
 
+Main.typeCheck "foo(1)" |> Async.RunSynchronously
+Main.typeCheck "foo(1\n.bar()\n.zoo()" |> Async.RunSynchronously
 
 
-let rec seriesTy = Delayed(fun () -> 
-  Type.Object 
-    { Members = 
-      [ Member.Method("sortValues", ["reverse", Type.Primitive "bool"], seriesTy)
-        Member.Method("take", ["count", Type.Primitive "num"], seriesTy) ]
-    })
+let code = "world." 
+let errs, ty = Main.typeCheck code |> Async.RunSynchronously
+let info = TypeChecker.collectEditorInfo { Completions = [] } ty |> Async.RunSynchronously
+info.Completions |> Array.ofSeq
 
-let worldTy = 
-  Type.Object
-    { Members = 
-        [ Member.Property("CO2 emissions (kt)", seriesTy) ] }
+code.[5]
+code.[30 .. 34-1]
+code.[41 .. 41-1]
+code.[6 .. 26-1]
 
-let globals = Map.ofSeq [ "world", worldTy ]
+(*
+let olympicsTy = TypePoviders.createRestType "http://127.0.0.1:10051" "/"
+let globals = Map.ofSeq [ "olympics", olympicsTy; "world", TypePoviders.worldTy ]
 
 
 let sample = """world.'CO2 emissions (kt)'
@@ -31,8 +33,10 @@ let expr =
   let (Parsec.Parser q) = Parser.expression
   q r |> Option.get |> snd
 
-let typed = TypeChecker.typeCheck { Globals = globals } expr        
+let typed = TypeChecker.typeCheck { Globals = globals } expr  |> Async.RunSynchronously
+
 TypeChecker.asObjectType typed.Type
+|> Async.RunSynchronously
 
 let getObjectType e = (Option.get e).Type |> TypeChecker.asObjectType
 
@@ -42,3 +46,4 @@ typeBefore { Line=1; Column=26 } None typed |> getObjectType
 (typeBefore { Line=2; Column=24 } None typed |> Option.get).Type
 
 typed.Range
+*)

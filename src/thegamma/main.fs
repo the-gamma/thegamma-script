@@ -5,50 +5,149 @@ open Fable.Core.Extensions
 open Fable.Import
 open Fable.Import.Browser
 open Fable.Import.monaco
+open Fable.Extensions
 module FsOption = Microsoft.FSharp.Core.Option
 
-[<Emit("JSON.stringify($0)")>]
-let jsonStringify json : string = failwith "JS Only"
-
-[<Emit("JSON.parse($0)")>]
-let jsonParse<'R> (str:string) : 'R = failwith "JS Only"
-
-module Http =
-  /// Send HTTP request asynchronously
-  /// (does not handle errors properly)
-  let Request(meth, url, data) =
-    Async.FromContinuations(fun (cont, _, _) ->
-      let xhr = XMLHttpRequest.Create()
-      xhr.``open``(meth, url)
-      xhr.onreadystatechange <- fun _ ->
-        if xhr.readyState > 3. && xhr.status = 200. then
-          cont(xhr.responseText)
-        obj()
-      xhr.send(defaultArg data "") )
-
 [<Emit("_monaco = monaco")>]
-let hack : unit = failwith "JS only"
+let hack : unit = ()
 hack
 
+// Global provided types
 
-type Type = { kind:string }
-type TypeNested = { kind:string (* = nested *); endpoint:string }
-type TypePrimitive = { kind:string (* = primitive *); ``type``:obj; endpoint:string }
+let olympicsTy = TypePoviders.createRestType "http://127.0.0.1:10051" "/"
+let globals = Map.ofSeq [ "olympics", olympicsTy; "world", TypePoviders.worldTy ]
 
-type Member =
-  { name : string
-    returns : Type
-    trace : string[] }
+let (|ExprLeaf|ExprNode|) e = 
+  match e with
+  | ExprKind.Property(e, n) -> ExprNode([e], [n])
+  | ExprKind.Call(e, n, args) -> ExprNode(e::[for a in args -> a.Value ], n::(args |> List.choose (fun a -> a.Name)))
+  | ExprKind.Variable(n) -> ExprNode([], [n])
+  | ExprKind.Number _
+  | ExprKind.Boolean _
+  | ExprKind.Unit
+  | ExprKind.Empty -> ExprLeaf()
 
-let load url = async {
-  let! json = Http.Request("GET", url, None)
-  let members = jsonParse<Member[]> json
-  Browser.console.log(members) }
-  
-load "http://127.0.0.1:10051" |> Async.StartImmediate  
+let rebuildExprNode e es ns =
+  match e, es, ns with
+  | ExprKind.Property(_, _), [e], [n] -> ExprKind.Property(e, n)
+  | ExprKind.Call(_, _, args), e::es, n::ns ->
+      let rec rebuildArgs args es ns =
+        match args, es, ns with
+        | { Argument.Name = None }::args, e::es, ns -> { Value = e; Name = None }::(rebuildArgs args es ns)
+        | { Argument.Name = Some _ }::args, e::es, n::ns -> { Value = e; Name = Some n }::(rebuildArgs args es ns)
+        | [], [], [] -> []
+        | _ -> failwith "rebuildExprNode: Wrong call length"
+      ExprKind.Call(e, n, rebuildArgs args es ns)
+  | ExprKind.Variable _, [], [n] -> ExprKind.Variable(n)
+  | ExprKind.Variable _, _, _ -> failwith "rebuildExprNode: Wrong variable length"
+  | ExprKind.Property _, _, _ -> failwith "rebuildExprNode: Wrong property length"
+  | ExprKind.Call _, _, _ -> failwith "rebuildExprNode: Wrong call length"
+  | ExprKind.Number _, _, _
+  | ExprKind.Boolean _, _, _
+  | ExprKind.Empty, _, _ 
+  | ExprKind.Unit, _, _ -> failwith "rebuildExprNode: Not a node"
+
+let mapNameRanges f (n:Name) = 
+  { n  with Range = f n.Range }
+
+let rec mapExprRanges f expr = 
+  match expr.Expr with  
+  | ExprLeaf -> { expr with Range = f expr.Range }
+  | ExprNode(es, ns) -> 
+      { Expr = rebuildExprNode expr.Expr (List.map (mapExprRanges f) es) (List.map (mapNameRanges f) ns)
+        Range = f expr.Range; Type = expr.Type }
+
+let rec mapCmdRanges f cmd = 
+  match cmd.Command with
+  | CommandKind.Expr e -> { Command = CommandKind.Expr (mapExprRanges f e); Range = cmd.Range }
+  | CommandKind.Let(n, e) -> { Command = CommandKind.Let(mapNameRanges f n, mapExprRanges f e); Range = cmd.Range }
+
+let tokenize (input:string) = 
+  let input = input.Replace("\r\n", "\n")
+  let (Parsec.Parser p) = Tokenizer.tokens
+  match p (0, List.ofSeq input) with
+  | Some((offs, rest), errors, tokens) ->
+      let errors = 
+        if List.isEmpty rest then errors
+        else 
+          let rest = System.String(Array.ofList rest)
+          { Number = 11; Range = { Start = offs; End = offs + rest.Length }
+            Message = sprintf "Tokenizer stopped: %s" rest }::errors 
+      errors, tokens
+  | None ->
+      [ { Number = 11; Range = { Start = 0; End = input.Length }
+          Message = sprintf "Tokenizer did not recognize input: %s" input } ], []
+
+let parse (input:string) = 
+  let errs1, tokens = tokenize input
+  let (Parsec.Parser p) = Parser.command
+
+  let rangeLookup = tokens |> List.map (fun tok -> tok.Range) |> Array.ofSeq
+
+  let tokToChar rng =
+    let safe start n = 
+      if n >= rangeLookup.Length then rangeLookup.[rangeLookup.Length-1].End
+      elif n < 0 then 0
+      elif start then rangeLookup.[n].Start
+      else rangeLookup.[n].End
+    let rng = 
+      { Start = safe true rng.Start
+        End = safe false (rng.End-1) }
+    if rng.End < rng.Start then { rng with End = rng.Start }
+    else rng
+
+  match p (0, tokens) with
+  | Some((offs, rest), errs2, cmds) ->
+      let errs2 = errs2 |> List.map (fun e -> { e with Range = tokToChar e.Range })
+      let errors = 
+        if List.isEmpty rest then errs1 @ errs2
+        else
+          { Number = 21; Range = tokToChar { Start = offs; End = offs + List.length rest }
+            Message = sprintf "Parser stopped: %A" rest } :: errs1 @ errs2
+      errors, cmds |> List.map (mapCmdRanges tokToChar)
+  | _ ->
+    { Number = 21; Range = tokToChar { Start = 0; End = List.length tokens }
+      Message = sprintf "Parser stopped: %A" tokens } :: errs1,
+    []
+          
+let typeCheck input = async {
+  let errs1, untyped = parse input
+  let! checkd, ctx = TypeChecker.typeCheckCmd { Variables = globals } { Errors = [] } untyped
+  return errs1 @ ctx.Errors, checkd }
+
+
+type DomNode = 
+  | Text of string
+  | Element of tag:string * attributes : (string * string)[] * children : DomNode[]
+
+let rec render node = 
+  match node with
+  | Text(s) -> 
+      document.createTextNode(s) :> Node
+  | Element(tag, attrs, children) ->
+      let el = document.createElement(tag)
+      for c in children do el.appendChild(render c) |> ignore
+      for k, v in attrs do el.setAttribute(k, v)
+      el :> Node
+
+let div a c = Element("div", Array.ofList a, Array.ofList c)
+let text s = Text(s)
+let (=>) k v = k, v
+
+let renderErrors errors = 
+  div ["class" => "error"] 
+    [ for (e:Error) in errors -> 
+        div [] [
+          text (sprintf "%d:%d" e.Range.Start e.Range.End); 
+          text "error "; text (string e.Number); text ": "; text (e.Message)] ]
+
+let reportErrors errors = 
+  let node = renderErrors errors
+  let ediv = document.getElementById("errors")
+  while box ediv.lastChild <> null do ignore(ediv.removeChild(ediv.lastChild))
+  ediv.appendChild(render node) |> ignore
 
 let run () =
-
   let services = createEmpty<editor.IEditorOverrideServices>
 
   let lang = createEmpty<languages.ILanguageExtensionPoint>
@@ -66,82 +165,58 @@ let run () =
           tokens.endState <- noState
           tokens.tokens <- ResizeArray()
 
-          let (Parsec.Parser p) = Tokenizer.tokens
-          match p (List.ofSeq line) with
-          | Some(_, r) ->
-              //Browser.console.log(line)
-              //Browser.console.log(r)
-              for t in r do
-                let tok = createEmpty<languages.IToken>
-                tok.startIndex <- float t.Range.Start.Column
-                tok.scopes <- U2.Case1 (match t.Token with TokenKind.QIdent _ | TokenKind.Ident _ -> "entity" | TokenKind.Dot _ -> "operator" | TokenKind.Boolean _ -> "keyword" | TokenKind.Number _ -> "number" | _ -> "")
-                tokens.tokens.Add(tok)
-          | _ -> ()
+          let _, tokenized = tokenize line
+          for t in tokenized do
+            let tok = createEmpty<languages.IToken>
+            tok.startIndex <- float t.Range.Start
+            tok.scopes <- U2.Case1 (match t.Token with TokenKind.QIdent _ | TokenKind.Ident _ -> "entity" | TokenKind.Dot _ -> "operator" | TokenKind.Boolean _ -> "keyword" | TokenKind.Number _ -> "number" | _ -> "")
+            tokens.tokens.Add(tok)
 
           tokens
         member this.getInitialState() = noState }
 
   monaco.languages.Globals.setTokensProvider("thegamma", toks) |> ignore
 
-  let rec seriesTy() = 
-    { new Future<_> with
-        member x.Then(f) = 
-          Type.Object 
-            { Members = 
-              [ Member.Method("sortValues", ["reverse", Type.Primitive "bool"], seriesTy ())
-                Member.Method("take", ["count", Type.Primitive "num"], seriesTy ()) ] } |> f } |> Delayed
-
-  let worldTy = 
-    Type.Object
-      { Members = 
-          [ Member.Property("CO2 emissions (kt)", seriesTy ()) ] }
-
-  let globals = Map.ofSeq [ "world", worldTy ]
-
-  let typeCheck (text:string) = 
-    let sample = text.Replace("\r\n", "\n")
-    let (Parsec.Parser p) = Tokenizer.tokens
-    match p (List.ofSeq sample) with
-    | Some([], r) ->
-        let r = r |> List.filter (function { Token = TokenKind.White _ } -> false | _ -> true)
-        let (Parsec.Parser q) = Parser.expression
-        match q r with
-        | Some(_, r) -> // first should be empty - but whatever, ignore '.' at the end
-            let checkd = TypeChecker.typeCheck { Globals = globals } r
-            checkd
-        | n -> failwith (sprintf "Parser faield: %A" n)
-    | n ->
-      failwith (sprintf "Tokenizer faield: %A" n)
 
   let needsEscaping (s:string) = 
-    s.ToCharArray() |> Array.exists (fun c -> not ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))  )
+    s.ToCharArray() |> Array.exists (fun c -> not ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) )
 
   let compr = 
     { new languages.CompletionItemProvider with 
         member this.triggerCharacters = Some(ResizeArray [ "." ])
         member this.provideCompletionItems(model, position, token) =           
           async {          
-            let! ty = typeCheck (model.getValue(editor.EndOfLinePreference.LF, false))
-            Browser.console.log(ty)
+            let input = model.getValue(editor.EndOfLinePreference.LF, false)
+            let lines = input.Split('\n')
+            let! errs, ty = typeCheck input
+            let! info = TypeChecker.collectCmdInfo { Completions = [] } ty
+            
+            let absPosition = 
+              int position.column - 1 +
+                List.fold (+) 0 [ for i in 1 .. int position.lineNumber-1 -> lines.[i-1].Length + 1 ]
+  
+            let optMembers = 
+              info.Completions 
+              |> List.filter (fun (rng, _) -> absPosition >= rng.Start && absPosition <= rng.End)
+              |> List.sortBy (fun (rng, _) -> -rng.Start)
+              |> List.tryHead
 
-            let getObjectType e = (FsOption.get e).Type |> TypeChecker.asObjectType
-            let tb = TypeChecker.typeBefore { Line=int position.lineNumber; Column=int position.column-1 } None ty 
-            let! obj = getObjectType tb
-
-            Browser.console.log(obj)
-
-            let completion =
-              [ for m in obj.Members ->
-                  let ci = createEmpty<languages.CompletionItem>
-                  let n, k =
-                    match m with 
-                    | Member.Method(n, _, _) -> n, languages.CompletionItemKind.Method
-                    | Member.Property(n, _) -> n, languages.CompletionItemKind.Property
-                  ci.kind <- k
-                  ci.label <- n
-                  if needsEscaping n then ci.insertText <- Some("'" + n + "'")
-                  ci ] 
-            return ResizeArray(completion) } |> Async.StartAsPromise |> U4.Case2
+            match optMembers with 
+            | None -> return ResizeArray []
+            | Some (_, members) -> 
+              let completion =
+                [ for m in members ->
+                    let ci = createEmpty<languages.CompletionItem>
+                    let n, k =
+                      match m with 
+                      | Member.Method(n, _, _) -> n, languages.CompletionItemKind.Method
+                      | Member.Property(n, _) -> n, languages.CompletionItemKind.Property
+                    ci.kind <- k
+                    ci.label <- n
+                    if needsEscaping n then ci.insertText <- Some("'" + n + "'")
+                    ci ] 
+              Browser.console.log("Completions: %O", completion)
+              return ResizeArray(completion) } |> Async.StartAsPromise |> U4.Case2
 
         member this.resolveCompletionItem(item, token) = U2.Case1 item }
 
@@ -159,22 +234,26 @@ let run () =
   options.value <- Some sample
   options.language <- Some "thegamma"
 
-  let editor = monaco.editor.Globals.create(Browser.document.getElementById("container"), options, services)
+  let ed = monaco.editor.Globals.create(Browser.document.getElementById("container"), options, services)
   ()
-(*
-  editor.getModel().onDidChangeContent(fun ch ->
-    let text = editor.getModel().getValue()
 
-    let sample = text.Replace("\r\n", "\n")
-    let (Parsec.Parser p) = Tokenizer.tokens
-    match p (List.ofSeq sample) with
-    | Some([], r) ->
-        let r = r |> List.filter (function { Token = TokenKind.White _ } -> false | _ -> true)
-        let (Parsec.Parser q) = Parser.expression
-        Browser.console.log(q r)
-    | n ->
-      failwith (sprintf "Tokenizer faield: %A" n)
+  ed.getModel().onDidChangeContent(fun ch ->
+    let text = ed.getModel().getValue(editor.EndOfLinePreference.LF, false)
+    
+    async {
+      try
+        let! errs, expr = typeCheck text 
+        reportErrors errs
+
+        (*Browser.console.log("*** Type checking completed ***")
+        for e in errs do
+          Browser.console.log("Error %s: %s (%O)", e.Number, e.Message, e.Range)
+        Browser.console.log("Expression: %O", expr) 
+        *)
+      with e ->
+        Browser.console.log("*** Type checking failed ***")
+        Browser.console.log(e) } |> Async.StartImmediate
+
   ) |> ignore
-*)
 
 run ()

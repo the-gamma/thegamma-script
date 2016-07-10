@@ -4,9 +4,9 @@ if errorlevel 1 (
   exit /b %errorlevel%
 )
 if not exist paket.lock (
-  .paket\paket.exe install
+  .paket\paket.exe install -v
 ) else (
-  .paket\paket.exe restore
+  .paket\paket.exe restore -v
 )
 if errorlevel 1 (
   exit /b %errorlevel%

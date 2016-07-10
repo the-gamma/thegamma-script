@@ -6,9 +6,9 @@ NUGET
       FSharp.Core (>= 3.1.2.5)
 GIT
   remote: https://github.com/fsprojects/Fable.git
-     (ce7cdcef07dd48aced6422d828f677c0f42e6c85)
-      build: build.cmd
+     (da6842717c072ecf9ad484bb46a6bdf8e8eb0369)
+      build: build.cmd AllAndCore
       os: windows
-     (ce7cdcef07dd48aced6422d828f677c0f42e6c85)
-      build: build.sh
+     (da6842717c072ecf9ad484bb46a6bdf8e8eb0369)
+      build: build.sh AllAndCore
       os: mono

@@ -8,6 +8,9 @@
 
 <div id="container" style="width:800px;height:600px;border:1px solid grey"></div>
 
+<div id="errors">
+</div>
+
 <!-- <script src="node_modules/core-js/client/core.min.js"></script> -->
 <script src="node_modules/requirejs/require.js"></script>
 <script>
@@ -16,7 +19,7 @@
 		map: {
 			"*": {
 				"monaco": "vs/editor/editor.main",
-				"fable-core": "paket-files/github.com/fsprojects/Fable/src/fable/Fable.Core/fable-core.min.js"
+				"fable-core": "paket-files/github.com/fsprojects/Fable/src/fable/Fable.Core/npm/fable-core"
 			}
     }})
 	require(["out/main"])

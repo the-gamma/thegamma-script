@@ -7,8 +7,19 @@ open TheGamma
 open TheGamma.Parsec
 
 let unionRanges r1 r2 =
-  { Start = r1.Start; End = r2.End }
-  
+  { Start = min r1.Start r2.Start; End = max r1.End r2.End }
+
+let anySpace = zeroOrMore (pred (fun t -> match t.Token with TokenKind.White _ -> true | _ -> false))
+let anyWhite = zeroOrMore (pred (fun t -> match t.Token with TokenKind.Newline | TokenKind.White _ -> true | _ -> false))
+
+let anyUntilLineEnd = Parser(fun input ->
+  let rec loop input =
+    match input with
+    | offset, { Token = TokenKind.Newline }::rest -> Some((offset+1, rest), [], ())
+    | offset, tok::rest -> loop (offset+1, rest)
+    | _, [] -> None
+  loop input)
+
 // Parsing of simple expressions that correspond to tokens
 let token tok = pred (fun t -> t.Token = tok)
 
@@ -16,59 +27,104 @@ let separated sep p =
   p <*> zeroOrMore (sep <*> p)
   |> map (fun (a1, args) -> a1::(List.map snd args))
 
+let separatedThen sep p1 p2 =
+  p1 <*> zeroOrMore (sep <*> p2)
+  |> map (fun (a1, args) -> a1::(List.map snd args))
+
 let separatedOrEmpty sep p = 
   optional (separated sep p) 
   |> map (fun l -> defaultArg l [])
 
 let ident =
-  choose (fun tok ->
+  anyWhite <*>> range (choose (fun tok ->
     match tok.Token with
     | TokenKind.Ident id
-    | TokenKind.QIdent id -> Some(id, tok.Range) 
-    | _ -> None)
-
+    | TokenKind.QIdent id -> Some(id)
+    | _ -> None)) |> map (fun (rng, id) -> { Name = id; Range = rng })
+  
 let expressionSetter, expression = slot()
 
 let argument = 
-  ( (ident <*> token TokenKind.Equals <*> expression)
-    |> map (fun (((id, rng), _), expr) -> { Name = Some id; Value = expr }) ) <|>
+  ( (ident <<*> anyWhite <<*> token TokenKind.Equals <*> expression)
+    |> map (fun (name, expr) -> { Name = Some name; Value = expr }) ) <|>
   ( expression
     |> map (fun expr -> { Name = None; Value = expr }) )
 
-let argumentList = 
-   token TokenKind.LParen <*> separatedOrEmpty (token TokenKind.Comma) argument <*> token TokenKind.RParen
-   |> map (fun ((t1, l), t2) -> l, unionRanges t1.Range t2.Range)
+let argumentList =  
+   anyWhite <*>>
+   range 
+    ( token TokenKind.LParen <*>> 
+      separatedOrEmpty (anyWhite <*> token TokenKind.Comma) argument <<*> 
+      // Recovery: If we don't find ), just consume everything until the end of line
+      ( ignore ( anyWhite <*> token TokenKind.RParen ) <|> 
+        ( range anyUntilLineEnd 
+          |> bind (fun (rng, _) -> error (Errors.Parser.missingClosingParen rng)) ) ) )
 
+
+type CallOrProperty = 
+  { Name : Name
+    Arguments : option<Range * list<Argument<unit>>> }
+     
 let callOrProperty =
-  (ident <*> optional argumentList)
-  
+  ( // Recovery: if the identifier is empty, but there is arg list, continue
+    range (ident <*> optional argumentList |> map(fun (id, args) -> Some id, args)) <|> 
+    range (optional ident <*> argumentList |> map(fun (id, args) -> id, Some args)) )
+  |> bind (function
+      | _, (Some(name), args) -> unit { Name = name; Arguments = args }
+      | rng, (None, args) -> 
+          error (Errors.Parser.emptyIdentifier rng) <*>>
+          unit { Name = { Name = ""; Range = rng }; Arguments = args })
+
+let callOrPropertyOrNothing = 
+  callOrProperty <|>
+  // Recovery: there is nothing after '.' in method chain
+  ( range (unit ()) |> bind (fun (rng, _) ->
+      error (Errors.Parser.nothingAfterDot rng) <*>>
+      unit { Name = { Name = ""; Range = rng; }; Arguments = None }) )
+
 let invocationChain =
-  separated (token TokenKind.Dot) callOrProperty
-  |> map (function 
-    | ((id, rng), None)::chain ->
-        let inst = { Expr = ExprKind.Variable id; Range = rng; Type = () }
-        chain |> List.fold (fun st ((id, rng), argsOpt) -> 
+  separatedThen (anyWhite <*> token TokenKind.Dot) callOrProperty callOrPropertyOrNothing
+  |> bind (function 
+    | first::chain ->
+        let inst = { Expr = ExprKind.Variable first.Name; Range = first.Name.Range; Type = () }
+        let parsed = chain |> List.fold (fun st item -> 
           let expr, r =
-            match argsOpt with
-            | Some(args, arng) -> ExprKind.Call(st, id, args), unionRanges st.Range (unionRanges rng arng)
-            | None -> ExprKind.Property(st, id), unionRanges st.Range rng
-          { Expr = expr; Range = r; Type = () }) inst 
-    | (_, Some _)::_ ->
-        failwith "Top-level should not be call"
+            match item.Arguments with
+            | Some(arng, args) -> ExprKind.Call(st, item.Name, args), unionRanges st.Range (unionRanges item.Name.Range arng)
+            | None -> ExprKind.Property(st, item.Name), unionRanges st.Range item.Name.Range
+          { Expr = expr; Range = r; Type = () }) inst
+        ( match first.Arguments with
+          | Some(rng, _) -> error (Errors.Parser.valueNotAfunction rng first.Name.Name)
+          | _ -> unit () ) <*>> unit parsed
     | [] -> 
         failwith "Unexpected: Parsed empty chain")
 
 let primitive = 
-  choose (function 
+  anyWhite <*>> choose (function 
     | { Token = TokenKind.Number(_, n); Range = rng } -> 
         Some { Expr = ExprKind.Number(n); Range = rng; Type = () }
     | { Token = TokenKind.Boolean(b); Range = rng } -> 
         Some { Expr = ExprKind.Boolean(b); Range = rng; Type = () }
     | _ -> None)
 
+let declaration = 
+  anyWhite <*>> token TokenKind.Let <*>> ident <<*> anyWhite <<*> token TokenKind.Equals <*> expression
+
+let letBinding =
+  range declaration
+  |> map (fun (rng, (name, expr)) -> 
+      { Command = CommandKind.Let(name, expr); Range = rng })
+
 expressionSetter.Set
-  ( invocationChain <|> 
-    primitive )
+  ( anyWhite <*>> 
+    ( invocationChain <|> 
+      primitive ) )
+
+let command =
+  sequenceChoices
+    [ expression |> map (fun e -> { Command = CommandKind.Expr e; Range = e.Range })
+      letBinding ]
+
 
 (*
 let var = 

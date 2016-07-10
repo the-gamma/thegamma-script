@@ -62,11 +62,14 @@
   </Target>
   -->
   <ItemGroup>
+    <Compile Include="extensions.fs" />
     <Compile Include="ast.fs" />
+    <Compile Include="errors.fs" />
     <Compile Include="parsec.fs" />
     <Compile Include="tokenizer.fs" />
     <Compile Include="parser.fs" />
     <Compile Include="typechecker.fs" />
+    <Compile Include="providers.fs" />
     <Compile Include="main.fs" />
     <None Include="tests.fsx" />
     <Content Include="App.config">

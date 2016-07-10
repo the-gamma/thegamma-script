@@ -27,8 +27,8 @@ let operator = pred operators.Contains |> map (fun op ->
 
 /// Identifier in single-quotes can contain anything except for end of line or '
 let quotedIdent = 
-  char '\'' () <*> oneOrMore (pred (fun c -> c <> '\n' && c <> '\'')) <*> char '\'' ()
-  |> map (fun ((_, cs), _) -> TokenKind.QIdent(System.String(Array.ofList cs)) )
+  char '\'' () <*>> oneOrMore (pred (fun c -> c <> '\n' && c <> '\'')) <<*> char '\'' ()
+  |> map (fun cs -> TokenKind.QIdent(System.String(Array.ofList cs)) )
 
 /// Parse letter followed by zero or more letters and/or numbers
 let keywordOrIdent = 
@@ -41,45 +41,32 @@ let keywordOrIdent =
 
 /// We parse and keep whitespace, but filter it out later 
 let whitespace =
-  oneOrMore (pred (fun c -> c = ' ' || c = '\n'))
-  |> map (fun whites -> TokenKind.White(System.String(Array.ofList whites)))
+  ( oneOrMore (pred ((=) ' '))
+    |> map (fun whites -> TokenKind.White(System.String(Array.ofList whites))) ) <|>
+  ( pred ((=) '\n') 
+    |> map (fun _ -> TokenKind.Newline) )
+
+let unclosedQuotedIdent = 
+  range (char '\'' () <*>> oneOrMore (pred (fun c -> c <> '\n' && c <> '\'')))
+  |> bind (fun (rng, ch) -> 
+      let q = System.String(Array.ofList ch)
+      error (Errors.Tokenizer.missingClosingQuote rng q) <*>>
+      unit (TokenKind.QIdent(q)))
 
 /// The main lexer for our mini-ML language
-let rawTokens = 
-  sequenceChoices 
-    [ char '(' TokenKind.LParen
-      char ')' TokenKind.RParen 
-      char '=' TokenKind.Equals
-      char '.' TokenKind.Dot
-      char ',' TokenKind.Comma
-      integer
-      operator
-      quotedIdent
-      keywordOrIdent
-      whitespace ] 
-
-let incrementLocation loc tok = 
-  match tok with
-  | TokenKind.Dot
-  | TokenKind.Comma
-  | TokenKind.Equals
-  | TokenKind.LParen
-  | TokenKind.RParen -> { loc with Column = loc.Column + 1 }
-  | TokenKind.Ident s 
-  | TokenKind.Operator s 
-  | TokenKind.Number(s, _) -> { loc with Column = loc.Column + s.Length }
-  | TokenKind.Boolean(b) -> { loc with Column = loc.Column + if b then 4 else 5 }
-  | TokenKind.QIdent s -> { loc with Column = loc.Column + s.Length + 2 }
-  | TokenKind.Let -> { loc with Column = loc.Column + 3 }
-  | TokenKind.White s ->
-      s |> Seq.fold (fun loc c -> 
-        if c = '\n' then { Line = loc.Line + 1; Column = 0 } 
-        else { loc with Column = loc.Column +  1} ) loc
-
-let tokens = rawTokens |> map (fun toks -> 
-  let start = { Line = 1; Column = 0; }
-  toks 
-  |> List.scan (fun st tok ->
-      { Token = tok; Range = { Start = st.Range.End; End = incrementLocation st.Range.End tok }})
-    { Token = TokenKind.White ""; Range = { Start = start; End = start } }
-  |> List.tail )
+let tokens = 
+  [ char '(' TokenKind.LParen
+    char ')' TokenKind.RParen 
+    char '=' TokenKind.Equals
+    char '.' TokenKind.Dot
+    char ',' TokenKind.Comma
+    integer
+    operator
+    quotedIdent
+    keywordOrIdent
+    whitespace 
+    // Error recovery
+    unclosedQuotedIdent ] 
+  |> List.map range
+  |> sequenceChoices 
+  |> map (List.map (fun (rng, tok) -> { Token = tok; Range = rng }))
