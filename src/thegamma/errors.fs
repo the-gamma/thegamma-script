@@ -20,7 +20,7 @@ module Parser =
 
 module TypeChecker = 
   let private formatMembers members = 
-    [ for m in members -> match m with Member.Method(n, _, _) -> n | Member.Property(n, _) -> n ] 
+    [ for Member.Method(name=n) | Member.Property(name=n) in members -> n ] 
     |> String.concat ", " 
 
   let variableNotInScope rng name =

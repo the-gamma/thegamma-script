@@ -6,12 +6,33 @@
 </head>
 <body>
 
+<script type="text/javascript">
+var olympics = [];
+function download(endpoint, trace) {
+	var xhr = new XMLHttpRequest();
+	var url = "http://127.0.0.1:10051" + endpoint;
+	xhr.open("POST", url, true)
+	xhr.onreadystatechange = function() {
+		if (xhr.readyState > 3 && xhr.status == 200) {
+		  console.log(xhr.responseText)
+		}
+	};
+	xhr.send(trace.join("&"));
+}
+
+window.evalCode = function(code) {
+	eval(code);
+}
+</script>
+
 <div id="container" style="width:800px;height:600px;border:1px solid grey"></div>
 
+<button id="run">Run</button>
 <div id="errors">
 </div>
 
 <!-- <script src="node_modules/core-js/client/core.min.js"></script> -->
+<script src="node_modules/babel-standalone/babel.js"></script>
 <script src="node_modules/requirejs/require.js"></script>
 <script>
 	require.config({

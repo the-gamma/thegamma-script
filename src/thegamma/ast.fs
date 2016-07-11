@@ -63,9 +63,17 @@ and Expr<'T> =
     Range : Range 
     Type : 'T }
 
+type Program<'T> = 
+  { Body : Command<'T> list 
+    Range : Range }
+
+
+type Emitter = 
+  { Emit : Babel.Expression * (string * Babel.Expression) list -> Babel.Expression }
+
 type [<RequireQualifiedAccess>] Member = 
-  | Property of string * Type
-  | Method of string * (string * Type) list * Type
+  | Property of name:string * typ:Type * emitter:Emitter
+  | Method of name:string * arguments:(string * Type) list * typ:Type * emitter:Emitter
 
 and ObjectType = 
   { Members : Member list }

@@ -120,11 +120,12 @@ expressionSetter.Set
     ( invocationChain <|> 
       primitive ) )
 
-let command =
+let program =
   sequenceChoices
     [ expression |> map (fun e -> { Command = CommandKind.Expr e; Range = e.Range })
       letBinding ]
-
+  |> range
+  |> map (fun (rng, cmds) -> { Body = cmds; Range = rng })
 
 (*
 let var = 

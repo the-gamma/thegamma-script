@@ -26,6 +26,9 @@ type Future<'T> =
   abstract Then : ('T -> unit) -> unit
 
 type Microsoft.FSharp.Control.Async with
+  static member AwaitFuture (f:Future<'T>) = Async.FromContinuations(fun (cont, _, _) ->
+    f.Then(cont))
+
   static member AsFuture(op, ?start) = 
     let mutable res = None
     let mutable handlers = []
@@ -46,4 +49,27 @@ type Microsoft.FSharp.Control.Async with
           | Some v -> f v
           | None -> handlers <- f::handlers }
 
+module Async = 
+  let rec map f l = async {
+    match l with 
+    | x::xs -> 
+        let! y = f x
+        let! ys = map f xs
+        return y::ys
+    | [] -> return [] }
+
+  let rec foldMap f st l = async {
+    match l with
+    | x::xs ->
+        let! st, y = f st x
+        let! st, ys = foldMap f st xs
+        return st, y::ys
+    | [] -> return st, [] }
+
+  let rec fold f st l = async {
+    match l with
+    | x::xs ->
+        let! st = f st x
+        return! fold f st xs 
+    | [] -> return st }
 

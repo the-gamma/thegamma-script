@@ -12,9 +12,6 @@ type CheckingResult =
 let addError e ctx = { ctx with Errors = e::ctx.Errors }
 let addVariable k v ctx = { ctx with Variables = Map.add k v ctx.Variables }
 
-let awaitFuture (f:Future<'T>) = Async.FromContinuations(fun (cont, _, _) ->
-  f.Then(cont))
-
 type ObjectMembers = 
   | Members of Member list
   | NotAnObject
@@ -23,27 +20,12 @@ type ObjectMembers =
 let rec getObjectMembers t = async {
   match t with
   | Type.Delayed f ->
-      let! t = awaitFuture f
+      let! t = Async.AwaitFuture f
       return! getObjectMembers t 
   | Type.Object o -> return Members(o.Members)
   | Type.Unit
   | Type.Primitive _ -> return NotAnObject
   | Type.Any _ -> return SilentError }
-
-let rec asyncFoldMap f st l = async {
-  match l with
-  | x::xs ->
-      let! st, y = f st x
-      let! st, ys = asyncFoldMap f st xs
-      return st, y::ys
-  | [] -> return st, [] }
-
-let rec asyncFold f st l = async {
-  match l with
-  | x::xs ->
-      let! st = f st x
-      return! asyncFold f st xs 
-  | [] -> return st }
 
 let rec typeCheckExpr ctx res (expr:Expr<unit>) = async {
   match expr.Expr with
@@ -68,7 +50,7 @@ let rec typeCheckExpr ctx res (expr:Expr<unit>) = async {
       let resTyp, res = 
         match members with
         | ObjectMembers.Members members ->
-            match members |> Seq.tryPick (function Member.Property(n, r) when n = name.Name -> Some r | _ -> None) with
+            match members |> Seq.tryPick (function Member.Property(name=n; typ=r) when n = name.Name -> Some r | _ -> None) with
             | Some resTyp -> resTyp, res
             | _ -> Type.Any, res |> addError (Errors.TypeChecker.propertyMissing name.Range name.Name members)
         | ObjectMembers.SilentError -> Type.Any, res
@@ -80,14 +62,14 @@ let rec typeCheckExpr ctx res (expr:Expr<unit>) = async {
       let! members = getObjectMembers typed.Type 
 
       let! res, typedArgs = 
-        args |> asyncFoldMap (fun res arg -> async {
+        args |> Async.foldMap (fun res arg -> async {
           let! t, res = typeCheckExpr ctx res arg.Value
           return res, { Name = arg.Name; Value = t } }) res
 
       let resTyp, res = 
         match members with
         | ObjectMembers.Members members ->
-            match members |> Seq.tryPick (function Member.Method(n, args, r) when n = name.Name -> Some(r, args) | _ -> None) with
+            match members |> Seq.tryPick (function Member.Method(name=n; arguments=args; typ=r) when n = name.Name -> Some(r, args) | _ -> None) with
             | Some(resTyp, args) -> 
                 // TODO: check arguments
                 resTyp, res
@@ -110,6 +92,10 @@ let rec typeCheckCmd ctx res cmds = async {
   | [] -> 
       return [], res }
 
+let typeCheckProgram ctx res prog = async {
+  let! cmds, res = typeCheckCmd ctx res prog.Body
+  return { Body = cmds; Range = prog.Range }, res }
+
 type EditorInfo = 
   { Completions : list<Range * Member list> }
 
@@ -126,7 +112,7 @@ let rec collectExprInfo ctx expr = async {
       return! withCompletion n.Range inst.Type ctx
   | ExprKind.Call(inst, n, args) ->
       let! ctx = collectExprInfo ctx inst
-      let! ctx = args |> asyncFold (fun ctx arg -> collectExprInfo ctx arg.Value) ctx
+      let! ctx = args |> Async.fold (fun ctx arg -> collectExprInfo ctx arg.Value) ctx
       return! withCompletion n.Range inst.Type ctx 
   | ExprKind.Empty
   | ExprKind.Unit
@@ -141,3 +127,6 @@ let rec collectCmdInfo ctx cmds = async {
   | { Command = CommandKind.Expr(expr) }::cmds ->
       let! ctx = collectExprInfo ctx expr
       return! collectCmdInfo ctx cmds }
+
+let collectProgramInfo ctx prog = 
+  collectCmdInfo ctx prog.Body

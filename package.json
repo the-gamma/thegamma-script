@@ -12,6 +12,7 @@
   "dependencies": {
     "core-js": "^2.4.0",
     "monaco-editor": "^0.5.1",
-    "requirejs": "^2.2.0"
+    "requirejs": "^2.2.0",
+    "babel-standalone": "^6.10.3"
   }
 }

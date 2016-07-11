@@ -8,6 +8,40 @@ open Fable.Import.monaco
 open Fable.Extensions
 module FsOption = Microsoft.FSharp.Core.Option
 
+open TheGamma
+open TheGamma.Babel
+
+type BabelOptions = 
+  { presets : string[] }
+
+type BabelResult = 
+  { code : string }
+type Babel =
+  abstract transformFromAst : obj * string * BabelOptions -> BabelResult
+
+[<Emit("window.evalCode($0)")>]
+let evalCode (s:string) : unit = ()
+
+[<Emit("Babel")>]
+let babel : Babel = Unchecked.defaultof<_> 
+
+let test () = 
+  let l = None
+  let prg =
+    { location = l
+      body =
+        [ ExpressionStatement
+            (FunctionExpression
+              ( None, [IdentifierPattern("x", l)], 
+                BlockStatement
+                  ([ ReturnStatement(NumericLiteral(42.0, l), l)
+                   ], l), false, false, l), l)] }
+
+  let code = babel.transformFromAst(Serializer.serializeProgram prg, "42", { presets = [| "es2015" |] })
+  Browser.window.alert(code.code)
+
+// test ()
+
 [<Emit("_monaco = monaco")>]
 let hack : unit = ()
 hack
@@ -80,7 +114,7 @@ let tokenize (input:string) =
 
 let parse (input:string) = 
   let errs1, tokens = tokenize input
-  let (Parsec.Parser p) = Parser.command
+  let (Parsec.Parser p) = Parser.program
 
   let rangeLookup = tokens |> List.map (fun tok -> tok.Range) |> Array.ofSeq
 
@@ -97,22 +131,23 @@ let parse (input:string) =
     else rng
 
   match p (0, tokens) with
-  | Some((offs, rest), errs2, cmds) ->
+  | Some((offs, rest), errs2, prog) ->
       let errs2 = errs2 |> List.map (fun e -> { e with Range = tokToChar e.Range })
       let errors = 
         if List.isEmpty rest then errs1 @ errs2
         else
           { Number = 21; Range = tokToChar { Start = offs; End = offs + List.length rest }
             Message = sprintf "Parser stopped: %A" rest } :: errs1 @ errs2
-      errors, cmds |> List.map (mapCmdRanges tokToChar)
+      errors, { Range = prog.Range; Body = prog.Body |> List.map (mapCmdRanges tokToChar) }
   | _ ->
     { Number = 21; Range = tokToChar { Start = 0; End = List.length tokens }
       Message = sprintf "Parser stopped: %A" tokens } :: errs1,
-    []
+    { Range = tokToChar { Start = 0; End = List.length tokens }
+      Body = [] }
           
 let typeCheck input = async {
   let errs1, untyped = parse input
-  let! checkd, ctx = TypeChecker.typeCheckCmd { Variables = globals } { Errors = [] } untyped
+  let! checkd, ctx = TypeChecker.typeCheckProgram { Variables = globals } { Errors = [] } untyped
   return errs1 @ ctx.Errors, checkd }
 
 
@@ -189,7 +224,7 @@ let run () =
             let input = model.getValue(editor.EndOfLinePreference.LF, false)
             let lines = input.Split('\n')
             let! errs, ty = typeCheck input
-            let! info = TypeChecker.collectCmdInfo { Completions = [] } ty
+            let! info = TypeChecker.collectProgramInfo { Completions = [] } ty
             
             let absPosition = 
               int position.column - 1 +
@@ -209,8 +244,8 @@ let run () =
                     let ci = createEmpty<languages.CompletionItem>
                     let n, k =
                       match m with 
-                      | Member.Method(n, _, _) -> n, languages.CompletionItemKind.Method
-                      | Member.Property(n, _) -> n, languages.CompletionItemKind.Property
+                      | Member.Method(name=n) -> n, languages.CompletionItemKind.Method
+                      | Member.Property(name=n) -> n, languages.CompletionItemKind.Property
                     ci.kind <- k
                     ci.label <- n
                     if needsEscaping n then ci.insertText <- Some("'" + n + "'")
@@ -226,9 +261,10 @@ let run () =
   monaco.languages.Globals.register(lang)
 
 
-  let sample = """world.'CO2 emissions (kt)'
-  .sortValues(reverse=true)
-  .take(42)"""
+  let sample = """let gold100 = olympics.'by sport'
+  .Athletics.'100m'.'by medal'.Gold
+
+gold100.data"""
 
   let options = createEmpty<editor.IEditorConstructionOptions>
   options.value <- Some sample
@@ -255,5 +291,32 @@ let run () =
         Browser.console.log(e) } |> Async.StartImmediate
 
   ) |> ignore
+
+
+  document.getElementById("run").onclick <- fun e ->
+    
+    let text = ed.getModel().getValue(editor.EndOfLinePreference.LF, false)
+    async {
+      try
+        let! errs, prog = typeCheck text 
+        reportErrors errs
+        
+        let ctx = { CodeGenerator.LineLengths = [ for l in text.Split('\n') -> l.Length ] }        
+        let! res = CodeGenerator.compileProgram ctx prog
+
+        let code = babel.transformFromAst(Serializer.serializeProgram res, text, { presets = [| "es2015" |] })
+
+        //Browser.window.alert(code.code)
+        Browser.console.log(code)
+
+        evalCode code.code
+
+        // let lengths = 
+
+      with e ->
+        Browser.console.log("*** Type checking failed ***")
+        Browser.console.log(e) } |> Async.StartImmediate
+
+    box()
 
 run ()
