@@ -30,11 +30,10 @@ let config =
       logger = Logging.Loggers.saneDefaultsFor Logging.LogLevel.Debug
       bindings = [ HttpBinding.mkSimple HTTP  "127.0.0.1" 8899 ] }
 
-Target "run" (fun _ ->
+Target "justrun" (fun _ ->
   let _, server = startWebServerAsync config server
   Async.Start(server)
   System.Diagnostics.Process.Start("http://localhost:8899/index.html") |> ignore
-  System.Threading.Thread.Sleep(System.Threading.Timeout.Infinite)
 )
 
 // --------------------------------------------------------------------------------------
@@ -60,12 +59,26 @@ let spawnNode command args workingDir =
       info.WorkingDirectory <- workingDir
       info.Arguments <- args) TimeSpan.MaxValue |> ignore } |> Async.Start
 
-let fable = "paket-files/github.com/fsprojects/Fable/build/fable"
+let fable = "../../paket-files/github.com/fsprojects/Fable/build/fable"
 
-Target "fable" (fun _ ->
+Target "justfable" (fun _ ->
   __SOURCE_DIRECTORY__ |> npm "install" []
-  __SOURCE_DIRECTORY__ |> spawnNode fable ["-w"]
+  __SOURCE_DIRECTORY__ </> "src" </> "thegamma" |> spawnNode fable ["-w"]
+  __SOURCE_DIRECTORY__ </> "src" </> "libraries" |> spawnNode fable ["-w"]
 )
 
-"fable" ==> "run"
-RunTargetOrDefault "run"
+let sleep _ = 
+  traceImportant "Press any key to stop!"
+  Console.ReadKey() |> ignore
+
+
+Target "run" sleep
+Target "fable" sleep
+Target "all" sleep
+
+"justrun" ==> "run"
+"justfable" ==> "fable"
+"justrun" ==> "all"
+"justfable" ==> "all"
+
+RunTargetOrDefault "all"

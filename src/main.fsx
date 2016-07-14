@@ -1,5 +1,7 @@
-﻿module TheGamma.Main
-
+﻿#r "../paket-files/github.com/fsprojects/Fable/build/fable/bin/Fable.Core.dll"
+#r "libraries/bin/Debug/libraries.dll"
+#r "thegamma/bin/Debug/thegamma.dll"
+#r "bindings/bin/Debug/bindings.dll"
 open Fable.Core
 open Fable.Core.Extensions
 open Fable.Import
@@ -19,7 +21,7 @@ type BabelResult =
 type Babel =
   abstract transformFromAst : obj * string * BabelOptions -> BabelResult
 
-[<Emit("window.evalCode($0)")>]
+[<Emit("eval($0)")>]
 let evalCode (s:string) : unit = ()
 
 [<Emit("Babel")>]
@@ -42,14 +44,23 @@ let test () =
 
 // test ()
 
-[<Emit("_monaco = monaco")>]
+[<Emit("_monaco = monaco; var deps = {'restruntime': _restruntime, 'series': _series}")>]
 let hack : unit = ()
 hack
 
 // Global provided types
 
-let olympicsTy = TypePoviders.createRestType "http://127.0.0.1:10051" "/"
-let globals = Map.ofSeq [ "olympics", olympicsTy; "world", TypePoviders.worldTy ]
+let mutable named = Map.empty
+let lookupNamed n tyargs = named.[n]
+let series = TypePoviders.FSharpProvider.provideFSharpType lookupNamed "out/fsprovider/series.json" 
+named <- Map.ofSeq ["series", series; "value", Type.Any]
+
+
+let globals = 
+  [ "olympics", TypePoviders.RestProvider.provideRestType lookupNamed "http://127.0.0.1:10042/olympics" 
+    "adventure", TypePoviders.RestProvider.provideRestType lookupNamed "http://127.0.0.1:10042/adventure"
+    "world", TypePoviders.RestProvider.provideRestType lookupNamed "http://127.0.0.1:10042/worldbank" ]
+  |> Map.ofSeq 
 
 let (|ExprLeaf|ExprNode|) e = 
   match e with
@@ -147,7 +158,7 @@ let parse (input:string) =
           
 let typeCheck input = async {
   let errs1, untyped = parse input
-  let! checkd, ctx = TypeChecker.typeCheckProgram { Variables = globals } { Errors = [] } untyped
+  let! checkd, ctx = TypeChecker.typeCheckProgram { Variables = Map.map (fun _ (_, t) -> t) globals } { Errors = [] } untyped
   return errs1 @ ctx.Errors, checkd }
 
 
@@ -204,7 +215,7 @@ let run () =
           for t in tokenized do
             let tok = createEmpty<languages.IToken>
             tok.startIndex <- float t.Range.Start
-            tok.scopes <- U2.Case1 (match t.Token with TokenKind.QIdent _ | TokenKind.Ident _ -> "entity" | TokenKind.Dot _ -> "operator" | TokenKind.Boolean _ -> "keyword" | TokenKind.Number _ -> "number" | _ -> "")
+            tok.scopes <- U2.Case1 (match t.Token with TokenKind.QIdent _ | TokenKind.Ident _ -> "" | TokenKind.Dot _ -> "operator" | TokenKind.Let | TokenKind.Boolean _ -> "keyword" | TokenKind.Number _ -> "number" | _ -> "")
             tokens.tokens.Add(tok)
 
           tokens
@@ -214,7 +225,8 @@ let run () =
 
 
   let needsEscaping (s:string) = 
-    s.ToCharArray() |> Array.exists (fun c -> not ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) )
+    (s.[0] >= '0' && s.[0] <= '9') ||
+    (s.ToCharArray() |> Array.exists (fun c -> not ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) ))
 
   let compr = 
     { new languages.CompletionItemProvider with 
@@ -301,13 +313,20 @@ gold100.data"""
         let! errs, prog = typeCheck text 
         reportErrors errs
         
-        let ctx = { CodeGenerator.LineLengths = [ for l in text.Split('\n') -> l.Length ] }        
+        let ctx = 
+          { CodeGenerator.LineLengths = [ for l in text.Split('\n') -> l.Length ] 
+            CodeGenerator.Globals = globals |> Map.map (fun _ (e, _) -> e) }
+
         let! res = CodeGenerator.compileProgram ctx prog
 
         let code = babel.transformFromAst(Serializer.serializeProgram res, text, { presets = [| "es2015" |] })
 
         //Browser.window.alert(code.code)
         Browser.console.log(code)
+
+        TheGamma.Series.series<int, int>.create(async { return [||] }, "", "", "")  |> ignore
+        TypePovidersRuntime.trimLeft |> ignore
+        TheGamma.GoogleCharts.chart.bar |> ignore
 
         evalCode code.code
 
@@ -320,3 +339,8 @@ gold100.data"""
     box()
 
 run ()
+
+
+let fooooo () =
+  let rc = TheGamma.TypePovidersRuntime.RuntimeContext("lol", "troll")
+  rc.addTrace("zzz").getValue("yollo")

@@ -44,6 +44,7 @@ and Expression =
   | CallExpression of callee:Expression * args:Expression list * location:SourceLocation option
   | ArrayExpression of elements:Expression list * location:SourceLocation option
   | MemberExpression of obj:Expression * property:Expression * computed:bool * location:SourceLocation option
+  | NewExpression of callee:Expression * arguments:Expression list * location:SourceLocation option
 
 and Statement =
   | ExpressionStatement of expression:Expression * location:SourceLocation option
@@ -89,6 +90,10 @@ module Serializer =
     match expr with
     | IdentifierExpression(name, loc) ->
         createObj [ "type" => "Identifier"; "name" => name; "loc" =?> loc ]
+    | NewExpression(callee, args, loc) ->
+        createObj [ 
+          "type" => "NewExpression"; "callee" => serializeExpression callee
+          "arguments" => Array.ofList (List.map serializeExpression args); "loc" =?> loc ]
     | FunctionExpression(id, pars, body, generator, async, loc) ->
         createObj [ 
           "type" => "FunctionExpression"; "id" =?> id; "params" => Array.ofList (List.map serializePattern pars)

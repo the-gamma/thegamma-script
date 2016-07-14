@@ -1,9 +1,8 @@
 {
-    "outDir": "out",
+    "outDir": "../../out/js/libraries",
     "sourceMaps": true,
-    "projFile": "src/thegamma/thegamma.fsproj",
+    "projFile": "libraries.fsproj",
     "refs": {
-        "bindings": "src/bindings"
     },
     "scripts": {
     },

@@ -1,3 +1,4 @@
+.ionide.debug
 .paket/paket.exe
 node_modules/
 paket-files/

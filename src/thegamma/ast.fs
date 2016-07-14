@@ -73,7 +73,7 @@ type Emitter =
 
 type [<RequireQualifiedAccess>] Member = 
   | Property of name:string * typ:Type * emitter:Emitter
-  | Method of name:string * arguments:(string * Type) list * typ:Type * emitter:Emitter
+  | Method of name:string * arguments:(string * bool * Type) list * typ:Type * emitter:Emitter
 
 and ObjectType = 
   { Members : Member list }
@@ -82,5 +82,7 @@ and [<RequireQualifiedAccess>] Type =
   | Delayed of Future<Type>
   | Primitive of string
   | Object of ObjectType
+  | Function of arguments:Type list * returns:Type
+  | Parameter of string
   | Unit
   | Any

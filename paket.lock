@@ -1,14 +1,16 @@
+FRAMEWORK: >= NET40
 NUGET
   remote: https://www.nuget.org/api/v2
-    FAKE (4.29.2)
+    FAKE (4.30.2)
     FSharp.Core (4.0.0.1)
+    Newtonsoft.Json (9.0.1)
     Suave (1.1.3)
       FSharp.Core (>= 3.1.2.5)
 GIT
   remote: https://github.com/fsprojects/Fable.git
-     (da6842717c072ecf9ad484bb46a6bdf8e8eb0369)
+     (9f6476be2a91b7f10475ede3c567b8aaa332bff2)
       build: build.cmd AllAndCore
       os: windows
-     (da6842717c072ecf9ad484bb46a6bdf8e8eb0369)
+     (9f6476be2a91b7f10475ede3c567b8aaa332bff2)
       build: build.sh AllAndCore
       os: mono

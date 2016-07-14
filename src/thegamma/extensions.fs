@@ -1,4 +1,5 @@
 ﻿module Fable.Extensions
+
 open Fable.Core
 open Fable.Import.JS
 open Fable.Import.Browser

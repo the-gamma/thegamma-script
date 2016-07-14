@@ -5,7 +5,8 @@ open TheGamma.Babel
 open Fable.Extensions
 
 type CompilationContext =
-  { LineLengths : int list }
+  { LineLengths : int list
+    Globals : Map<string, Expression> }
 
 let rangeToLoc ctx rng = 
   let rec asLoc lines offs lengths =
@@ -28,14 +29,27 @@ let rec getEmitter name typ = async {
 
 let rec compileExpression ctx (expr:Expr<Type>) = async {
   match expr.Expr with 
+  | ExprKind.Call(inst, n, args) ->
+      let! emitter = getEmitter n.Name inst.Type
+      let! inst = compileExpression ctx inst
+      let! args = args |> Async.map (fun a -> async {
+        let! r = compileExpression ctx a.Value
+        return (match a.Name with Some n -> n.Name | _ -> ""), r })          // TODO: Names ...???
+      return emitter.Emit(inst, args)
   | ExprKind.Property(inst, n) ->
       let! emitter = getEmitter n.Name inst.Type
       let! inst = compileExpression ctx inst
       return emitter.Emit(inst, [])
   | ExprKind.Number(n) ->
       return NumericLiteral(n, rangeToLoc ctx expr.Range)
+  | ExprKind.Variable(n) when ctx.Globals.ContainsKey(n.Name) ->
+      return ctx.Globals.[n.Name]
   | ExprKind.Variable(n) ->
-      return IdentifierExpression(n.Name, rangeToLoc ctx n.Range) }
+      return IdentifierExpression(n.Name, rangeToLoc ctx n.Range) 
+  | e ->
+      Fable.Import.Browser.console.log("compileExpression: %O", e) 
+      return failwith "!" }
+    
 
 let compileCommand ctx (cmd:Command<Type>) = async {
   match cmd.Command with

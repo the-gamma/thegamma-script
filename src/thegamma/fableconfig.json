@@ -1,0 +1,17 @@
+{
+    "outDir": "../../out/js/thegamma",
+    "sourceMaps": true,
+    "projFile": "thegamma.fsproj",
+    "refs": {
+    },
+    "scripts": {
+    },
+    "targets": {
+        "debug": {
+            "watch": true
+        },
+        "production": {
+            "sourceMaps": false
+        }
+    }
+}

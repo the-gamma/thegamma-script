@@ -1,0 +1,20 @@
+{
+    "outDir": "../out/js",
+    "sourceMaps": true,
+    "projFile": "main.fsx",
+    "refs": {
+        "bindings": "bindings",
+        "libraries": "libraries",
+        "thegamma": "thegamma"
+    },
+    "scripts": {
+    },
+    "targets": {
+        "debug": {
+            "watch": true
+        },
+        "production": {
+            "sourceMaps": false
+        }
+    }
+}

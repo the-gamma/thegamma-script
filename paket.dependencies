@@ -1,6 +1,8 @@
+framework: >= net40
 source https://www.nuget.org/api/v2
 nuget FAKE
 nuget Suave
+nuget Newtonsoft.Json
 
 git https://github.com/fsprojects/Fable.git master build: "build.cmd AllAndCore", OS: windows
 git https://github.com/fsprojects/Fable.git master build: "build.sh AllAndCore", OS: mono
