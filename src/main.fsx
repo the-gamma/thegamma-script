@@ -44,23 +44,39 @@ let test () =
 
 // test ()
 
-[<Emit("_monaco = monaco; var deps = {'restruntime': _restruntime, 'series': _series}")>]
+[<Emit("_monaco = monaco;")>]
 let hack : unit = ()
 hack
 
 // Global provided types
+type ProvidedTypes = 
+  { LookupNamed : string -> Type list -> Type
+    Globals : Map<string, Expression * Type> }
 
-let mutable named = Map.empty
-let lookupNamed n tyargs = named.[n]
-let series = TypePoviders.FSharpProvider.provideFSharpType lookupNamed "out/fsprovider/series.json" 
-named <- Map.ofSeq ["series", series; "value", Type.Any]
+// TODO: "value", Type.Any
+let types = async {
+  let mutable named = Map.empty
+  let lookupNamed n tyargs = named.[n]
 
+  let restTys = 
+    [ TypePoviders.RestProvider.provideRestType lookupNamed "olympics" "http://127.0.0.1:10042/olympics" 
+      TypePoviders.RestProvider.provideRestType lookupNamed "adventure" "http://127.0.0.1:10042/adventure"
+      TypePoviders.RestProvider.provideRestType lookupNamed "world" "http://127.0.0.1:10042/worldbank" ]
+  let! fsTys = TypePoviders.FSharpProvider.provideFSharpTypes lookupNamed "out/fsprovider/libraries.json"     
+  let allTys = restTys @ fsTys
 
-let globals = 
-  [ "olympics", TypePoviders.RestProvider.provideRestType lookupNamed "http://127.0.0.1:10042/olympics" 
-    "adventure", TypePoviders.RestProvider.provideRestType lookupNamed "http://127.0.0.1:10042/adventure"
-    "world", TypePoviders.RestProvider.provideRestType lookupNamed "http://127.0.0.1:10042/worldbank" ]
-  |> Map.ofSeq 
+  named <- 
+    allTys 
+    |> Seq.choose (function TypePoviders.NamedType(s, t) -> Some(s, t) | _ -> None)
+    |> Map.ofSeq
+
+  let globals = 
+    allTys 
+    |> List.choose (function TypePoviders.GlobalValue(s, e, t) -> Some(s, (e, t)) | _ -> None)
+    |> Map.ofSeq
+  
+  return { Globals = globals; LookupNamed = lookupNamed } } |> Async.StartAsFuture 
+    
 
 let (|ExprLeaf|ExprNode|) e = 
   match e with
@@ -157,8 +173,9 @@ let parse (input:string) =
       Body = [] }
           
 let typeCheck input = async {
+  let! ptys = types |> Async.AwaitFuture
   let errs1, untyped = parse input
-  let! checkd, ctx = TypeChecker.typeCheckProgram { Variables = Map.map (fun _ (_, t) -> t) globals } { Errors = [] } untyped
+  let! checkd, ctx = TypeChecker.typeCheckProgram { Variables = Map.map (fun _ (_, t) -> t) ptys.Globals } { Errors = [] } untyped
   return errs1 @ ctx.Errors, checkd }
 
 
@@ -273,10 +290,13 @@ let run () =
   monaco.languages.Globals.register(lang)
 
 
-  let sample = """let gold100 = olympics.'by sport'
-  .Athletics.'100m'.'by medal'.Gold
+  let sample = """let data =
+  world
+    .byCountry.China
+    .'Climate Change'.'CO2 emissions (kt)'
+    .take(10)
 
-gold100.data"""
+chart.show(chart.column(data))"""
 
   let options = createEmpty<editor.IEditorConstructionOptions>
   options.value <- Some sample
@@ -310,12 +330,13 @@ gold100.data"""
     let text = ed.getModel().getValue(editor.EndOfLinePreference.LF, false)
     async {
       try
+        let! ptys = types |> Async.AwaitFuture
         let! errs, prog = typeCheck text 
         reportErrors errs
         
         let ctx = 
           { CodeGenerator.LineLengths = [ for l in text.Split('\n') -> l.Length ] 
-            CodeGenerator.Globals = globals |> Map.map (fun _ (e, _) -> e) }
+            CodeGenerator.Globals = ptys.Globals |> Map.map (fun _ (e, _) -> e) }
 
         let! res = CodeGenerator.compileProgram ctx prog
 

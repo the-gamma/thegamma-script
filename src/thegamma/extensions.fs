@@ -50,6 +50,8 @@ type Microsoft.FSharp.Control.Async with
           | Some v -> f v
           | None -> handlers <- f::handlers }
 
+  static member StartAsFuture(op) = Async.AsFuture(op, true)
+
 module Async = 
   let rec map f l = async {
     match l with 

@@ -55,13 +55,14 @@ module FSharpProvider =
       returns : AnyType }
 
   type ExportedType = 
-    { typepars : AnyType
+    { name : string
+      typepars : AnyType
       ``static`` : bool 
       instance : string[]
       members : Member[] }
 
 
-  let provideFSharpType lookupNamed url = 
+  let provideFSharpTypes lookupNamed url = 
 
     let rec mapType (t:AnyType) = 
       match t.kind with
@@ -92,9 +93,15 @@ module FSharpProvider =
                           List.map snd args, None) }
                     yield Member.Method(m.name, args, mapType m.returns, emitter) ]
             
-            if exp.``static`` then
-            
-            Type.Object { Members = mems } ] }
+            let ty = Type.Object { Members = mems }
+            if exp.``static`` then           
+              let e = exp.instance |> Seq.fold (fun chain s -> 
+                match chain with
+                | None -> Some(IdentifierExpression(s, None))
+                | Some e -> Some(MemberExpression(e, IdentifierExpression(s, None), false, None)) ) None |> Option.get
+              ProvidedType.GlobalValue(exp.name, e, ty)
+            else
+              ProvidedType.NamedType(exp.name, ty) ] }
     
 
 // ------------------------------------------------------------------------------------------------
@@ -192,13 +199,15 @@ module RestProvider =
                   | _ -> failwith "?" ] } }
     |> Async.AsFuture |> Type.Delayed
 
-  let rec provideRestType lookupNamed root = 
+  let rec provideRestType lookupNamed name root = 
     let ctx = 
       MemberExpression
         ( IdentifierExpression("_restruntime", None), 
           IdentifierExpression("RuntimeContext", None), false, None)
-    NewExpression(ctx, [StringLiteral(root, None); StringLiteral("", None)], None),
-    createRestType lookupNamed root "/"
+    ProvidedType.GlobalValue
+      ( name, 
+        NewExpression(ctx, [StringLiteral(root, None); StringLiteral("", None)], None),
+        createRestType lookupNamed root "/" )
 
   // ------------------------------------------------------------------------------------------------
   //

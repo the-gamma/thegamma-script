@@ -3,6 +3,7 @@
 node_modules/
 paket-files/
 packages/
+.fake/
 
 out/
 

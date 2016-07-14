@@ -3,6 +3,38 @@
 <head>
 	<meta http-equiv="X-UA-Compatible" content="IE=edge" />
 	<meta http-equiv="Content-Type" content="text/html;charset=utf-8" >
+
+	<script type="text/javascript" src="//www.google.com/jsapi"></script>
+	<script type="text/javascript">
+		var chartsToDraw = [];
+		var googleLoaded = false;
+
+		var outputElementID = "chart";
+		var blockCallback = function() { console.log("done!!!"); };
+
+		function drawChartOnLoad(f) {
+		  if (googleLoaded) f();
+		  else chartsToDraw.push(f);
+		};
+
+		google.load('visualization', '1', { 'packages': ['corechart'] });
+		google.setOnLoadCallback(function () {
+		  googleLoaded = true;
+		  for (var i = 0; i < chartsToDraw.length; i++) chartsToDraw[i]();
+		  chartsToDraw = undefined;
+		});
+
+		function drawChart(chart, data, id, callback) {
+		  drawChartOnLoad(function() {
+		    var ctor = eval("(function(a) { return new google.visualization." + chart.typeName + " (a); })");
+		    var ch = ctor(document.getElementById(id));
+		    if (chart.options.height == undefined)
+		      chart.options.height = 400;
+		    ch.draw(data, chart.options);
+		    callback();
+		  });
+		}
+	</script>
 </head>
 <body>
 
@@ -11,6 +43,7 @@
 <button id="run">Run</button>
 <div id="errors">
 </div>
+<div id="chart"></div>
 
 <!-- <script src="node_modules/core-js/client/core.min.js"></script> -->
 <script src="node_modules/babel-standalone/babel.js"></script>

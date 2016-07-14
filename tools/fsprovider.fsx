@@ -121,7 +121,7 @@ let exportType ctx (typ:System.Type) isStatic =
   { typepars = [| for t in typArgs -> GenericParameterType.Create(t.Key) |]
     ``static`` = isStatic; instance = [||]
     members = Array.ofSeq methods 
-    name = typ.Name }
+    name = defaultArg (ctx.KnownTypes.TryFind(typ.Name)) typ.Name }
 
 
 
@@ -168,7 +168,7 @@ let e =
       yield { exportType ctx (asm.GetType("TheGamma.GoogleCharts.chart")) true with instance = [| "_charts"; "chart" |] }
       yield exportType ctx (asm.GetType("TheGamma.Series.series`2")) false |]
 
-System.IO.File.WriteAllText(fsprovider + "/series.json", toJson e)
+System.IO.File.WriteAllText(fsprovider + "/libraries.json", toJson e)
 
 
 
