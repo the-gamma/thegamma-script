@@ -27,23 +27,6 @@ let evalCode (s:string) : unit = ()
 [<Emit("Babel")>]
 let babel : Babel = Unchecked.defaultof<_> 
 
-let test () = 
-  let l = None
-  let prg =
-    { location = l
-      body =
-        [ ExpressionStatement
-            (FunctionExpression
-              ( None, [IdentifierPattern("x", l)], 
-                BlockStatement
-                  ([ ReturnStatement(NumericLiteral(42.0, l), l)
-                   ], l), false, false, l), l)] }
-
-  let code = babel.transformFromAst(Serializer.serializeProgram prg, "42", { presets = [| "es2015" |] })
-  Browser.window.alert(code.code)
-
-// test ()
-
 [<Emit("_monaco = monaco;")>]
 let hack : unit = ()
 hack
@@ -53,15 +36,24 @@ type ProvidedTypes =
   { LookupNamed : string -> Type list -> Type
     Globals : Map<string, Expression * Type> }
 
-// TODO: "value", Type.Any
 let types = async {
   let mutable named = Map.empty
-  let lookupNamed n tyargs = named.[n]
+  let lookupNamed n tyargs = 
+    match named.TryFind(n) with
+    | Some r -> r
+    | None -> 
+        Browser.console.log("Could not find named type '%s'", n)
+        failwith (sprintf "Could not find named type '%s'" n)
 
   let restTys = 
-    [ TypePoviders.RestProvider.provideRestType lookupNamed "olympics" "http://127.0.0.1:10042/olympics" 
+    [ TypePoviders.RestProvider.provideRestType lookupNamed "olympics" "http://127.0.0.1:10042/pivot/olympics" 
       TypePoviders.RestProvider.provideRestType lookupNamed "adventure" "http://127.0.0.1:10042/adventure"
-      TypePoviders.RestProvider.provideRestType lookupNamed "world" "http://127.0.0.1:10042/worldbank" ]
+      TypePoviders.RestProvider.provideRestType lookupNamed "world" "http://127.0.0.1:10042/worldbank" 
+      
+      // TODO: some more types 
+      TypePoviders.NamedType("value", Type.Any)
+      TypePoviders.NamedType("seq", Type.Any) 
+      ]
   let! fsTys = TypePoviders.FSharpProvider.provideFSharpTypes lookupNamed "out/fsprovider/libraries.json"     
   let allTys = restTys @ fsTys
 
@@ -250,37 +242,42 @@ let run () =
         member this.triggerCharacters = Some(ResizeArray [ "." ])
         member this.provideCompletionItems(model, position, token) =           
           async {          
-            let input = model.getValue(editor.EndOfLinePreference.LF, false)
-            let lines = input.Split('\n')
-            let! errs, ty = typeCheck input
-            let! info = TypeChecker.collectProgramInfo { Completions = [] } ty
+            try
+              let input = model.getValue(editor.EndOfLinePreference.LF, false)
+              let lines = input.Split('\n')
+              let! errs, ty = typeCheck input
+              let! info = TypeChecker.collectProgramInfo { Completions = [] } ty
             
-            let absPosition = 
-              int position.column - 1 +
-                List.fold (+) 0 [ for i in 1 .. int position.lineNumber-1 -> lines.[i-1].Length + 1 ]
+              let absPosition = 
+                int position.column - 1 +
+                  List.fold (+) 0 [ for i in 1 .. int position.lineNumber-1 -> lines.[i-1].Length + 1 ]
   
-            let optMembers = 
-              info.Completions 
-              |> List.filter (fun (rng, _) -> absPosition >= rng.Start && absPosition <= rng.End)
-              |> List.sortBy (fun (rng, _) -> -rng.Start)
-              |> List.tryHead
+              let optMembers = 
+                info.Completions 
+                |> List.filter (fun (rng, _) -> absPosition >= rng.Start && absPosition <= rng.End)
+                |> List.sortBy (fun (rng, _) -> -rng.Start)
+                |> List.tryHead
 
-            match optMembers with 
-            | None -> return ResizeArray []
-            | Some (_, members) -> 
-              let completion =
-                [ for m in members ->
-                    let ci = createEmpty<languages.CompletionItem>
-                    let n, k =
-                      match m with 
-                      | Member.Method(name=n) -> n, languages.CompletionItemKind.Method
-                      | Member.Property(name=n) -> n, languages.CompletionItemKind.Property
-                    ci.kind <- k
-                    ci.label <- n
-                    if needsEscaping n then ci.insertText <- Some("'" + n + "'")
-                    ci ] 
-              Browser.console.log("Completions: %O", completion)
-              return ResizeArray(completion) } |> Async.StartAsPromise |> U4.Case2
+              match optMembers with 
+              | None -> return ResizeArray []
+              | Some (_, members) -> 
+                let completion =
+                  [ for m in members ->
+                      let ci = createEmpty<languages.CompletionItem>
+                      let n, k =
+                        match m with 
+                        | Member.Method(name=n) -> n, languages.CompletionItemKind.Method
+                        | Member.Property(name=n) -> n, languages.CompletionItemKind.Property
+                      ci.kind <- k
+                      ci.label <- n
+                      if needsEscaping n then ci.insertText <- Some("'" + n + "'")
+                      ci ] 
+                Browser.console.log("Completions: %O", completion)
+                return ResizeArray(completion)
+              with e ->
+                Browser.console.log("*** Type checking failed ***")
+                Browser.console.log(e) 
+                return ResizeArray [] } |> Async.StartAsPromise |> U4.Case2
 
         member this.resolveCompletionItem(item, token) = U2.Case1 item }
 
@@ -290,13 +287,18 @@ let run () =
   monaco.languages.Globals.register(lang)
 
 
-  let sample = """let data =
+  let sample1 = """let data =
   world
     .byCountry.China
     .'Climate Change'.'CO2 emissions (kt)'
     .take(10)
 
 chart.show(chart.column(data))"""
+  let sample = """let phelps = 
+  olympics.'by athlete'.'United States'  
+    .'PHELPS, Michael'.data
+
+table.create(phelps).show()"""
 
   let options = createEmpty<editor.IEditorConstructionOptions>
   options.value <- Some sample
@@ -345,9 +347,11 @@ chart.show(chart.column(data))"""
         //Browser.window.alert(code.code)
         Browser.console.log(code)
 
-        TheGamma.Series.series<int, int>.create(async { return [||] }, "", "", "")  |> ignore
+        // Get fable to reference everything
+        let s = TheGamma.Series.series<int, int>.create(async { return [||] }, "", "", "") 
         TypePovidersRuntime.trimLeft |> ignore
         TheGamma.GoogleCharts.chart.bar |> ignore
+        TheGamma.table.create(s) |> ignore
 
         evalCode code.code
 

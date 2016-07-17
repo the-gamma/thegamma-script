@@ -89,7 +89,9 @@ let rec formatType ctx (genPars:Map<_, _>) (typ:System.Type) =
   | n -> failwithf "Not supported type: >>>%s<<<" n
 
 
-let exportType ctx (typ:System.Type) isStatic = 
+let exportType ctx (typ:System.Type) kind = 
+  let isStatic = kind &&& BindingFlags.Static = BindingFlags.Static
+
   let typArgs = 
     if typ.IsGenericType then
       typ.GetGenericArguments()
@@ -97,7 +99,6 @@ let exportType ctx (typ:System.Type) isStatic =
       |> Map.ofSeq
     else Map.empty
 
-  let kind = if isStatic then BindingFlags.Static else BindingFlags.Instance
   let methods = 
     [ for m in typ.GetMethods(BindingFlags.DeclaredOnly ||| kind ||| BindingFlags.Public) do
         if not m.IsSpecialName then
@@ -155,6 +156,7 @@ let recordTypes =
 let knownTypes = 
   [ yield! 
       [ "IEnumerable`1", "seq" // wishful thinking
+        "table`2", "table"
         "series`2", "series"; "value`1", "value"; "options", "options" ]
     for t in recordTypes do yield t.Name, t.Name 
     for t in chartTypes do yield t.Name, t.Name ] |> Map.ofSeq 
@@ -164,9 +166,13 @@ let ctx = { KnownTypes = knownTypes }
 
 let e = 
   [|  for ct in chartTypes do
-        yield exportType ctx ct false
-      yield { exportType ctx (asm.GetType("TheGamma.GoogleCharts.chart")) true with instance = [| "_charts"; "chart" |] }
-      yield exportType ctx (asm.GetType("TheGamma.Series.series`2")) false |]
+        yield exportType ctx ct BindingFlags.Instance
+      yield { exportType ctx (asm.GetType("TheGamma.GoogleCharts.chart")) BindingFlags.Static 
+                with instance = [| "_charts"; "chart" |] }
+      yield { exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Static 
+                with instance = [| "_tables"; "table" |] }
+      yield exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Instance
+      yield exportType ctx (asm.GetType("TheGamma.Series.series`2")) BindingFlags.Instance |]
 
 System.IO.File.WriteAllText(fsprovider + "/libraries.json", toJson e)
 

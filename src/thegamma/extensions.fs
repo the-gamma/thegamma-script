@@ -31,24 +31,31 @@ type Microsoft.FSharp.Control.Async with
     f.Then(cont))
 
   static member AsFuture(op, ?start) = 
-    let mutable res = None
+    let mutable res = Choice1Of3()
     let mutable handlers = []
     let mutable running = false
+
+    let trigger h = 
+      match res with
+      | Choice1Of3 () -> handlers <- h::handlers 
+      | Choice2Of3 v -> h v
+      | Choice3Of3 e -> raise e
 
     let ensureStarted() = 
       if not running then 
         running <- true
-        async { let! r = op
-                res <- Some r
-                for h in handlers do h r  } |> Async.StartImmediate
+        async { try 
+                  let! r = op
+                  res <- Choice2Of3 r                  
+                with e ->
+                  res <- Choice3Of3 e
+                for h in handlers do trigger h } |> Async.StartImmediate
     if start = Some true then ensureStarted()
 
     { new Future<_> with
         member x.Then(f) = 
           ensureStarted()
-          match res with
-          | Some v -> f v
-          | None -> handlers <- f::handlers }
+          trigger f }
 
   static member StartAsFuture(op) = Async.AsFuture(op, true)
 

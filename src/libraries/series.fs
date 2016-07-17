@@ -124,6 +124,13 @@ and series<'k, 'v> =
   static member create(data, keyName, valueName, seriesName) = 
     { data = data; keyName = keyName; valueName = valueName; seriesName = seriesName }
 
+  // TODO: This is where the naming starts to suck
+  static member ordinal(data, keyName, valueName, seriesName) = 
+    let data = async {
+      let! values = data
+      return values |> Array.mapi (fun i v -> i, v) }
+    { data = data; keyName = keyName; valueName = valueName; seriesName = seriesName }
+
   member s.sortKeys(?reverse) =
     s |> helpers.lift (fun arr ->
       arr |> Array.sortWith (fun (k1, _) (k2, _) -> compare k1 k2)

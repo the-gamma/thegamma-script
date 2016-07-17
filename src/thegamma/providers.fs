@@ -76,24 +76,27 @@ module FSharpProvider =
       | "parameter" -> Type.Parameter (unbox<GenericParameterType> t).name
       | _ -> failwith "provideFSharpType: Unexpected type"
 
+    // Needs to be delayed to avoid calling lookupNamed too early
+    let importProvidedType exp = async {
+      let mems = 
+        [ for m in exp.members do
+            if m.kind = "method" then
+              let m = unbox<MethodMember> m
+              let args = [ for a in m.arguments -> a.name, a.optional, mapType a.``type`` ]
+              let emitter = { Emit = fun (inst, args) ->
+                // TODO: match arguments based on name or something
+                CallExpression
+                  ( MemberExpression(inst, IdentifierExpression(m.name, None), false, None), 
+                    List.map snd args, None) }
+              yield Member.Method(m.name, args, mapType m.returns, emitter) ]
+      return Type.Object { Members = mems } } |> Async.AsFuture |> Type.Delayed
+            
     async {
       let! json = Http.Request("GET", url, None)
       let expTys = jsonParse<ExportedType[]> json
       return
         [ for exp in expTys ->
-            let mems = 
-              [ for m in exp.members do
-                  if m.kind = "method" then
-                    let m = unbox<MethodMember> m
-                    let args = [ for a in m.arguments -> a.name, a.optional, mapType a.``type`` ]
-                    let emitter = { Emit = fun (inst, args) ->
-                      // TODO: match arguments based on name or something
-                      CallExpression
-                        ( MemberExpression(inst, IdentifierExpression(m.name, None), false, None), 
-                          List.map snd args, None) }
-                    yield Member.Method(m.name, args, mapType m.returns, emitter) ]
-            
-            let ty = Type.Object { Members = mems }
+            let ty = importProvidedType exp
             if exp.``static`` then           
               let e = exp.instance |> Seq.fold (fun chain s -> 
                 match chain with
@@ -110,7 +113,7 @@ module FSharpProvider =
 
 module RestProvider = 
 
-  type Type = { kind:string }
+  type AnyType = { kind:string }
   type TypeNested = { kind:string (* = nested *); endpoint:string }
   type TypePrimitive = { kind:string (* = primitive *); ``type``:obj; endpoint:string }
 
@@ -119,7 +122,7 @@ module RestProvider =
 
   type Member =
     { name : string
-      returns : Type
+      returns : AnyType
       trace : string[] }
 
   type ResultType = 
@@ -169,16 +172,48 @@ module RestProvider =
   let ident s = IdentifierExpression(s, None)
   let str v = StringLiteral(v, None)
   let (?) (e:Expression) (s:string) = MemberExpression(e, IdentifierExpression(s, None), false, None)
-  let (@) (e:Expression) (args) = CallExpression(e, args, None)
+  let (/@/) (e:Expression) (args) = CallExpression(e, args, None)
+  let func v f = 
+    let body = BlockStatement([ReturnStatement(f (ident v), None)], None)
+    FunctionExpression(None, [IdentifierPattern(v, None)], body, false, false, None)
 
-  // Turn "Async<string>" into the required type (haha)
-  let getTypeAndEmitter lookupNamed ty = 
+//  Member.Property
+//  Type.Object ObjectType
+
+
+  // Turn "Async<string>" into the required type
+  // I guess we should keep a flag whether the input is still async (or something)
+  let rec getTypeAndEmitter (lookupNamed:string -> TheGamma.Type list -> TheGamma.Type) ty = 
     match ty with
+    | Primitive("string") -> Type.Primitive("string"), id
+    | Primitive("int") -> Type.Primitive("num"), id
+    | Primitive("float") -> Type.Primitive("num"), id
     | Generic("seq", [Generic("tuple", [t1; t2])]) -> 
-        let typ = lookupNamed "series" [] // TODO: Generics
+        // let t1, _ = getTypeAndEmitter lookupNamed t1
+        // let t2, _ = getTypeAndEmitter lookupNamed t2
+        let typ = lookupNamed "series" [] // TODO: Generics 
         typ, 
-        fun d -> ident("_series")?series?create @ [d; str "key"; str "value"; str "series"] // TODO: We don't have any info - that sucks
-    | _ -> failwith "Nop"
+        fun d -> ident("_series")?series?create /@/ [d; str "key"; str "value"; str "series"] // TODO: We don't have any info - that sucks
+    | Generic("seq", [ty]) ->
+        let elTy, emitter = getTypeAndEmitter lookupNamed ty
+        let serTy = lookupNamed "series" [Type.Primitive "int"; elTy]
+        serTy, 
+        // This is over async, but the child `emitter` is not over async
+        fun d -> 
+          ident("_series")?series?ordinal /@/ 
+            [ ident("_restruntime")?convertSequence /@/ [func "v" emitter; d] 
+              str "key"; str "value"; str "series" ]
+    | Record(membs) ->
+        let membs = 
+          [ for name, ty in membs ->
+              let memTy, memConv = getTypeAndEmitter lookupNamed ty
+              let emitter = { Emit = fun (inst, _) -> memConv <| inst?(name) }
+              Member.Property(name, memTy, emitter) ]
+        let obj = TheGamma.Type.Object { Members = [] }
+        obj, id
+    | _ -> 
+        Browser.console.log("getTypeAndEmitter: Cannot handle %O", ty)
+        failwith "getTypeAndEmitter: Cannot handle type"
     
   let rec createRestType lookupNamed root url = 
     async {
@@ -200,13 +235,10 @@ module RestProvider =
     |> Async.AsFuture |> Type.Delayed
 
   let rec provideRestType lookupNamed name root = 
-    let ctx = 
-      MemberExpression
-        ( IdentifierExpression("_restruntime", None), 
-          IdentifierExpression("RuntimeContext", None), false, None)
+    let ctx = ident("_restruntime")?RuntimeContext
     ProvidedType.GlobalValue
       ( name, 
-        NewExpression(ctx, [StringLiteral(root, None); StringLiteral("", None)], None),
+        NewExpression(ctx, [str root; str ""], None),
         createRestType lookupNamed root "/" )
 
   // ------------------------------------------------------------------------------------------------
