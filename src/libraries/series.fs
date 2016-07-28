@@ -182,7 +182,7 @@ and series<'k, 'v> =
       let! v1 = s.data
       let! v2 = s2.data
       return zipAny v1 v2 }
-    series.create(data, s.keyName, "Values", s.seriesName + " and " + s2.seriesName)
+    series<obj,obj>.create(data, s.keyName, "Values", s.seriesName + " and " + s2.seriesName)
 
   member s.joinInner<'v2>(s2:series<'k, 'v2>) : series<'k, 'v * 'v2>=
     s.joinOuter(s2).choose(function Some(v1), Some(v2) -> Some((v1, v2)) | _ -> None)

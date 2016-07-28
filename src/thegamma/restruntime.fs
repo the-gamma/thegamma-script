@@ -12,7 +12,7 @@ let trimRight c (s:string) = s.ToCharArray() |> Array.rev |> Array.skipWhile ((=
 let concatUrl (a:string) (b:string) =
   (trimRight '/' a) + "/" + (trimLeft '/' b)
 
-type RuntimeContext(root:string, trace:string) = 
+type RuntimeContext(root:string, cookies:string, trace:string) = 
   member x.root = root
   member x.trace = trace
   
@@ -20,11 +20,11 @@ type RuntimeContext(root:string, trace:string) =
     let traces = 
       [ if not (String.IsNullOrEmpty trace) then yield trace
         if not (String.IsNullOrEmpty suffix) then yield suffix ]
-    RuntimeContext(root, String.concat "&" traces)
+    RuntimeContext(root, cookies, String.concat "&" traces)
   
   member x.getValue(endpoint:string) =     
     async { 
-      let! res = Http.Request("POST", concatUrl root endpoint, Some trace)
+      let! res = Http.Request("POST", concatUrl root endpoint, trace, cookies)
       // TODO: This is wrong - it may return an integer too!
       return jsonParse<obj> res }
 

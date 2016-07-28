@@ -66,6 +66,7 @@
     <Compile Include="babel/babelast.fs" />
     <Compile Include="extensions.fs" />
     <Compile Include="ast.fs" />
+    <Compile Include="astops.fs" />
     <Compile Include="errors.fs" />
     <Compile Include="parsec.fs" />
     <Compile Include="tokenizer.fs" />
@@ -74,6 +75,7 @@
     <Compile Include="restruntime.fs" />
     <Compile Include="providers.fs" />
     <Compile Include="codegen.fs" />
+    <Compile Include="editors.fs" />
     <Content Include="App.config">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>

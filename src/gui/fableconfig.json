@@ -1,9 +1,8 @@
 {
-    "outDir": "../../out/js/libraries",
+    "outDir": "../../out/js/gui",
     "sourceMaps": true,
-    "projFile": "libraries.fsproj",
+    "projFile": "gui.fsproj",
     "refs": {
-        "gui": "../gui"
     },
     "scripts": {
     },

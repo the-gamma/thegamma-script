@@ -8,21 +8,22 @@ type CompilationContext =
   { LineLengths : int list
     Globals : Map<string, Expression> }
 
+let rec offsetToLocation lines offs lengths =
+  match lengths with
+  | l::lengths when offs <= l -> { line = lines; column = offs }
+  | l::lengths -> offsetToLocation (lines+1) (offs-l-1) lengths
+  | [] -> { line = lines; column = offs  } // error? out of range
+
 let rangeToLoc ctx rng = 
-  let rec asLoc lines offs lengths =
-    match lengths with
-    | l::lengths when offs <= l -> { line = lines; column = offs }
-    | l::lengths -> asLoc (lines+1) (offs-l-1) lengths
-    | [] -> { line = lines; column = offs  } // error? out of range
-  Some { start = asLoc 1 rng.Start ctx.LineLengths 
-         ``end`` = asLoc 1 rng.Start ctx.LineLengths }
+  Some { start = offsetToLocation 1 rng.Start ctx.LineLengths 
+         ``end`` = offsetToLocation 1 rng.Start ctx.LineLengths }
 
 let rec getEmitter name typ = async {
   match typ with
   | Type.Object(o) -> 
       return o.Members |> Seq.pick (function 
         Member.Method(name=n; emitter=e) | Member.Property(name=n; emitter=e) when n=name -> Some e | _ -> None) 
-  | Type.Delayed(f) ->
+  | Type.Delayed(_, f) ->
       let! typ = Async.AwaitFuture f
       return! getEmitter name typ 
   | _ -> return failwith "Not an object" }

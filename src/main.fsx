@@ -2,7 +2,7 @@
 #r "libraries/bin/Debug/libraries.dll"
 #r "thegamma/bin/Debug/thegamma.dll"
 #r "bindings/bin/Debug/bindings.dll"
-open Fable.Core
+#r "gui/bin/Debug/gui.dll"
 open Fable.Core.Extensions
 open Fable.Import
 open Fable.Import.Browser
@@ -11,7 +11,10 @@ open Fable.Extensions
 module FsOption = Microsoft.FSharp.Core.Option
 
 open TheGamma
+open TheGamma.Html
+open TheGamma.AstOperations
 open TheGamma.Babel
+module F = Fable.Core.Operators
 
 type BabelOptions = 
   { presets : string[] }
@@ -31,6 +34,7 @@ let babel : Babel = Unchecked.defaultof<_>
 let hack : unit = ()
 hack
 
+
 // Global provided types
 type ProvidedTypes = 
   { LookupNamed : string -> Type list -> Type
@@ -46,9 +50,10 @@ let types = async {
         failwith (sprintf "Could not find named type '%s'" n)
 
   let restTys = 
-    [ TypePoviders.RestProvider.provideRestType lookupNamed "olympics" "http://127.0.0.1:10042/pivot/olympics" 
-      TypePoviders.RestProvider.provideRestType lookupNamed "adventure" "http://127.0.0.1:10042/adventure"
-      TypePoviders.RestProvider.provideRestType lookupNamed "world" "http://127.0.0.1:10042/worldbank" 
+    [ TypePoviders.RestProvider.provideRestType lookupNamed "olympics1" "http://127.0.0.1:10042/olympics" ""
+      TypePoviders.RestProvider.provideRestType lookupNamed "olympics" "http://127.0.0.1:10042/pivot" "source=http://127.0.0.1:10042/olympics"
+      TypePoviders.RestProvider.provideRestType lookupNamed "adventure" "http://127.0.0.1:10042/adventure" ""
+      TypePoviders.RestProvider.provideRestType lookupNamed "world" "http://127.0.0.1:10042/worldbank" ""
       
       // TODO: some more types 
       TypePoviders.NamedType("value", Type.Any)
@@ -69,36 +74,6 @@ let types = async {
   
   return { Globals = globals; LookupNamed = lookupNamed } } |> Async.StartAsFuture 
     
-
-let (|ExprLeaf|ExprNode|) e = 
-  match e with
-  | ExprKind.Property(e, n) -> ExprNode([e], [n])
-  | ExprKind.Call(e, n, args) -> ExprNode(e::[for a in args -> a.Value ], n::(args |> List.choose (fun a -> a.Name)))
-  | ExprKind.Variable(n) -> ExprNode([], [n])
-  | ExprKind.Number _
-  | ExprKind.Boolean _
-  | ExprKind.Unit
-  | ExprKind.Empty -> ExprLeaf()
-
-let rebuildExprNode e es ns =
-  match e, es, ns with
-  | ExprKind.Property(_, _), [e], [n] -> ExprKind.Property(e, n)
-  | ExprKind.Call(_, _, args), e::es, n::ns ->
-      let rec rebuildArgs args es ns =
-        match args, es, ns with
-        | { Argument.Name = None }::args, e::es, ns -> { Value = e; Name = None }::(rebuildArgs args es ns)
-        | { Argument.Name = Some _ }::args, e::es, n::ns -> { Value = e; Name = Some n }::(rebuildArgs args es ns)
-        | [], [], [] -> []
-        | _ -> failwith "rebuildExprNode: Wrong call length"
-      ExprKind.Call(e, n, rebuildArgs args es ns)
-  | ExprKind.Variable _, [], [n] -> ExprKind.Variable(n)
-  | ExprKind.Variable _, _, _ -> failwith "rebuildExprNode: Wrong variable length"
-  | ExprKind.Property _, _, _ -> failwith "rebuildExprNode: Wrong property length"
-  | ExprKind.Call _, _, _ -> failwith "rebuildExprNode: Wrong call length"
-  | ExprKind.Number _, _, _
-  | ExprKind.Boolean _, _, _
-  | ExprKind.Empty, _, _ 
-  | ExprKind.Unit, _, _ -> failwith "rebuildExprNode: Not a node"
 
 let mapNameRanges f (n:Name) = 
   { n  with Range = f n.Range }
@@ -171,201 +146,341 @@ let typeCheck input = async {
   return errs1 @ ctx.Errors, checkd }
 
 
-type DomNode = 
-  | Text of string
-  | Element of tag:string * attributes : (string * string)[] * children : DomNode[]
-
-let rec render node = 
-  match node with
-  | Text(s) -> 
-      document.createTextNode(s) :> Node
-  | Element(tag, attrs, children) ->
-      let el = document.createElement(tag)
-      for c in children do el.appendChild(render c) |> ignore
-      for k, v in attrs do el.setAttribute(k, v)
-      el :> Node
-
-let div a c = Element("div", Array.ofList a, Array.ofList c)
-let text s = Text(s)
-let (=>) k v = k, v
-
 let renderErrors errors = 
-  div ["class" => "error"] 
+  h?div ["class" => "error"] 
     [ for (e:Error) in errors -> 
-        div [] [
+        h?div [] [
           text (sprintf "%d:%d" e.Range.Start e.Range.End); 
           text "error "; text (string e.Number); text ": "; text (e.Message)] ]
 
 let reportErrors errors = 
-  let node = renderErrors errors
-  let ediv = document.getElementById("errors")
-  while box ediv.lastChild <> null do ignore(ediv.removeChild(ediv.lastChild))
-  ediv.appendChild(render node) |> ignore
+  renderErrors errors |> renderTo (document.getElementById("errors"))
 
-let run () =
-  let services = createEmpty<editor.IEditorOverrideServices>
+let services = F.createEmpty<editor.IEditorOverrideServices>
 
-  let lang = createEmpty<languages.ILanguageExtensionPoint>
-  lang.id <- "thegamma"
+let lang = F.createEmpty<languages.ILanguageExtensionPoint>
+lang.id <- "thegamma"
 
-  let noState = 
-    { new languages.IState with
-        member this.clone() = this
-        member this.equals(other) = true }
+let noState = 
+  { new languages.IState with
+      member this.clone() = this
+      member this.equals(other) = true }
 
-  let toks = 
-    { new monaco.languages.TokensProvider with
-        member this.tokenize(line, state) =
-          let tokens = createEmpty<languages.ILineTokens>
-          tokens.endState <- noState
-          tokens.tokens <- ResizeArray()
+let toks = 
+  { new monaco.languages.TokensProvider with
+      member this.tokenize(line, state) =
+        let tokens = F.createEmpty<languages.ILineTokens>
+        tokens.endState <- noState
+        tokens.tokens <- ResizeArray()
 
-          let _, tokenized = tokenize line
-          for t in tokenized do
-            let tok = createEmpty<languages.IToken>
-            tok.startIndex <- float t.Range.Start
-            tok.scopes <- U2.Case1 (match t.Token with TokenKind.QIdent _ | TokenKind.Ident _ -> "" | TokenKind.Dot _ -> "operator" | TokenKind.Let | TokenKind.Boolean _ -> "keyword" | TokenKind.Number _ -> "number" | _ -> "")
-            tokens.tokens.Add(tok)
+        let _, tokenized = tokenize line
+        for t in tokenized do
+          let tok = F.createEmpty<languages.IToken>
+          tok.startIndex <- float t.Range.Start
+          tok.scopes <- Fable.Core.U2.Case1 (match t.Token with TokenKind.QIdent _ | TokenKind.Ident _ -> "" | TokenKind.Dot _ -> "operator" | TokenKind.Let | TokenKind.Boolean _ -> "keyword" | TokenKind.Number _ -> "number" | _ -> "")
+          tokens.tokens.Add(tok)
 
-          tokens
-        member this.getInitialState() = noState }
+        tokens
+      member this.getInitialState() = noState }
 
-  monaco.languages.Globals.setTokensProvider("thegamma", toks) |> ignore
+monaco.languages.Globals.setTokensProvider("thegamma", toks) |> ignore
 
 
-  let needsEscaping (s:string) = 
-    (s.[0] >= '0' && s.[0] <= '9') ||
-    (s.ToCharArray() |> Array.exists (fun c -> not ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) ))
+let needsEscaping (s:string) = 
+  (s.[0] >= '0' && s.[0] <= '9') ||
+  (s.ToCharArray() |> Array.exists (fun c -> not ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) ))
 
-  let compr = 
-    { new languages.CompletionItemProvider with 
-        member this.triggerCharacters = Some(ResizeArray [ "." ])
-        member this.provideCompletionItems(model, position, token) =           
-          async {          
-            try
-              let input = model.getValue(editor.EndOfLinePreference.LF, false)
-              let lines = input.Split('\n')
-              let! errs, ty = typeCheck input
-              let! info = TypeChecker.collectProgramInfo { Completions = [] } ty
+let compr = 
+  { new languages.CompletionItemProvider with 
+      member this.triggerCharacters = Some(ResizeArray [ "." ])
+      member this.provideCompletionItems(model, position, token) =           
+        async {          
+          try
+            let input = model.getValue(editor.EndOfLinePreference.LF, false)
+            let lines = input.Split('\n')
+            let! errs, ty = typeCheck input
+            let! info = TypeChecker.collectProgramInfo { Completions = []; Source = input } ty
             
-              let absPosition = 
-                int position.column - 1 +
-                  List.fold (+) 0 [ for i in 1 .. int position.lineNumber-1 -> lines.[i-1].Length + 1 ]
+            let absPosition = 
+              int position.column - 1 +
+                List.fold (+) 0 [ for i in 1 .. int position.lineNumber-1 -> lines.[i-1].Length + 1 ]
   
-              let optMembers = 
-                info.Completions 
-                |> List.filter (fun (rng, _) -> absPosition >= rng.Start && absPosition <= rng.End)
-                |> List.sortBy (fun (rng, _) -> -rng.Start)
-                |> List.tryHead
+            let optMembers = 
+              info.Completions 
+              |> List.filter (fun (rng, _, _) -> absPosition >= rng.Start && absPosition <= rng.End)
+              |> List.sortBy (fun (rng, _, _) -> -rng.Start)
+              |> List.tryHead
 
-              match optMembers with 
-              | None -> return ResizeArray []
-              | Some (_, members) -> 
+            let log = 
+              [| for r, _, c in info.Completions -> 
+                  let opts = c |> Seq.truncate 3 |> Seq.map (fun m -> m.Name) |> String.concat ", "
+                  sprintf "%d - %d: %s..." r.Start r.End opts |]
+            Log.trace("completions", "requested at: %O", position)
+            Log.trace("completions", "available: %O", log)
+
+            let lengths = lines |> Array.map String.length |> List.ofSeq
+
+            let convertRange (rng:Range) = 
+              let s = CodeGenerator.offsetToLocation 1 rng.Start lengths
+              let e = CodeGenerator.offsetToLocation 1 rng.End lengths
+              let res = F.createEmpty<IRange>
+              res.startColumn <- float s.column
+              res.startLineNumber <- float s.line
+              res.endColumn <- float e.column
+              res.endLineNumber <- float e.line
+              res
+
+            match optMembers with 
+            | None -> 
+                Log.trace("completions", "no members at %s", absPosition)
+                return ResizeArray []
+            | Some (_, nameRange, members) -> 
+                let nameRange = convertRange nameRange
                 let completion =
                   [ for m in members ->
-                      let ci = createEmpty<languages.CompletionItem>
+                      let ci = F.createEmpty<languages.CompletionItem>
                       let n, k =
                         match m with 
                         | Member.Method(name=n) -> n, languages.CompletionItemKind.Method
                         | Member.Property(name=n) -> n, languages.CompletionItemKind.Property
                       ci.kind <- k
                       ci.label <- n
-                      if needsEscaping n then ci.insertText <- Some("'" + n + "'")
+                      ci.insertText <- Some(if needsEscaping n then "'" + n + "'" else n)
+                      ci.filterText <- Some(n)
+                      let eo = F.createEmpty<editor.ISingleEditOperation>
+                      eo.text <- if needsEscaping n then "'" + n + "'" else n
+                      eo.range <- nameRange
+                      //ci.textEdit <- Some eo
                       ci ] 
-                Browser.console.log("Completions: %O", completion)
+                Log.trace("completions", "returning %O", Array.ofSeq completion)
                 return ResizeArray(completion)
-              with e ->
-                Browser.console.log("*** Type checking failed ***")
-                Browser.console.log(e) 
-                return ResizeArray [] } |> Async.StartAsPromise |> U4.Case2
+            with e ->
+              Log.exn("completions", "type checking failed %O", e)
+              return ResizeArray [] } |> Async.StartAsPromise |> Fable.Core.U4.Case2
 
-        member this.resolveCompletionItem(item, token) = U2.Case1 item }
+      member this.resolveCompletionItem(item, token) = Fable.Core.U2.Case1 item }
 
-  monaco.languages.Globals.registerCompletionItemProvider("thegamma", compr)
-  |> ignore
+monaco.languages.Globals.registerCompletionItemProvider("thegamma", compr)
+|> ignore
 
-  monaco.languages.Globals.register(lang)
+monaco.languages.Globals.register(lang)
 
 
-  let sample1 = """let data =
+let sample1 = """let data =
   world
     .byCountry.China
     .'Climate Change'.'CO2 emissions (kt)'
     .take(10)
 
 chart.show(chart.column(data))"""
-  let sample = """let phelps = 
+let sample2 = """let phelps = 
   olympics.'by athlete'.'United States'  
-    .'PHELPS, Michael'.data
+    .'PHELPS, Michael'.then.data
+  .'filter columns'
+    .'drop Athlete'.'drop Sport'.'drop Gold'.'drop Silver'.'drop Bronze'
+  .then.'get the data'
 
 table.create(phelps).show()"""
 
-  let options = createEmpty<editor.IEditorConstructionOptions>
-  options.value <- Some sample
-  options.language <- Some "thegamma"
+let sample = """let data = 
+  olympics.data
+    .'group data'.'by Athlete'
+      .'count all'.'sum Gold'.'sum Silver'.'sum Bronze'
+      .'concatenate values of NOC'.then
+    .'sort data'
+      .'by Gold descending'.'and by Silver descending'
+      .'and by Bronze descending'.then
+    .paging
+      .take(10)
+    .'get the data'
 
-  let ed = monaco.editor.Globals.create(Browser.document.getElementById("container"), options, services)
-  ()
+table.create(data).show()"""
 
-  ed.getModel().onDidChangeContent(fun ch ->
-    let text = ed.getModel().getValue(editor.EndOfLinePreference.LF, false)
+let options = F.createEmpty<editor.IEditorConstructionOptions>
+options.value <- Some sample
+options.language <- Some "thegamma"
+
+let ed = monaco.editor.Globals.create(Browser.document.getElementById("container"), options, services)
+()
+
+let escape s = 
+  if needsEscaping s then "'" + s + "'" else s
+
+let replace (rng:Range) newValue (text:string) = 
+  text.Substring(0, rng.Start) + newValue + text.Substring(rng.End)
+
+let replaceNameWithValue (text:string) (n:Name) el e =
+  let newValue = escape (unbox<HTMLSelectElement> el).value
+  let newText = replace n.Range newValue text
+  ed.getModel().setValue(newText)
+
+/// Replace the second string first, assuming it is later in the text
+let replaceTwoNamesWithValues (text:string) (n1:Name, n2:Name) (s1, s2) =
+  let newText = replace n1.Range (escape s1) (replace n2.Range (escape s2) text) 
+  ed.getModel().setValue(newText)
+
+let removeRangeWithPrecendingDot (text:string) (rng:Range) = 
+  // Once we have comments, we need to skip over them too
+  let mutable start = rng.Start
+  while start > 0 && text.[start] <> '.'  do start <- start - 1
+  let newText = text.Substring(0, start) + text.Substring(rng.End)
+  ed.getModel().setValue(newText)
+
+let insertDotTextAfter (origText:string) (rng:Range) ins =
+  let newText = origText.Substring(0, rng.End) + "." + escape ins + origText.Substring(rng.End)
+  ed.getModel().setValue(newText)
+
+let renderEditor origText = function
+  | Editors.SingleChoice(n, ms) ->
+      h?div [] [
+        h?h2 [] [text "choose one"]
+        h?select 
+          [ "change" =!> replaceNameWithValue origText n ] 
+          [ for (Editors.Property(name, _, _)) in ms ->
+              let sel = if name = n.Name then ["selected" => "selected"] else []
+              h?option sel [ text name ] ]
+      ]
+  | Editors.CreateList(ca, ns, ms) ->
+      h?div [] [
+        h?h2 [] [text "create list"]
+        h?ul [] [
+          for n in ns -> 
+            h?li [] [ 
+              text n.Name 
+              text " "
+              h?a ["click" =!> fun el e -> removeRangeWithPrecendingDot origText n.Range ] [ text "X" ]
+            ]
+        ]
+        h?select 
+          [ "data-placeholder" => "Add another item..."
+            "change" =!> fun el e -> 
+              let sel = (el :?> HTMLSelectElement).value
+              let last = if ns.Length = 0 then ca else ns.[ns.Length - 1]
+              insertDotTextAfter origText last.Range sel
+          ] 
+          [ yield h?option [] []
+            for (Editors.Property(name, _, _)) in ms ->
+              h?option [] [ text name ]
+          ]
+      ]
+  | Editors.NestedChoice(n1, n2, props) ->
+      h.part (n1.Name, n2.Name) (fun el (name1, name2) update ->
+        let selected = 
+          props 
+          |> Array.tryFind (fun (Editors.Property(name, _, _), nested) -> name = name1) 
+          |> FsOption.map snd
+        let nested = defaultArg selected [||]
+
+        h?div [] [
+          h?h2 [] [text "nested choice"]
+          h?select 
+            [ "change" =!> fun el e -> update ((unbox<HTMLSelectElement> el).value, "") ] 
+            [ for (Editors.Property(name, _, _), nested) in props ->
+                let sel = if name = name1 then ["selected" => "selected"] else []
+                h?option sel [ text name ] ]
+          h?select 
+            [ "data-placeholder" => "Choose an item..." 
+              "change" =!> fun el e -> 
+                  let name2 = (unbox<HTMLSelectElement> el).value
+                  replaceTwoNamesWithValues origText (n1, n2) (name1, name2) ] 
+            [ if name2 = "" then yield h?option [] []
+              for Editors.Property(name, _, _) in nested ->
+                let sel = if name = name2 then ["selected" => "selected"] else []
+                h?option sel [ text name ] ]
+        ] |> renderTo el
+      )
+
+
+type EditorWorker() = 
+  let update text = async {
+    Log.trace("editors", "type checking")
+    let! errs, prg = typeCheck text 
+    reportErrors errs
+
+    Log.trace("editors", "collecting")
+    let! eds = Async.collect Editors.collectCmdEditors prg.Body 
+    let eds = eds |> List.mapi (fun i v -> i, v)
+    let filteredEds = 
+      eds 
+      |> List.filter (fun (i, ed1) ->
+          eds |> List.exists (fun (j, ed2) -> j <> i && Ranges.subRange ed1.Range ed2.Range) |> not)
+      |> List.map snd
+            
+    Log.trace("editors", "rendering %s out of %s", eds.Length, filteredEds.Length)
+    h?div [] (List.map (renderEditor text) filteredEds)
+    |> renderTo (document.getElementById("editor")) }
+
+  let mutable lastText = None
+  let mutable resume = ignore
+
+  let textChanged = Async.FromContinuations(fun (cont, _, _) ->
+    let rec loop () =
+      match lastText with
+      | Some text ->
+          resume <- ignore
+          lastText <- None
+          cont(text)
+      | None -> resume <- loop
+    loop ())
+
+  let worker = async { 
+    while true do
+      try 
+        let! text = textChanged
+        do! update text          
+      with e -> 
+        Log.exn("editors", "update failed: %O", e)
+  }
+
+  do worker |> Async.StartImmediate
+
+  member x.Update(text) =
+    Log.trace("editors", "text updated")
+    lastText <- Some text
+    resume()
+
+
+let edWorker = EditorWorker()
+
+ed.getModel().onDidChangeContent(fun ch ->
+  let text = ed.getModel().getValue(editor.EndOfLinePreference.LF, false)
+  edWorker.Update(text)  
+) |> ignore
+  
+
+document.getElementById("run").onclick <- fun e ->
     
-    async {
-      try
-        let! errs, expr = typeCheck text 
-        reportErrors errs
-
-        (*Browser.console.log("*** Type checking completed ***")
-        for e in errs do
-          Browser.console.log("Error %s: %s (%O)", e.Number, e.Message, e.Range)
-        Browser.console.log("Expression: %O", expr) 
-        *)
-      with e ->
-        Browser.console.log("*** Type checking failed ***")
-        Browser.console.log(e) } |> Async.StartImmediate
-
-  ) |> ignore
-
-
-  document.getElementById("run").onclick <- fun e ->
-    
-    let text = ed.getModel().getValue(editor.EndOfLinePreference.LF, false)
-    async {
-      try
-        let! ptys = types |> Async.AwaitFuture
-        let! errs, prog = typeCheck text 
-        reportErrors errs
+  let text = ed.getModel().getValue(editor.EndOfLinePreference.LF, false)
+  async {
+    try
+      let! ptys = types |> Async.AwaitFuture
+      let! errs, prog = typeCheck text 
+      reportErrors errs
         
-        let ctx = 
-          { CodeGenerator.LineLengths = [ for l in text.Split('\n') -> l.Length ] 
-            CodeGenerator.Globals = ptys.Globals |> Map.map (fun _ (e, _) -> e) }
+      let ctx = 
+        { CodeGenerator.LineLengths = [ for l in text.Split('\n') -> l.Length ] 
+          CodeGenerator.Globals = ptys.Globals |> Map.map (fun _ (e, _) -> e) }
 
-        let! res = CodeGenerator.compileProgram ctx prog
+      let! res = CodeGenerator.compileProgram ctx prog
 
-        let code = babel.transformFromAst(Serializer.serializeProgram res, text, { presets = [| "es2015" |] })
+      let code = babel.transformFromAst(Serializer.serializeProgram res, text, { presets = [| "es2015" |] })
 
-        //Browser.window.alert(code.code)
-        Browser.console.log(code)
+      //Browser.window.alert(code.code)
+      Browser.console.log(code)
 
-        // Get fable to reference everything
-        let s = TheGamma.Series.series<int, int>.create(async { return [||] }, "", "", "") 
-        TypePovidersRuntime.trimLeft |> ignore
-        TheGamma.GoogleCharts.chart.bar |> ignore
-        TheGamma.table.create(s) |> ignore
+      // Get fable to reference everything
+      let s = TheGamma.Series.series<int, int>.create(async { return [||] }, "", "", "") 
+      TheGamma.TypePovidersRuntime.RuntimeContext("lol", "", "troll") |> ignore
+      TypePovidersRuntime.trimLeft |> ignore
+      TheGamma.GoogleCharts.chart.bar |> ignore
+      TheGamma.table<int, int>.create(s) |> ignore
 
-        evalCode code.code
+      evalCode code.code
 
-        // let lengths = 
+      // let lengths = 
 
-      with e ->
-        Browser.console.log("*** Type checking failed ***")
-        Browser.console.log(e) } |> Async.StartImmediate
+    with e ->
+      Browser.console.log("*** Type checking failed ***")
+      Browser.console.log(e) } |> Async.StartImmediate
 
-    box()
-
-run ()
-
-
-let fooooo () =
-  let rc = TheGamma.TypePovidersRuntime.RuntimeContext("lol", "troll")
-  rc.addTrace("zzz").getValue("yollo")
+  box()

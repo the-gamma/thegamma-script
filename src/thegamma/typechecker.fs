@@ -13,17 +13,19 @@ let addError e ctx = { ctx with Errors = e::ctx.Errors }
 let addVariable k v ctx = { ctx with Variables = Map.add k v ctx.Variables }
 
 type ObjectMembers = 
-  | Members of Member list
+  | Members of Member[]
   | NotAnObject
   | SilentError
 
 let rec getObjectMembers t = async {
   match t with
-  | Type.Delayed f ->
+  | Type.Delayed(_, f) ->
       let! t = Async.AwaitFuture f
       return! getObjectMembers t 
-  | Type.Object o -> return Members(o.Members)
+  | Type.Object(o) -> return Members(o.Members)
   | Type.Unit
+  | Type.Parameter _
+  | Type.Function _
   | Type.Primitive _ -> return NotAnObject
   | Type.Any _ -> return SilentError }
 
@@ -66,17 +68,21 @@ let rec typeCheckExpr ctx res (expr:Expr<unit>) = async {
           let! t, res = typeCheckExpr ctx res arg.Value
           return res, { Name = arg.Name; Value = t } }) res
 
-      let resTyp, res = 
+      let resTyp, typedArgs, res = 
         match members with
         | ObjectMembers.Members members ->
             match members |> Seq.tryPick (function Member.Method(name=n; arguments=args; typ=r) when n = name.Name -> Some(r, args) | _ -> None) with
             | Some(resTyp, args) -> 
                 // TODO: check arguments
-                resTyp, res
-            | _ -> Type.Any, res |> addError (Errors.TypeChecker.methodMissing name.Range name.Name members)
-        | ObjectMembers.SilentError -> Type.Any, res
-        | ObjectMembers.NotAnObject -> Type.Any, res |> addError (Errors.TypeChecker.notAnObject e.Range typed.Type)
+                let typedArgs = 
+                  List.zip args typedArgs |> List.map (fun ((n, _, _), ta) ->
+                     { ta with Name = Some { Name = n; Range = ta.Value.Range }})
+                resTyp, typedArgs, res
+            | _ -> Type.Any, [], res |> addError (Errors.TypeChecker.methodMissing name.Range name.Name members)
+        | ObjectMembers.SilentError -> Type.Any, typedArgs, res
+        | ObjectMembers.NotAnObject -> Type.Any, typedArgs, res |> addError (Errors.TypeChecker.notAnObject e.Range typed.Type)
 
+      
       return { Expr = ExprKind.Call(typed, name, typedArgs); Type = resTyp; Range = expr.Range }, res }
 
 let rec typeCheckCmd ctx res cmds = async {
@@ -97,12 +103,18 @@ let typeCheckProgram ctx res prog = async {
   return { Body = cmds; Range = prog.Range }, res }
 
 type EditorInfo = 
-  { Completions : list<Range * Member list> }
+  { Source : string
+    Completions : list<Range * Range * Member[]> }
+
+let extendUntilDot (text:string) (rng:Range) = 
+  let mutable start = rng.Start
+  while start > 0 && text.[start] <> '.'  do start <- start - 1
+  { rng with Start = start + 1 }
 
 let withCompletion r t ctx = async {
   let! members = getObjectMembers t
   match members with
-  | Members members -> return { ctx with Completions = (r, members)::ctx.Completions }
+  | Members members -> return { ctx with Completions = (extendUntilDot ctx.Source r, r, members)::ctx.Completions }
   | _ -> return ctx }
 
 let rec collectExprInfo ctx expr = async {

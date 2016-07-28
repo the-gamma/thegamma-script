@@ -10,13 +10,43 @@ let jsonStringify json : string = failwith "JS Only"
 [<Emit("JSON.parse($0)")>]
 let jsonParse<'R> (str:string) : 'R = failwith "JS Only"
 
-module Http =
+[<Emit("console.log.apply(console, $0)")>]
+let consoleLog (args:obj[]) : unit = failwith "JS only"
+
+let enabledCategories = set [ "COMPLETIONS"; "EDITORS"]
+
+type Log =
+  static member message(level:string, category:string, msg:string, [<System.ParamArray>] args) = 
+    let category = category.ToUpper()
+    if level = "EXCEPTION" || enabledCategories.Contains category then
+      let dt = System.DateTime.Now
+      let p2 (s:int) = (string s).PadLeft(2, '0')
+      let p4 (s:int) = (string s).PadLeft(4, '0')
+      let prefix = sprintf "[%s:%s:%s:%s] %s: " (p2 dt.Hour) (p2 dt.Minute) (p2 dt.Second) (p4 dt.Millisecond) category
+      let color = 
+        match level with
+        | "TRACE" -> "color:#808080"
+        | "EXCEPTION" -> "color:#a00000"
+        | _ -> ""
+      let args = if args = null then [| |] else args
+      consoleLog(FSharp.Collections.Array.append [|box ("%c" + prefix + msg); box color|] args)
+
+  static member trace(category:string, msg:string, [<System.ParamArray>] args) = 
+    Log.message("TRACE", category, msg, args)
+
+  static member exn(category:string, msg:string, [<System.ParamArray>] args) = 
+    Log.message("EXCEPTION", category, msg, args)
+
+type Http =
   /// Send HTTP request asynchronously
   /// (does not handle errors properly)
-  let Request(meth, url, data) =
+  static member Request(meth, url, ?data, ?cookies) =
     Async.FromContinuations(fun (cont, _, _) ->
       let xhr = XMLHttpRequest.Create()
       xhr.``open``(meth, url, true)
+      match cookies with 
+      | Some cookies when cookies <> "" -> xhr.setRequestHeader("X-Cookie", cookies)
+      | _ -> ()
       xhr.onreadystatechange <- fun _ ->
         if xhr.readyState > 3. && xhr.status = 200. then
           cont(xhr.responseText)
@@ -60,6 +90,30 @@ type Microsoft.FSharp.Control.Async with
   static member StartAsFuture(op) = Async.AsFuture(op, true)
 
 module Async = 
+  module Array =
+    let rec map f (ar:_[]) = async {
+      let res = FSharp.Collections.Array.zeroCreate ar.Length
+      for i in 0 .. ar.Length-1 do
+        let! v = f ar.[i]
+        res.[i] <- v
+      return res }
+
+  let rec collect f l = async {
+    match l with 
+    | x::xs -> 
+        let! y = f x
+        let! ys = collect f xs
+        return List.append y ys
+    | [] -> return [] }
+
+  let rec choose f l = async {
+    match l with 
+    | x::xs -> 
+        let! y = f x
+        let! ys = choose f xs
+        return match y with None -> ys | Some y -> y::ys 
+    | [] -> return [] }
+
   let rec map f l = async {
     match l with 
     | x::xs -> 

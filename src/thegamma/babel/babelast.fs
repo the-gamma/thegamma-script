@@ -24,6 +24,30 @@ type AssignmentOperator =
   | AssignXorBitwise
   | AssignAndBitwise    
 
+type BinaryOperator =
+  | BinaryEqual
+  | BinaryUnequal
+  | BinaryEqualStrict
+  | BinaryUnequalStrict
+  | BinaryLess
+  | BinaryLessOrEqual
+  | BinaryGreater
+  | BinaryGreaterOrEqual
+  | BinaryShiftLeft
+  | BinaryShiftRightSignPropagating
+  | BinaryShiftRightZeroFill
+  | BinaryMinus
+  | BinaryPlus
+  | BinaryMultiply
+  | BinaryDivide
+  | BinaryModulus
+  | BinaryExponent
+  | BinaryOrBitwise
+  | BinaryXorBitwise
+  | BinaryAndBitwise
+  | BinaryIn
+  | BinaryInstanceOf
+
 type Pattern = 
   | IdentifierPattern of name:string * location:SourceLocation option
 
@@ -45,6 +69,7 @@ and Expression =
   | ArrayExpression of elements:Expression list * location:SourceLocation option
   | MemberExpression of obj:Expression * property:Expression * computed:bool * location:SourceLocation option
   | NewExpression of callee:Expression * arguments:Expression list * location:SourceLocation option
+  | BinaryExpression of operator:BinaryOperator * left:Expression * right:Expression * location:SourceLocation option
 
 and Statement =
   | ExpressionStatement of expression:Expression * location:SourceLocation option
@@ -61,6 +86,30 @@ module Serializer =
   let createObj props = createObj (List.concat props)
   let inline (=>) k v = [ k, box v ]
   let inline (=?>) k v = match v with Some v -> [ k, box v] | _ -> []
+
+  let serializeBinaryOperator = function
+    | BinaryEqual -> "=="
+    | BinaryUnequal -> "!="
+    | BinaryEqualStrict -> "==="
+    | BinaryUnequalStrict -> "!=="
+    | BinaryLess -> "<"
+    | BinaryLessOrEqual -> "<="
+    | BinaryGreater -> ">"
+    | BinaryGreaterOrEqual -> ">="
+    | BinaryShiftLeft -> "<<"
+    | BinaryShiftRightSignPropagating -> ">>"
+    | BinaryShiftRightZeroFill -> ">>>"
+    | BinaryMinus -> "-"
+    | BinaryPlus -> "+"
+    | BinaryMultiply -> "*"
+    | BinaryDivide -> "/"
+    | BinaryModulus -> "%"
+    | BinaryExponent -> "**"
+    | BinaryOrBitwise -> "|"
+    | BinaryXorBitwise -> "^"
+    | BinaryAndBitwise -> "&"
+    | BinaryIn -> "in"
+    | BinaryInstanceOf -> "instanceof"
 
   let serializeAssignOperator = function
     | AssignEqual -> "="
@@ -101,7 +150,7 @@ module Serializer =
     | AssignmentExpression(op, l, r, loc) ->
         createObj [ 
           "type" => "AssignmentExpression"; "left" => serializeExpression l; "right" => serializeExpression r;
-          "operator" => serializeAssignOperator op ]
+          "operator" => serializeAssignOperator op; "loc" =?> loc ]
     | CallExpression(callee, args, loc) ->
         createObj [ 
           "type" => "CallExpression"; "callee" => serializeExpression callee
@@ -110,6 +159,11 @@ module Serializer =
         createObj [
           "type" => "MemberExpression"; "object" => serializeExpression obj;
           "property" => serializeExpression prop; "computed" => computed; "loc" =?> loc ]
+    | BinaryExpression(op, l, r, loc) ->
+        createObj [ 
+          "type" => "BinaryExpression"; "left" => serializeExpression l; "right" => serializeExpression r;
+          "operator" => serializeBinaryOperator op; "loc" =?> loc ]
+    
     | ArrayExpression(elements, loc) ->
         createObj [ "type" => "ArrayExpression"; "elements" => Array.ofSeq (List.map serializeExpression elements); "loc" =?> loc ]
     | NullLiteral(loc) ->
@@ -165,31 +219,7 @@ type UnaryOperator =
 type UpdateOperator =
     | UpdateMinus
     | UpdatePlus
-    
-type BinaryOperator =
-    | BinaryEqual
-    | BinaryUnequal
-    | BinaryEqualStrict
-    | BinaryUnequalStrict
-    | BinaryLess
-    | BinaryLessOrEqual
-    | BinaryGreater
-    | BinaryGreaterOrEqual
-    | BinaryShiftLeft
-    | BinaryShiftRightSignPropagating
-    | BinaryShiftRightZeroFill
-    | BinaryMinus
-    | BinaryPlus
-    | BinaryMultiply
-    | BinaryDivide
-    | BinaryModulus
-    | BinaryExponent
-    | BinaryOrBitwise
-    | BinaryXorBitwise
-    | BinaryAndBitwise
-    | BinaryIn
-    | BinaryInstanceOf
-    
+        
 type LogicalOperator =
     | LogicalOr
     | LogicalAnd
@@ -591,35 +621,6 @@ type UpdateExpression(operator, prefix, argument, ?loc) =
         | UpdateMinus -> "--"
         | UpdatePlus -> "++"
     
-(** ##Binary Operations *)
-type BinaryExpression(operator, left, right, ?loc) =
-    inherit Expression("BinaryExpression", ?loc = loc)
-    member x.left: Expression = left
-    member x.right: Expression = right
-    member x.operator =
-        match operator with
-        | BinaryEqual -> "=="
-        | BinaryUnequal -> "!="
-        | BinaryEqualStrict -> "==="
-        | BinaryUnequalStrict -> "!=="
-        | BinaryLess -> "<"
-        | BinaryLessOrEqual -> "<="
-        | BinaryGreater -> ">"
-        | BinaryGreaterOrEqual -> ">="
-        | BinaryShiftLeft -> "<<"
-        | BinaryShiftRightSignPropagating -> ">>"
-        | BinaryShiftRightZeroFill -> ">>>"
-        | BinaryMinus -> "-"
-        | BinaryPlus -> "+"
-        | BinaryMultiply -> "*"
-        | BinaryDivide -> "/"
-        | BinaryModulus -> "%"
-        | BinaryExponent -> "**"
-        | BinaryOrBitwise -> "|"
-        | BinaryXorBitwise -> "^"
-        | BinaryAndBitwise -> "&"
-        | BinaryIn -> "in"
-        | BinaryInstanceOf -> "instanceof"
 
 type AssignmentExpression(operator, left, right, ?loc) =
     inherit Expression("AssignmentExpression", ?loc = loc)

@@ -79,24 +79,26 @@ module FSharpProvider =
     // Needs to be delayed to avoid calling lookupNamed too early
     let importProvidedType exp = async {
       let mems = 
-        [ for m in exp.members do
-            if m.kind = "method" then
-              let m = unbox<MethodMember> m
-              let args = [ for a in m.arguments -> a.name, a.optional, mapType a.``type`` ]
-              let emitter = { Emit = fun (inst, args) ->
-                // TODO: match arguments based on name or something
-                CallExpression
-                  ( MemberExpression(inst, IdentifierExpression(m.name, None), false, None), 
-                    List.map snd args, None) }
-              yield Member.Method(m.name, args, mapType m.returns, emitter) ]
-      return Type.Object { Members = mems } } |> Async.AsFuture |> Type.Delayed
+        exp.members |> Array.choose (fun m ->
+          if m.kind = "method" then
+            let m = unbox<MethodMember> m
+            let args = [ for a in m.arguments -> a.name, a.optional, mapType a.``type`` ]
+            let emitter = { Emit = fun (inst, args) ->
+              // TODO: match arguments based on name or something
+              CallExpression
+                ( MemberExpression(inst, IdentifierExpression(m.name, None), false, None), 
+                  List.map snd args, None) }
+            Some(Member.Method(m.name, args, mapType m.returns, emitter))
+          else None)
+      return Type.Object { Members = mems } } |> Async.AsFuture 
             
     async {
-      let! json = Http.Request("GET", url, None)
+      let! json = Http.Request("GET", url)
       let expTys = jsonParse<ExportedType[]> json
       return
         [ for exp in expTys ->
-            let ty = importProvidedType exp
+            let guid = url + "," + exp.name
+            let ty = Type.Delayed(guid, importProvidedType exp)
             if exp.``static`` then           
               let e = exp.instance |> Seq.fold (fun chain s -> 
                 match chain with
@@ -120,15 +122,21 @@ module RestProvider =
   [<Fable.Core.Emit("typeof($0)")>]
   let jstypeof (o:obj) : string = failwith "!"
 
+  type Parameter = 
+    { name : string 
+      ``type`` : string }
+
   type Member =
     { name : string
       returns : AnyType
+      parameters : Parameter[] option
+      schema : obj option
       trace : string[] }
 
   type ResultType = 
     | Primitive of string
-    | Generic of string * ResultType list
-    | Record of (string * ResultType) list
+    | Generic of string * ResultType[]
+    | Record of (string * ResultType)[]
 
   type RawField = 
     { name : string
@@ -143,11 +151,11 @@ module RestProvider =
     if jstypeof json = "string" then Primitive(unbox json)
     else
       let res = unbox<RawResultType> json
-      if res.name = "record" then Record [ for f in res.fields -> f.name, fromRawType f.``type`` ]
-      else Generic(res.name, [ for f in res.``params`` -> fromRawType f ])
+      if res.name = "record" then res.fields |> Array.map (fun f -> f.name, fromRawType f.``type``) |> Record
+      else Generic(res.name, res.``params`` |> Array.map fromRawType)
  
-  let load url = async {
-    let! json = Http.Request("GET", url, None)
+  let load url cookies = async {
+    let! json = Http.Request("GET", url, cookies=cookies)
     let members = jsonParse<Member[]> json
     return members }
 
@@ -157,11 +165,21 @@ module RestProvider =
   let concatUrl (a:string) (b:string) =
     (trimRight '/' a) + "/" + (trimLeft '/' b)
 
+  let addTraceCall inst trace =
+    let mem = MemberExpression(inst, IdentifierExpression("addTrace", None), false, None)
+    CallExpression(mem, [trace], None)
+
   let propAccess trace = 
     let trace = StringLiteral(String.concat "&" trace, None)
-    { Emit = fun (inst, _args) ->
-        let mem = MemberExpression(inst, IdentifierExpression("addTrace", None), false, None)
-        CallExpression(mem, [trace], None) }
+    { Emit = fun (inst, _args) -> addTraceCall inst trace }
+
+  let methCall trace =
+    let trace = StringLiteral(String.concat "&" trace, None)
+    { Emit = fun (inst, args) ->
+        let withTrace = addTraceCall inst trace
+        args |> Seq.fold (fun inst (name, value) ->
+          let trace = BinaryExpression(BinaryPlus, StringLiteral(name + "=", None), value, None)
+          addTraceCall inst trace ) withTrace }
 
   let dataCall parser trace endp = 
     { Emit = fun (inst, args) ->
@@ -188,13 +206,13 @@ module RestProvider =
     | Primitive("string") -> Type.Primitive("string"), id
     | Primitive("int") -> Type.Primitive("num"), id
     | Primitive("float") -> Type.Primitive("num"), id
-    | Generic("seq", [Generic("tuple", [t1; t2])]) -> 
+    | Generic("seq", [|Generic("tuple", [|t1; t2|])|]) -> 
         // let t1, _ = getTypeAndEmitter lookupNamed t1
         // let t2, _ = getTypeAndEmitter lookupNamed t2
         let typ = lookupNamed "series" [] // TODO: Generics 
         typ, 
         fun d -> ident("_series")?series?create /@/ [d; str "key"; str "value"; str "series"] // TODO: We don't have any info - that sucks
-    | Generic("seq", [ty]) ->
+    | Generic("seq", [|ty|]) ->
         let elTy, emitter = getTypeAndEmitter lookupNamed ty
         let serTy = lookupNamed "series" [Type.Primitive "int"; elTy]
         serTy, 
@@ -205,41 +223,53 @@ module RestProvider =
               str "key"; str "value"; str "series" ]
     | Record(membs) ->
         let membs = 
-          [ for name, ty in membs ->
-              let memTy, memConv = getTypeAndEmitter lookupNamed ty
-              let emitter = { Emit = fun (inst, _) -> memConv <| inst?(name) }
-              Member.Property(name, memTy, emitter) ]
-        let obj = TheGamma.Type.Object { Members = [] }
+          membs |> Array.map (fun (name, ty) ->
+            let memTy, memConv = getTypeAndEmitter lookupNamed ty
+            let emitter = { Emit = fun (inst, _) -> memConv <| inst?(name) }
+            Member.Property(name, memTy, None, emitter))
+        let obj = TheGamma.Type.Object { Members = membs }
         obj, id
     | _ -> 
         Browser.console.log("getTypeAndEmitter: Cannot handle %O", ty)
         failwith "getTypeAndEmitter: Cannot handle type"
-    
-  let rec createRestType lookupNamed root url = 
-    async {
-      let! members = load (concatUrl root url)
+
+  [<Fable.Core.Emit("$0[$1]")>]
+  let getProperty<'T> (obj:obj) (name:string) : 'T = failwith "never"
+
+  let rec createRestType lookupNamed root cookies url = 
+    let future = async {
+      let! members = load (concatUrl root url) cookies 
       return 
         Type.Object
           { Members = 
-              [ for m in members ->
-                  match m.returns.kind with
-                  | "nested" ->
-                      let returns = unbox<TypeNested> m.returns 
-                      Member.Property(m.name, createRestType lookupNamed root returns.endpoint, propAccess m.trace) 
-                  | "primitive" ->  
-                      let returns = unbox<TypePrimitive> m.returns                      
-                      let ty = fromRawType returns.``type``
-                      let typ, parser = getTypeAndEmitter lookupNamed ty
-                      Member.Property(m.name, typ, dataCall parser m.trace returns.endpoint)
-                  | _ -> failwith "?" ] } }
-    |> Async.AsFuture |> Type.Delayed
+              members |> Array.map (fun m ->
+                let schema = m.schema |> Option.map (fun s -> { Type = getProperty s "@type"; JSON = s })
+                match m.returns.kind with
+                | "nested" ->
+                    let returns = unbox<TypeNested> m.returns 
+                    let retTyp = createRestType lookupNamed root cookies returns.endpoint
+                    match m.parameters with 
+                    | Some parameters ->
+                        let args = [ for p in parameters -> p.name, false, Type.Primitive p.``type``] // TODO: Check this is OK type
+                        let argNames = [ for p in parameters -> p.name ]
+                        Member.Method(m.name, args, retTyp, methCall m.trace)
+                    | None -> 
+                        Member.Property(m.name, retTyp, schema, propAccess m.trace) 
+                | "primitive" ->  
+                    let returns = unbox<TypePrimitive> m.returns                      
+                    let ty = fromRawType returns.``type``
+                    let typ, parser = getTypeAndEmitter lookupNamed ty
+                    Member.Property(m.name, typ, schema, dataCall parser m.trace returns.endpoint)
+                | _ -> failwith "?" ) } }
+    let guid = concatUrl root url
+    Type.Delayed(guid, Async.AsFuture(future))
 
-  let rec provideRestType lookupNamed name root = 
+  let rec provideRestType lookupNamed name root cookies = 
     let ctx = ident("_restruntime")?RuntimeContext
     ProvidedType.GlobalValue
       ( name, 
-        NewExpression(ctx, [str root; str ""], None),
-        createRestType lookupNamed root "/" )
+        NewExpression(ctx, [str root; str cookies; str ""], None),
+        createRestType lookupNamed root cookies "/")
 
   // ------------------------------------------------------------------------------------------------
   //

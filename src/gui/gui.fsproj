@@ -5,14 +5,14 @@
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <SchemaVersion>2.0</SchemaVersion>
-    <ProjectGuid>c103641d-9755-4de4-bda9-fdcfc022c80e</ProjectGuid>
+    <ProjectGuid>f1214b44-b9bf-4dc7-bf98-3a23e83e01fc</ProjectGuid>
     <OutputType>Library</OutputType>
-    <RootNamespace>libraries</RootNamespace>
-    <AssemblyName>libraries</AssemblyName>
+    <RootNamespace>gui</RootNamespace>
+    <AssemblyName>gui</AssemblyName>
     <TargetFrameworkVersion>v4.5.2</TargetFrameworkVersion>
     <TargetFSharpCoreVersion>4.4.0.0</TargetFSharpCoreVersion>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
-    <Name>libraries</Name>
+    <Name>gui</Name>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -22,7 +22,7 @@
     <OutputPath>bin\Debug\</OutputPath>
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <WarningLevel>3</WarningLevel>
-    <DocumentationFile>bin\Debug\libraries.XML</DocumentationFile>
+    <DocumentationFile>bin\Debug\gui.XML</DocumentationFile>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -31,7 +31,7 @@
     <OutputPath>bin\Release\</OutputPath>
     <DefineConstants>TRACE</DefineConstants>
     <WarningLevel>3</WarningLevel>
-    <DocumentationFile>bin\Release\libraries.XML</DocumentationFile>
+    <DocumentationFile>bin\Release\gui.XML</DocumentationFile>
   </PropertyGroup>
   <PropertyGroup>
     <MinimumVisualStudioVersion Condition="'$(MinimumVisualStudioVersion)' == ''">11</MinimumVisualStudioVersion>
@@ -50,12 +50,7 @@
   </Choose>
   <Import Project="$(FSharpTargetsPath)" />
   <ItemGroup>
-    <Compile Include="series.fs" />
-    <Compile Include="tables.fs" />
-    <Compile Include="google/core.fs" />
-    <Compile Include="google/options.fs" />
-    <Compile Include="google/extensions.fs" />
-    <Compile Include="google/charts.fs" />
+    <Compile Include="html.fs" />
     <None Include="fableconfig.json" />
   </ItemGroup>
   <ItemGroup>
@@ -69,13 +64,6 @@
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Numerics" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\gui\gui.fsproj">
-      <Name>gui</Name>
-      <Project>{f1214b44-b9bf-4dc7-bf98-3a23e83e01fc}</Project>
-      <Private>True</Private>
-    </ProjectReference>
   </ItemGroup>
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.

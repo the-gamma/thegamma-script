@@ -3,34 +3,12 @@ namespace TheGamma
 open System
 open TheGamma
 open TheGamma.Series
-open Fable.Core
+open TheGamma.Html
 open Fable.Import.Browser
 
+type Emit = Fable.Core.EmitAttribute
+
 module TableHelpers =
-  // Copy past from main.fsx
-  type DomNode = 
-    | Text of string
-    | Element of tag:string * attributes : (string * string)[] * children : DomNode[]
-
-  let rec render node = 
-    match node with
-    | Text(s) -> 
-        document.createTextNode(s) :> Node
-    | Element(tag, attrs, children) ->
-        let el = document.createElement(tag)
-        for c in children do el.appendChild(render c) |> ignore
-        for k, v in attrs do el.setAttribute(k, v)
-        el :> Node
-
-  let div a c = Element("div", Array.ofList a, Array.ofList c)
-  let text s = Text(s)
-  let (=>) k v = k, v
-  // End copy past from main.fsx
-  type El() = class end
-  let h = El()
-  let (?) (_:El) n a b = Element(n, Array.ofList a, Array.ofList b)
-
-
   [<Emit("document.getElementById(outputElementID)")>]
   let outputElement() : HTMLDivElement = failwith "!"
   [<Emit("blockCallback()")>]
@@ -68,9 +46,7 @@ type table<'k,'v> =
       h?tr [] [ for t in things -> h?(el) [] [text t] ]
 
     let render nd = 
-      let oe = outputElement()
-      while box oe.lastChild <> null do ignore(oe.removeChild(oe.lastChild))
-      oe.appendChild(render nd) |> ignore
+      nd |> renderTo (outputElement())
 
     let makeTable header body = 
       h?table ["class" => "table table-striped"] [

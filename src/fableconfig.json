@@ -5,7 +5,8 @@
     "refs": {
         "bindings": "bindings",
         "libraries": "libraries",
-        "thegamma": "thegamma"
+        "thegamma": "thegamma",
+        "gui": "gui"
     },
     "scripts": {
     },

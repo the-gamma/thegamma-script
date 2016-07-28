@@ -6,9 +6,6 @@ module TheGamma.Parser
 open TheGamma
 open TheGamma.Parsec
 
-let unionRanges r1 r2 =
-  { Start = min r1.Start r2.Start; End = max r1.End r2.End }
-
 let anySpace = zeroOrMore (pred (fun t -> match t.Token with TokenKind.White _ -> true | _ -> false))
 let anyWhite = zeroOrMore (pred (fun t -> match t.Token with TokenKind.Newline | TokenKind.White _ -> true | _ -> false))
 
@@ -90,8 +87,8 @@ let invocationChain =
         let parsed = chain |> List.fold (fun st item -> 
           let expr, r =
             match item.Arguments with
-            | Some(arng, args) -> ExprKind.Call(st, item.Name, args), unionRanges st.Range (unionRanges item.Name.Range arng)
-            | None -> ExprKind.Property(st, item.Name), unionRanges st.Range item.Name.Range
+            | Some(arng, args) -> ExprKind.Call(st, item.Name, args), Ranges.unionRanges st.Range (Ranges.unionRanges item.Name.Range arng)
+            | None -> ExprKind.Property(st, item.Name), Ranges.unionRanges st.Range item.Name.Range
           { Expr = expr; Range = r; Type = () }) inst
         ( match first.Arguments with
           | Some(rng, _) -> error (Errors.Parser.valueNotAfunction rng first.Name.Name)

@@ -21,6 +21,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{D6CA65DC
 		..\tools\fsprovider.fsx = ..\tools\fsprovider.fsx
 	EndProjectSection
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "gui", "gui\gui.fsproj", "{F1214B44-B9BF-4DC7-BF98-3A23E83E01FC}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -39,6 +41,10 @@ Global
 		{C103641D-9755-4DE4-BDA9-FDCFC022C80E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C103641D-9755-4DE4-BDA9-FDCFC022C80E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C103641D-9755-4DE4-BDA9-FDCFC022C80E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F1214B44-B9BF-4DC7-BF98-3A23E83E01FC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F1214B44-B9BF-4DC7-BF98-3A23E83E01FC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F1214B44-B9BF-4DC7-BF98-3A23E83E01FC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F1214B44-B9BF-4DC7-BF98-3A23E83E01FC}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

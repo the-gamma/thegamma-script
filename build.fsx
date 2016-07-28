@@ -22,11 +22,12 @@ let server =
   Writers.setHeader "Cache-Control" "no-cache, no-store, must-revalidate"
   >=> Writers.setHeader "Pragma" "no-cache"
   >=> Writers.setHeader "Expires" "0"
-  >=> Files.browseHome
+  >=> choose [
+    Files.browse (__SOURCE_DIRECTORY__ </> "web")
+    Files.browse (__SOURCE_DIRECTORY__) ]
 
 let config =
   { defaultConfig with
-      homeFolder = Some __SOURCE_DIRECTORY__
       logger = Logging.Loggers.saneDefaultsFor Logging.LogLevel.Debug
       bindings = [ HttpBinding.mkSimple HTTP  "127.0.0.1" 8899 ] }
 
