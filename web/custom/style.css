@@ -15,12 +15,12 @@ header {
   min-height:500px;
 }
 header h1 {
-  font-size:42pt;
+  font-size:40pt;
   margin:0px;
   line-height:1.4em;
 }
 header h2 {
-  font-size:28pt;
+  font-size:26pt;
   margin:20px 0px 50px 0px;
   line-height:1.4em;
 }
@@ -103,7 +103,6 @@ nav.affix {
 nav.affix-top {
   top: 0;
   width: 100%;
-  margin-bottom:-50px;
 }
 
 
@@ -113,7 +112,48 @@ nav.affix-top {
 
 body {
   font-family:'PT Sans',verdana,sans-serif;
+  font-size:13pt;
   background-color:#F2F1ED;
   overflow-x:hidden;
   overflow-y:scroll;
 }
+
+article .content {
+  padding-top:50px;
+}
+article h1 {
+  font:300 24pt Kreon,'Times New Roman',times,serif;
+  margin:0px 0px 20px 0px;
+}
+article h1 span {
+  padding:4px 10px 4px 10px;
+  background:#FFDD35;
+}
+
+article h2 {
+  font:300 22pt Kreon,'Times New Roman',times,serif;
+  margin:0px 0px 20px 0px;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+button:disabled {
+  color:red;
+}
+/* */

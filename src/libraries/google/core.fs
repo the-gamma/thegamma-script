@@ -46,14 +46,14 @@ module Helpers =
     | _ when isNull o -> undefined<_>()
     | _ -> getProperty o prop
 
-  [<Emit("drawChart($0, $1, outputElementID, blockCallback);")>]
-  let drawChart<'T> (chart:obj) data : unit = failwith "!"
+  [<Emit("drawChart($0, $1, $2, blockCallback);")>]
+  let drawChart<'T> (chart:obj) data outputId : unit = failwith "!"
 
-  let showChart(chart:#Chart) =
+  let showChart (chart:#Chart) (outputId:string) =
     async {
       try
         let! dt = (getProperty<ChartData> chart "data").data
-        drawChart chart dt
+        drawChart chart dt outputId
       with e ->
         Browser.window.alert("SOmething went wrong: " + unbox e) }
       |> Async.StartImmediate
@@ -76,9 +76,32 @@ module ChartDataOperations =
     vals |> Array.map snd |> data.addRows |> ignore
     return data } }
 
+(*
   let oneKeyNValues keyType (v:seq<series<'k, float>>) = { data = async {
     let data = GoogleCharts.createTable()
     let v = Array.ofSeq v
+    data.addColumn(keyType, v.[0].keyName) |> ignore
+    for i in 0 .. v.Length - 1 do
+      data.addColumn("number", v.[i].seriesName) |> ignore
+
+    let head = v.[0].map(fun v -> Map.ofList [0,v])
+    let tail = SeriesInternals.slice 1 (v.Length-1) v |> Array.mapi (fun i v -> i+1, v)
+    let all = (head,tail) ||> Array.fold (fun s1 (i, s2) ->
+      s1.joinOuter(s2).map(fun (l, r) ->
+        match defaultArg l Map.empty, r with
+        | lm, Some r -> Map.add i r lm
+        | lm, None -> lm ))
+
+    let! vals = all.mapPairs(fun k vals ->
+      let data = Array.init v.Length (fun i -> box (defaultArg (Map.tryFind i vals) (Helpers.undefined<_>())))
+      Array.append [| box k |] data).data
+    vals |> Array.map snd |> data.addRows |> ignore
+    return data } }
+*)
+  let oneKeyNValues keyType (v:series<'a, series<'k, float>>) = { data = async {
+    let data = GoogleCharts.createTable()
+    let! v = v.data
+    let v = Array.map snd v
     data.addColumn(keyType, v.[0].keyName) |> ignore
     for i in 0 .. v.Length - 1 do
       data.addColumn("number", v.[i].seriesName) |> ignore

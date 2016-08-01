@@ -18,6 +18,15 @@ module Parser =
   let nothingAfterDot rng =
     { Number = 24; Range = rng; Message = "Call chain should not end with ." }
 
+  let nothingAfterComma rng =
+    { Number = 25; Range = rng; Message = "List should not end with ," }
+
+  let missingClosingSquare rng =
+    { Number = 26; Range = rng; Message = "Missing closing ]" }
+
+  let incompleteRange rng =
+    { Number = 27; Range = rng; Message = "Incomeplete range expression" }
+
 module TypeChecker = 
   let private formatMembers members = 
     [ for Member.Method(name=n) | Member.Property(name=n) in members -> n ] 
@@ -35,8 +44,14 @@ module TypeChecker =
     { Number = 33; Range = rng 
       Message = sprintf "Could not find method '%s' in the list '%s'." name (formatMembers members) }
 
+  let mismatchingListTypes rng = 
+    { Number = 33; Range = rng 
+      Message = "The types of list elements do not match." }
+
   let notAnObject rng typ = 
     { Number = 34; Range = rng 
-      Message = sprintf "Type is not an object." }
+      Message = "Type is not an object." }
     
-
+  let cannotUnityTypes rng = 
+    { Number = 35; Range = rng 
+      Message = "Cannot unify types" }

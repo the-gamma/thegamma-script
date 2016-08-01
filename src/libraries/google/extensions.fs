@@ -1,4 +1,5 @@
-[<AutoOpen>]
+// AUTO-GENERATED - DO NOT EDIT
+[<ReflectedDefinition;AutoOpen>]
 module TheGamma.GoogleCharts.Extensions
 
 open System
@@ -10,7 +11,7 @@ type Geo =
   { data : ChartData; typeName : string; 
     options : GeoChartOptions }
   interface Chart
-  member x.show() = Helpers.showChart(x)
+  member x.show(outputId) = Helpers.showChart x outputId
   member x.set(?backgroundColor:obj,?datalessRegionColor:string,?displayMode:string,?enableRegionInteractivity:bool,?height:float,?keepAspectRatio:bool,?region:string,?markerOpacity:float,?resolution:string,?width:float) = 
     let o = x.options
     let newOptions = { x.options with backgroundColor = right o "backgroundColor" backgroundColor; datalessRegionColor = right o "datalessRegionColor" datalessRegionColor; displayMode = right o "displayMode" displayMode; enableRegionInteractivity = right o "enableRegionInteractivity" enableRegionInteractivity; height = right o "height" height; keepAspectRatio = right o "keepAspectRatio" keepAspectRatio; region = right o "region" region; markerOpacity = right o "markerOpacity" markerOpacity; resolution = right o "resolution" resolution; width = right o "width" width }
@@ -39,7 +40,7 @@ type Scatter =
   { data : ChartData; typeName : string; 
     options : ScatterChartOptions }
   interface Chart
-  member x.show() = Helpers.showChart(x)
+  member x.show(outputId) = Helpers.showChart x outputId
   member x.set(?aggregationTarget:string,?axisTitlesPosition:string,?backgroundColor:obj,?colors:seq<string>,?curveType:string,?dataOpacity:float,?enableInteractivity:bool,?fontSize:float,?fontName:string,?forceIFrame:bool,?height:float,?lineWidth:float,?pointSize:float,?selectionMode:string,?series:obj,?theme:string,?title:string,?titlePosition:string,?width:float) = 
     let o = x.options
     let newOptions = { x.options with aggregationTarget = right o "aggregationTarget" aggregationTarget; axisTitlesPosition = right o "axisTitlesPosition" axisTitlesPosition; backgroundColor = right o "backgroundColor" backgroundColor; colors = right o "colors" (Option.map Array.ofSeq colors); curveType = right o "curveType" curveType; dataOpacity = right o "dataOpacity" dataOpacity; enableInteractivity = right o "enableInteractivity" enableInteractivity; fontSize = right o "fontSize" fontSize; fontName = right o "fontName" fontName; forceIFrame = right o "forceIFrame" forceIFrame; height = right o "height" height; lineWidth = right o "lineWidth" lineWidth; pointSize = right o "pointSize" pointSize; selectionMode = right o "selectionMode" selectionMode; series = right o "series" series; theme = right o "theme" theme; title = right o "title" title; titlePosition = right o "titlePosition" titlePosition; width = right o "width" width }
@@ -87,7 +88,7 @@ type Column =
   { data : ChartData; typeName : string; 
     options : ColumnChartOptions }
   interface Chart
-  member x.show() = Helpers.showChart(x)
+  member x.show(outputId) = Helpers.showChart x outputId
   member x.set(?aggregationTarget:string,?axisTitlesPosition:string,?backgroundColor:obj,?colors:seq<string>,?enableInteractivity:bool,?focusTarget:string,?fontSize:float,?fontName:string,?height:float,?isStacked:bool,?reverseCategories:bool,?selectionMode:string,?series:obj,?theme:string,?title:string,?titlePosition:string,?vAxes:obj,?width:float) = 
     let o = x.options
     let newOptions = { x.options with aggregationTarget = right o "aggregationTarget" aggregationTarget; axisTitlesPosition = right o "axisTitlesPosition" axisTitlesPosition; backgroundColor = right o "backgroundColor" backgroundColor; colors = right o "colors" (Option.map Array.ofSeq colors); enableInteractivity = right o "enableInteractivity" enableInteractivity; focusTarget = right o "focusTarget" focusTarget; fontSize = right o "fontSize" fontSize; fontName = right o "fontName" fontName; height = right o "height" height; isStacked = right o "isStacked" isStacked; reverseCategories = right o "reverseCategories" reverseCategories; selectionMode = right o "selectionMode" selectionMode; series = right o "series" series; theme = right o "theme" theme; title = right o "title" title; titlePosition = right o "titlePosition" titlePosition; vAxes = right o "vAxes" vAxes; width = right o "width" width }
@@ -128,7 +129,7 @@ type Line =
   { data : ChartData; typeName : string; 
     options : LineChartOptions }
   interface Chart
-  member x.show() = Helpers.showChart(x)
+  member x.show(outputId) = Helpers.showChart x outputId
   member x.set(?aggregationTarget:string,?axisTitlesPosition:string,?backgroundColor:obj,?colors:seq<string>,?curveType:string,?dataOpacity:float,?enableInteractivity:bool,?focusTarget:string,?fontSize:float,?fontName:string,?height:float,?interpolateNulls:bool,?lineWidth:float,?orientation:string,?pointSize:float,?reverseCategories:bool,?selectionMode:string,?series:obj,?theme:string,?title:string,?titlePosition:string,?vAxes:obj,?width:float) = 
     let o = x.options
     let newOptions = { x.options with aggregationTarget = right o "aggregationTarget" aggregationTarget; axisTitlesPosition = right o "axisTitlesPosition" axisTitlesPosition; backgroundColor = right o "backgroundColor" backgroundColor; colors = right o "colors" (Option.map Array.ofSeq colors); curveType = right o "curveType" curveType; dataOpacity = right o "dataOpacity" dataOpacity; enableInteractivity = right o "enableInteractivity" enableInteractivity; focusTarget = right o "focusTarget" focusTarget; fontSize = right o "fontSize" fontSize; fontName = right o "fontName" fontName; height = right o "height" height; interpolateNulls = right o "interpolateNulls" interpolateNulls; lineWidth = right o "lineWidth" lineWidth; orientation = right o "orientation" orientation; pointSize = right o "pointSize" pointSize; reverseCategories = right o "reverseCategories" reverseCategories; selectionMode = right o "selectionMode" selectionMode; series = right o "series" series; theme = right o "theme" theme; title = right o "title" title; titlePosition = right o "titlePosition" titlePosition; vAxes = right o "vAxes" vAxes; width = right o "width" width }
@@ -173,7 +174,7 @@ type Bar =
   { data : ChartData; typeName : string; 
     options : BarChartOptions }
   interface Chart
-  member x.show() = Helpers.showChart(x)
+  member x.show(outputId) = Helpers.showChart x outputId
   member x.set(?aggregationTarget:string,?axisTitlesPosition:string,?backgroundColor:obj,?colors:seq<string>,?dataOpacity:float,?enableInteractivity:bool,?focusTarget:string,?fontSize:float,?fontName:string,?hAxes:obj,?height:float,?isStacked:bool,?reverseCategories:bool,?series:obj,?theme:string,?title:string,?titlePosition:string,?vAxes:obj,?width:float) = 
     let o = x.options
     let newOptions = { x.options with aggregationTarget = right o "aggregationTarget" aggregationTarget; axisTitlesPosition = right o "axisTitlesPosition" axisTitlesPosition; backgroundColor = right o "backgroundColor" backgroundColor; colors = right o "colors" (Option.map Array.ofSeq colors); dataOpacity = right o "dataOpacity" dataOpacity; enableInteractivity = right o "enableInteractivity" enableInteractivity; focusTarget = right o "focusTarget" focusTarget; fontSize = right o "fontSize" fontSize; fontName = right o "fontName" fontName; hAxes = right o "hAxes" hAxes; height = right o "height" height; isStacked = right o "isStacked" isStacked; reverseCategories = right o "reverseCategories" reverseCategories; series = right o "series" series; theme = right o "theme" theme; title = right o "title" title; titlePosition = right o "titlePosition" titlePosition; vAxes = right o "vAxes" vAxes; width = right o "width" width }
@@ -214,7 +215,7 @@ type Histogram =
   { data : ChartData; typeName : string; 
     options : HistogramOptions }
   interface Chart
-  member x.show() = Helpers.showChart(x)
+  member x.show(outputId) = Helpers.showChart x outputId
   member x.set(?axisTitlesPosition:string,?backgroundColor:obj,?colors:seq<string>,?dataOpacity:float,?enableInteractivity:bool,?focusTarget:string,?fontSize:float,?fontName:string,?height:float,?interpolateNulls:bool,?isStacked:bool,?orientation:string,?reverseCategories:bool,?series:obj,?theme:string,?title:string,?titlePosition:string,?vAxes:obj,?width:float) = 
     let o = x.options
     let newOptions = { x.options with axisTitlesPosition = right o "axisTitlesPosition" axisTitlesPosition; backgroundColor = right o "backgroundColor" backgroundColor; colors = right o "colors" (Option.map Array.ofSeq colors); dataOpacity = right o "dataOpacity" dataOpacity; enableInteractivity = right o "enableInteractivity" enableInteractivity; focusTarget = right o "focusTarget" focusTarget; fontSize = right o "fontSize" fontSize; fontName = right o "fontName" fontName; height = right o "height" height; interpolateNulls = right o "interpolateNulls" interpolateNulls; isStacked = right o "isStacked" isStacked; orientation = right o "orientation" orientation; reverseCategories = right o "reverseCategories" reverseCategories; series = right o "series" series; theme = right o "theme" theme; title = right o "title" title; titlePosition = right o "titlePosition" titlePosition; vAxes = right o "vAxes" vAxes; width = right o "width" width }
@@ -259,7 +260,7 @@ type Area =
   { data : ChartData; typeName : string; 
     options : AreaChartOptions }
   interface Chart
-  member x.show() = Helpers.showChart(x)
+  member x.show(outputId) = Helpers.showChart x outputId
   member x.set(?aggregationTarget:string,?areaOpacity:float,?axisTitlesPosition:string,?backgroundColor:obj,?colors:seq<string>,?dataOpacity:float,?enableInteractivity:bool,?focusTarget:string,?fontSize:float,?fontName:string,?height:float,?interpolateNulls:bool,?isStacked:bool,?lineWidth:float,?orientation:string,?pointSize:float,?reverseCategories:bool,?selectionMode:string,?series:obj,?theme:string,?title:string,?titlePosition:string,?vAxes:obj,?width:float) = 
     let o = x.options
     let newOptions = { x.options with aggregationTarget = right o "aggregationTarget" aggregationTarget; areaOpacity = right o "areaOpacity" areaOpacity; axisTitlesPosition = right o "axisTitlesPosition" axisTitlesPosition; backgroundColor = right o "backgroundColor" backgroundColor; colors = right o "colors" (Option.map Array.ofSeq colors); dataOpacity = right o "dataOpacity" dataOpacity; enableInteractivity = right o "enableInteractivity" enableInteractivity; focusTarget = right o "focusTarget" focusTarget; fontSize = right o "fontSize" fontSize; fontName = right o "fontName" fontName; height = right o "height" height; interpolateNulls = right o "interpolateNulls" interpolateNulls; isStacked = right o "isStacked" isStacked; lineWidth = right o "lineWidth" lineWidth; orientation = right o "orientation" orientation; pointSize = right o "pointSize" pointSize; reverseCategories = right o "reverseCategories" reverseCategories; selectionMode = right o "selectionMode" selectionMode; series = right o "series" series; theme = right o "theme" theme; title = right o "title" title; titlePosition = right o "titlePosition" titlePosition; vAxes = right o "vAxes" vAxes; width = right o "width" width }
@@ -304,7 +305,7 @@ type Annotation =
   { data : ChartData; typeName : string; 
     options : AnnotationChartOptions }
   interface Chart
-  member x.show() = Helpers.showChart(x)
+  member x.show(outputId) = Helpers.showChart x outputId
   member x.set(?allowHtml:bool,?allValuesSuffix:string,?annotationsWidth:float,?colors:seq<string>,?dateFormat:string,?displayAnnotations:bool,?displayAnnotationsFilter:bool,?displayDateTimeBarSeparator:bool,?displayExactValues:bool,?displayLegendDots:bool,?displayLegendValues:bool,?displayRangeSelector:bool,?displayZoomButtons:bool,?fill:float,?legendPosition:string,?max:float,?min:float,?numberFormats:obj,?scaleColumns:seq<float>,?scaleFormat:string,?scaleType:string,?thickness:float,?zoomEndTime:DateTime,?zoomStartTime:DateTime) = 
     let o = x.options
     let newOptions = { x.options with allowHtml = right o "allowHtml" allowHtml; allValuesSuffix = right o "allValuesSuffix" allValuesSuffix; annotationsWidth = right o "annotationsWidth" annotationsWidth; colors = right o "colors" (Option.map Array.ofSeq colors); dateFormat = right o "dateFormat" dateFormat; displayAnnotations = right o "displayAnnotations" displayAnnotations; displayAnnotationsFilter = right o "displayAnnotationsFilter" displayAnnotationsFilter; displayDateTimeBarSeparator = right o "displayDateTimeBarSeparator" displayDateTimeBarSeparator; displayExactValues = right o "displayExactValues" displayExactValues; displayLegendDots = right o "displayLegendDots" displayLegendDots; displayLegendValues = right o "displayLegendValues" displayLegendValues; displayRangeSelector = right o "displayRangeSelector" displayRangeSelector; displayZoomButtons = right o "displayZoomButtons" displayZoomButtons; fill = right o "fill" fill; legendPosition = right o "legendPosition" legendPosition; max = right o "max" max; min = right o "min" min; numberFormats = right o "numberFormats" numberFormats; scaleColumns = right o "scaleColumns" (Option.map Array.ofSeq scaleColumns); scaleFormat = right o "scaleFormat" scaleFormat; scaleType = right o "scaleType" scaleType; thickness = right o "thickness" thickness; zoomEndTime = right o "zoomEndTime" zoomEndTime; zoomStartTime = right o "zoomStartTime" zoomStartTime }
@@ -313,7 +314,7 @@ type SteppedArea =
   { data : ChartData; typeName : string; 
     options : SteppedAreaChartOptions }
   interface Chart
-  member x.show() = Helpers.showChart(x)
+  member x.show(outputId) = Helpers.showChart x outputId
   member x.set(?aggregationTarget:string,?areaOpacity:float,?axisTitlesPosition:string,?backgroundColor:obj,?colors:seq<string>,?connectSteps:bool,?enableInteractivity:bool,?focusTarget:string,?fontSize:float,?fontName:string,?height:float,?interpolateNulls:bool,?isStacked:bool,?reverseCategories:bool,?selectionMode:string,?series:obj,?theme:string,?title:string,?titlePosition:string,?vAxes:obj,?width:float) = 
     let o = x.options
     let newOptions = { x.options with aggregationTarget = right o "aggregationTarget" aggregationTarget; areaOpacity = right o "areaOpacity" areaOpacity; axisTitlesPosition = right o "axisTitlesPosition" axisTitlesPosition; backgroundColor = right o "backgroundColor" backgroundColor; colors = right o "colors" (Option.map Array.ofSeq colors); connectSteps = right o "connectSteps" connectSteps; enableInteractivity = right o "enableInteractivity" enableInteractivity; focusTarget = right o "focusTarget" focusTarget; fontSize = right o "fontSize" fontSize; fontName = right o "fontName" fontName; height = right o "height" height; interpolateNulls = right o "interpolateNulls" interpolateNulls; isStacked = right o "isStacked" isStacked; reverseCategories = right o "reverseCategories" reverseCategories; selectionMode = right o "selectionMode" selectionMode; series = right o "series" series; theme = right o "theme" theme; title = right o "title" title; titlePosition = right o "titlePosition" titlePosition; vAxes = right o "vAxes" vAxes; width = right o "width" width }
@@ -350,7 +351,7 @@ type Pie =
   { data : ChartData; typeName : string; 
     options : PieChartOptions }
   interface Chart
-  member x.show() = Helpers.showChart(x)
+  member x.show(outputId) = Helpers.showChart x outputId
   member x.set(?backgroundColor:obj,?colors:seq<string>,?enableInteractivity:bool,?fontSize:float,?fontName:string,?height:float,?is3D:bool,?pieHole:float,?pieSliceBorderColor:string,?pieSliceText:string,?pieStartAngle:float,?reverseCategories:bool,?pieResidueSliceColor:string,?pieResidueSliceLabel:string,?slices:obj,?sliceVisibilityThreshold:float,?title:string,?width:float) = 
     let o = x.options
     let newOptions = { x.options with backgroundColor = right o "backgroundColor" backgroundColor; colors = right o "colors" (Option.map Array.ofSeq colors); enableInteractivity = right o "enableInteractivity" enableInteractivity; fontSize = right o "fontSize" fontSize; fontName = right o "fontName" fontName; height = right o "height" height; is3D = right o "is3D" is3D; pieHole = right o "pieHole" pieHole; pieSliceBorderColor = right o "pieSliceBorderColor" pieSliceBorderColor; pieSliceText = right o "pieSliceText" pieSliceText; pieStartAngle = right o "pieStartAngle" pieStartAngle; reverseCategories = right o "reverseCategories" reverseCategories; pieResidueSliceColor = right o "pieResidueSliceColor" pieResidueSliceColor; pieResidueSliceLabel = right o "pieResidueSliceLabel" pieResidueSliceLabel; slices = right o "slices" slices; sliceVisibilityThreshold = right o "sliceVisibilityThreshold" sliceVisibilityThreshold; title = right o "title" title; width = right o "width" width }
@@ -379,7 +380,7 @@ type Bubble =
   { data : ChartData; typeName : string; 
     options : BubbleChartOptions }
   interface Chart
-  member x.show() = Helpers.showChart(x)
+  member x.show(outputId) = Helpers.showChart x outputId
   member x.set(?axisTitlesPosition:string,?backgroundColor:obj,?colors:seq<string>,?enableInteractivity:bool,?fontSize:float,?fontName:string,?forceIFrame:bool,?height:float,?selectionMode:string,?series:obj,?sortBubblesBySize:bool,?theme:string,?title:string,?titlePosition:string,?width:float) = 
     let o = x.options
     let newOptions = { x.options with axisTitlesPosition = right o "axisTitlesPosition" axisTitlesPosition; backgroundColor = right o "backgroundColor" backgroundColor; colors = right o "colors" (Option.map Array.ofSeq colors); enableInteractivity = right o "enableInteractivity" enableInteractivity; fontSize = right o "fontSize" fontSize; fontName = right o "fontName" fontName; forceIFrame = right o "forceIFrame" forceIFrame; height = right o "height" height; selectionMode = right o "selectionMode" selectionMode; series = right o "series" series; sortBubblesBySize = right o "sortBubblesBySize" sortBubblesBySize; theme = right o "theme" theme; title = right o "title" title; titlePosition = right o "titlePosition" titlePosition; width = right o "width" width }
@@ -432,7 +433,7 @@ type TreeMap =
   { data : ChartData; typeName : string; 
     options : TreeMapOptions }
   interface Chart
-  member x.show() = Helpers.showChart(x)
+  member x.show(outputId) = Helpers.showChart x outputId
   member x.set(?fontColor:string,?fontFamily:string,?fontSize:float,?forceIFrame:bool,?headerColor:string,?headerHeight:float,?headerHighlightColor:string,?hintOpacity:float,?maxColor:string,?maxDepth:float,?maxHighlightColor:string,?maxPostDepth:float,?maxColorValue:float,?midColor:string,?midHighlightColor:string,?minColor:string,?minHighlightColor:string,?minColorValue:float,?showScale:bool,?showTooltips:bool,?title:string,?useWeightedAverageForAggregation:bool) = 
     let o = x.options
     let newOptions = { x.options with fontColor = right o "fontColor" fontColor; fontFamily = right o "fontFamily" fontFamily; fontSize = right o "fontSize" fontSize; forceIFrame = right o "forceIFrame" forceIFrame; headerColor = right o "headerColor" headerColor; headerHeight = right o "headerHeight" headerHeight; headerHighlightColor = right o "headerHighlightColor" headerHighlightColor; hintOpacity = right o "hintOpacity" hintOpacity; maxColor = right o "maxColor" maxColor; maxDepth = right o "maxDepth" maxDepth; maxHighlightColor = right o "maxHighlightColor" maxHighlightColor; maxPostDepth = right o "maxPostDepth" maxPostDepth; maxColorValue = right o "maxColorValue" maxColorValue; midColor = right o "midColor" midColor; midHighlightColor = right o "midHighlightColor" midHighlightColor; minColor = right o "minColor" minColor; minHighlightColor = right o "minHighlightColor" minHighlightColor; minColorValue = right o "minColorValue" minColorValue; showScale = right o "showScale" showScale; showTooltips = right o "showTooltips" showTooltips; title = right o "title" title; useWeightedAverageForAggregation = right o "useWeightedAverageForAggregation" useWeightedAverageForAggregation }
@@ -449,7 +450,7 @@ type Table =
   { data : ChartData; typeName : string; 
     options : TableOptions }
   interface Chart
-  member x.show() = Helpers.showChart(x)
+  member x.show(outputId) = Helpers.showChart x outputId
   member x.set(?allowHtml:bool,?alternatingRowStyle:bool,?firstRowNumber:float,?height:string,?page:string,?pageSize:float,?rtlTable:bool,?scrollLeftStartPosition:float,?showRowNumber:bool,?sort:string,?sortAscending:bool,?sortColumn:float,?startPage:float,?width:string) = 
     let o = x.options
     let newOptions = { x.options with allowHtml = right o "allowHtml" allowHtml; alternatingRowStyle = right o "alternatingRowStyle" alternatingRowStyle; firstRowNumber = right o "firstRowNumber" firstRowNumber; height = right o "height" height; page = right o "page" page; pageSize = right o "pageSize" pageSize; rtlTable = right o "rtlTable" rtlTable; scrollLeftStartPosition = right o "scrollLeftStartPosition" scrollLeftStartPosition; showRowNumber = right o "showRowNumber" showRowNumber; sort = right o "sort" sort; sortAscending = right o "sortAscending" sortAscending; sortColumn = right o "sortColumn" sortColumn; startPage = right o "startPage" startPage; width = right o "width" width }
@@ -462,7 +463,7 @@ type Timeline =
   { data : ChartData; typeName : string; 
     options : TimelineOptions }
   interface Chart
-  member x.show() = Helpers.showChart(x)
+  member x.show(outputId) = Helpers.showChart x outputId
   member x.set(?avoidOverlappingGridLines:bool,?backgroundColor:obj,?colors:seq<string>,?enableInteractivity:bool,?forceIFrame:bool,?height:float,?width:float) = 
     let o = x.options
     let newOptions = { x.options with avoidOverlappingGridLines = right o "avoidOverlappingGridLines" avoidOverlappingGridLines; backgroundColor = right o "backgroundColor" backgroundColor; colors = right o "colors" (Option.map Array.ofSeq colors); enableInteractivity = right o "enableInteractivity" enableInteractivity; forceIFrame = right o "forceIFrame" forceIFrame; height = right o "height" height; width = right o "width" width }
@@ -475,7 +476,7 @@ type Candlestick =
   { data : ChartData; typeName : string; 
     options : CandlestickChartOptions }
   interface Chart
-  member x.show() = Helpers.showChart(x)
+  member x.show(outputId) = Helpers.showChart x outputId
   member x.set(?aggregationTarget:string,?axisTitlesPosition:string,?backgroundColor:obj,?colors:seq<string>,?enableInteractivity:bool,?focusTarget:string,?fontSize:float,?fontName:string,?height:float,?orientation:string,?reverseCategories:bool,?selectionMode:string,?series:obj,?theme:string,?title:string,?titlePosition:string,?vAxes:obj,?width:float) = 
     let o = x.options
     let newOptions = { x.options with aggregationTarget = right o "aggregationTarget" aggregationTarget; axisTitlesPosition = right o "axisTitlesPosition" axisTitlesPosition; backgroundColor = right o "backgroundColor" backgroundColor; colors = right o "colors" (Option.map Array.ofSeq colors); enableInteractivity = right o "enableInteractivity" enableInteractivity; focusTarget = right o "focusTarget" focusTarget; fontSize = right o "fontSize" fontSize; fontName = right o "fontName" fontName; height = right o "height" height; orientation = right o "orientation" orientation; reverseCategories = right o "reverseCategories" reverseCategories; selectionMode = right o "selectionMode" selectionMode; series = right o "series" series; theme = right o "theme" theme; title = right o "title" title; titlePosition = right o "titlePosition" titlePosition; vAxes = right o "vAxes" vAxes; width = right o "width" width }

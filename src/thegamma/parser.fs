@@ -6,7 +6,6 @@ module TheGamma.Parser
 open TheGamma
 open TheGamma.Parsec
 
-let anySpace = zeroOrMore (pred (fun t -> match t.Token with TokenKind.White _ -> true | _ -> false))
 let anyWhite = zeroOrMore (pred (fun t -> match t.Token with TokenKind.Newline | TokenKind.White _ -> true | _ -> false))
 
 let anyUntilLineEnd = Parser(fun input ->
@@ -14,11 +13,16 @@ let anyUntilLineEnd = Parser(fun input ->
     match input with
     | offset, { Token = TokenKind.Newline }::rest -> Some((offset+1, rest), [], ())
     | offset, tok::rest -> loop (offset+1, rest)
-    | _, [] -> None
+    | offset, [] -> Some((offset, []), [], ())
   loop input)
 
 // Parsing of simple expressions that correspond to tokens
 let token tok = pred (fun t -> t.Token = tok)
+
+let optionalOrError err p = 
+  range (optional p) |> bind (function
+    | _, Some v -> unit (Some v)
+    | rng, None -> error (err rng) <*>> unit None)
 
 let separated sep p =
   p <*> zeroOrMore (sep <*> p)
@@ -38,7 +42,7 @@ let ident =
     | TokenKind.Ident id
     | TokenKind.QIdent id -> Some(id)
     | _ -> None)) |> map (fun (rng, id) -> { Name = id; Range = rng })
-  
+
 let expressionSetter, expression = slot()
 
 let argument = 
@@ -96,13 +100,65 @@ let invocationChain =
     | [] -> 
         failwith "Unexpected: Parsed empty chain")
 
-let primitive = 
+
+let expressionOrNothing = 
+  map Some expression <|>
+  // Recovery: there is nothing after ',' in a list
+  ( range (unit ()) |> bind (fun (rng, _) ->
+      error (Errors.Parser.nothingAfterComma rng) <*>>
+      unit None) )
+
+let list =
+  anyWhite <*>> range (token TokenKind.LSquare <*>>
+    separatedThen (anyWhite <*> token TokenKind.Comma) (map Some expression) expressionOrNothing <<*> 
+    anyWhite <<*> (optionalOrError Errors.Parser.missingClosingSquare (token TokenKind.RSquare)))
+  |> map (fun (rng, items) ->
+    { Range = rng; Type = (); Expr = ExprKind.List(List.choose id items) } )
+
+let lambda = 
+  anyWhite <*>> 
+    range (token TokenKind.Fun <*>> anyWhite <*>> ident <*> 
+      (anyWhite <*>> token TokenKind.Arrow <*>> anyWhite <*>> expression))
+  |> map (fun (rng, (var, body)) -> 
+    { Range = rng; Type = (); Expr = ExprKind.Function(var, body) })
+
+let number = 
   anyWhite <*>> choose (function 
     | { Token = TokenKind.Number(_, n); Range = rng } -> 
         Some { Expr = ExprKind.Number(n); Range = rng; Type = () }
+    | _ -> None)
+
+let string = 
+  anyWhite <*>> choose (function 
+    | { Token = TokenKind.String(n); Range = rng } -> 
+        Some { Expr = ExprKind.String(n); Range = rng; Type = () }
+    | _ -> None)
+
+let boolean = 
+  anyWhite <*>> choose (function 
     | { Token = TokenKind.Boolean(b); Range = rng } -> 
         Some { Expr = ExprKind.Boolean(b); Range = rng; Type = () }
     | _ -> None)
+
+let listrange =
+  anyWhite <*>> 
+    range (token TokenKind.LSquare <*>> anyWhite <*>>
+      number <<*> anyWhite <<*> token TokenKind.To <<*> anyWhite <*>
+          optional (number <<*> anyWhite <*>
+            optional (token TokenKind.By <*>> anyWhite <*>>
+              optional (number <<*> anyWhite))) <<*>
+          optionalOrError Errors.Parser.missingClosingSquare (token TokenKind.RSquare))
+  |> bind (fun (rng, e) ->
+    let getNum = function { Expr = ExprKind.Number n } -> n | _ -> failwith "expected number"
+    let asNum n = { Expr = ExprKind.Number n; Type = (); Range = rng }
+    match e with
+    | efrom, Some (eto, Some (Some (estep))) ->         
+        unit { Type = (); Range = rng; Expr = ExprKind.List(List.map asNum [getNum efrom .. getNum estep .. getNum eto]) }
+    | efrom, Some (eto, None) ->         
+        unit { Type = (); Range = rng; Expr = ExprKind.List(List.map asNum [getNum efrom .. getNum eto]) }
+    | _ ->
+        error (Errors.Parser.incompleteRange rng) <*>>
+        unit { Type = (); Range = rng; Expr = ExprKind.List([asNum 0.0]) })
 
 let declaration = 
   anyWhite <*>> token TokenKind.Let <*>> ident <<*> anyWhite <<*> token TokenKind.Equals <*> expression
@@ -115,12 +171,17 @@ let letBinding =
 expressionSetter.Set
   ( anyWhite <*>> 
     ( invocationChain <|> 
-      primitive ) )
+      listrange <|>
+      list <|>
+      lambda <|>
+      number <|>
+      string <|>
+      boolean ) )
 
 let program =
   sequenceChoices
     [ expression |> map (fun e -> { Command = CommandKind.Expr e; Range = e.Range })
-      letBinding ]
+      letBinding ] <<*> anyWhite
   |> range
   |> map (fun (rng, cmds) -> { Body = cmds; Range = rng })
 

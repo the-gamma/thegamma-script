@@ -3,6 +3,10 @@
 open TheGamma
 open Fable.Extensions
 
+// ------------------------------------------------------------------------------------------------
+// Type checking
+// ------------------------------------------------------------------------------------------------
+
 type CheckingContext = 
   { Variables : Map<string, Type> }
 
@@ -11,6 +15,40 @@ type CheckingResult =
 
 let addError e ctx = { ctx with Errors = e::ctx.Errors }
 let addVariable k v ctx = { ctx with Variables = Map.add k v ctx.Variables }
+
+let rec listsEqual l1 l2 f = 
+  match l1, l2 with
+  | [], [] -> true
+  | x::xs, y::ys when f x y -> listsEqual xs ys f
+  | _ -> false 
+
+let rec arraysEqual (l1:_[]) (l2:_[]) f = 
+  let rec loop i =
+    if i = l1.Length && i = l2.Length then true
+    elif i < l1.Length && i < l2.Length then 
+      f (l1.[i]) (l2.[i]) && loop (i+1)
+    else false
+  loop 0
+
+let rec typesEqual t1 t2 = 
+  match t1, t2 with
+  | Type.Any, Type.Any -> true
+  | Type.Delayed(g1, _), Type.Delayed(g2, _) -> g1 = g2
+  | Type.Function(a1, r1), Type.Function(a2, r2) -> 
+      listsEqual (r1::a1) (r2::a2) typesEqual
+  | Type.Object(o1), Type.Object(o2) -> 
+      arraysEqual o1.Members o2.Members (fun m1 m2 ->
+          match m1, m2 with 
+          | Member.Property(n1, t1, s1, _), Member.Property(n2, t2, s2, _) -> n1 = n2 && s1 = s2 && typesEqual t1 t2
+          | Member.Method(n1, t1, a1, r1, _), Member.Method(n2, t2, a2, r2, _) -> 
+              n1 = n2 && t1 = t2 && typesEqual r1 r2 && 
+                listsEqual a1 a2 (fun (s1, b1, t1) (s2, b2, t2) -> 
+                  s1 = s2 && b1 = b2 && typesEqual t1 t2)
+          | _ -> false)
+  | Type.Parameter n1, Type.Parameter n2 -> n1 = n2
+  | Type.Primitive n1, Type.Primitive n2 -> n1 = n2
+  | Type.Unit, Type.Unit -> true
+  | _ -> false
 
 type ObjectMembers = 
   | Members of Member[]
@@ -26,10 +64,48 @@ let rec getObjectMembers t = async {
   | Type.Unit
   | Type.Parameter _
   | Type.Function _
+  | Type.List _
   | Type.Primitive _ -> return NotAnObject
   | Type.Any _ -> return SilentError }
 
-let rec typeCheckExpr ctx res (expr:Expr<unit>) = async {
+let rec unifyTypes assigns ts1 ts2 =
+  match ts1, ts2 with
+  | t1::ts1, t2::ts2 when typesEqual t1 t2 -> unifyTypes assigns ts1 ts2
+  | Type.Any::ts1, t::ts2 | t::ts1, Type.Any::ts2 -> unifyTypes assigns ts1 ts2
+  | (Type.Parameter n)::ts1, t::ts2 | t::ts1, (Type.Parameter n)::ts2 -> 
+      unifyTypes ((n, t)::assigns) ts1 ts2
+  | Type.Function(tis1, to1)::ts1, Type.Function(tis2, to2)::ts2 ->
+      unifyTypes assigns (to1::tis1 @ ts1) (to2::tis2 @ ts2)
+  | Type.List(t1)::ts1, Type.List(t2)::ts2 -> 
+      unifyTypes assigns (t1::ts1) (t2::ts2)
+  | [], [] -> 
+      (fun res rng -> assigns, res)
+  | ts1, ts2 -> 
+      (fun res rng ->
+          Log.trace("typechecker", "Cannot unify types: %O and %O", Array.ofList ts1, Array.ofList ts2)
+          assigns, addError (Errors.TypeChecker.cannotUnityTypes rng) res)
+
+let rec substituteTypes assigns t =
+  match t with
+  | Type.Parameter s when Map.containsKey s assigns -> assigns.[s]
+  | Type.Parameter _ | Type.Any | Type.Primitive _ | Type.Unit -> t
+  | Type.Function(ts, t) -> Type.Function(List.map (substituteTypes assigns) ts, substituteTypes assigns t)
+  | Type.List(t) -> Type.List(substituteTypes assigns t)
+  | Type.Object(o) ->
+      let members = o.Members |> Array.map (function
+        | Member.Method(n,tp,ars,t,e) -> 
+            let nars = ars |> List.map (fun (n,o,t) -> n, o, substituteTypes assigns t)
+            Member.Method(n,tp,nars,substituteTypes assigns t,e)
+        | Member.Property(n,t,s,e) -> Member.Property(n,substituteTypes assigns t,s,e))
+      Type.Object({ o with Members = members })
+  | Type.Delayed(g, f) -> 
+      let f = 
+        { new Future<Type> with 
+            member x.Then(g) =             
+              f.Then(fun t -> g (substituteTypes assigns t)) }
+      Type.Delayed(g, f)
+
+let rec typeCheckExpr ctx ctxTyp res (expr:Expr<unit>) = async {
   match expr.Expr with
   | ExprKind.Unit ->
       return { Expr = ExprKind.Unit; Type = Type.Unit; Range = expr.Range }, res
@@ -43,11 +119,34 @@ let rec typeCheckExpr ctx res (expr:Expr<unit>) = async {
         res |> addError (Errors.TypeChecker.variableNotInScope expr.Range v.Name)
   | ExprKind.Number n -> 
       return { Expr = ExprKind.Number n; Type = Type.Primitive "num"; Range = expr.Range }, res
+  | ExprKind.String s -> 
+      return { Expr = ExprKind.String s; Type = Type.Primitive "string"; Range = expr.Range }, res
   | ExprKind.Boolean b -> 
       return { Expr = ExprKind.Boolean b; Type = Type.Primitive "bool"; Range = expr.Range }, res
 
+  | ExprKind.Function(n, e) ->
+      let varTy = ctxTyp |> Option.bind (function
+        | Type.Function([ty], _) -> Some ty | _ -> None)
+      let varTy = defaultArg varTy Type.Any
+      Log.trace("typechecker", "function: '%s -> ...' in context: %O", n.Name, varTy)
+      let! e, res = typeCheckExpr (addVariable n.Name varTy ctx) None res e
+      return { Expr = ExprKind.Function(n, e); Type = Type.Function([varTy], e.Type); Range = expr.Range }, res
+
+  | ExprKind.List(els) ->
+      let! res, els =  els |> Async.foldMap (typeCheckExpr ctx None) res
+      let mutable tys = []
+      for el in els do
+        let known = tys |> List.exists (typesEqual el.Type)
+        if not known then tys <- el.Type::tys
+      let ty, res =
+        match tys with
+        | [] -> Type.Any, res // TODO: Something clever
+        | [ty] -> ty, res
+        | ty::_ -> ty, res |> addError (Errors.TypeChecker.mismatchingListTypes expr.Range)
+      return { Expr = ExprKind.List els; Type = Type.List(ty); Range = expr.Range }, res
+
   | ExprKind.Property(e, name) ->
-      let! typed, res = typeCheckExpr ctx res e
+      let! typed, res = typeCheckExpr ctx None res e
       let! members = getObjectMembers typed.Type 
       let resTyp, res = 
         match members with
@@ -60,39 +159,55 @@ let rec typeCheckExpr ctx res (expr:Expr<unit>) = async {
       return { Expr = ExprKind.Property(typed, name); Type = resTyp; Range = expr.Range }, res
 
   | ExprKind.Call(e, name, args) ->
-      let! typed, res = typeCheckExpr ctx res e
+      let! typed, res = typeCheckExpr ctx None res e
       let! members = getObjectMembers typed.Type 
 
-      let! res, typedArgs = 
-        args |> Async.foldMap (fun res arg -> async {
-          let! t, res = typeCheckExpr ctx res arg.Value
-          return res, { Name = arg.Name; Value = t } }) res
+      let checkArguments argTys = 
+        let argTys = match argTys with Some tys -> List.map Some tys | _ -> List.map (fun _ -> None) args
+        List.zip args argTys |> Async.foldMap (fun res (arg, argTy) -> async {
+          let! t, res = typeCheckExpr ctx argTy res arg.Value
+          return { Name = arg.Name; Value = t }, res }) res
 
-      let resTyp, typedArgs, res = 
+      let! resTyp, typedArgs, res = async {
         match members with
-        | ObjectMembers.Members members ->
-            match members |> Seq.tryPick (function Member.Method(name=n; arguments=args; typ=r) when n = name.Name -> Some(r, args) | _ -> None) with
-            | Some(resTyp, args) -> 
+        | ObjectMembers.Members members -> 
+            match members |> Seq.tryPick (function Member.Method(name=n; typars=tp; arguments=args; typ=r) when n = name.Name -> Some(tp, r, args) | _ -> None) with
+            | Some(tp, resTyp, pars) -> 
                 // TODO: check arguments
+                let! res, typedArgs = checkArguments (pars |> List.map (fun (_, _, t) -> t) |> Some)
                 let typedArgs = 
-                  List.zip args typedArgs |> List.map (fun ((n, _, _), ta) ->
+                  List.zip pars typedArgs |> List.map (fun ((n, _, _), ta) ->
                      { ta with Name = Some { Name = n; Range = ta.Value.Range }})
-                resTyp, typedArgs, res
-            | _ -> Type.Any, [], res |> addError (Errors.TypeChecker.methodMissing name.Range name.Name members)
-        | ObjectMembers.SilentError -> Type.Any, typedArgs, res
-        | ObjectMembers.NotAnObject -> Type.Any, typedArgs, res |> addError (Errors.TypeChecker.notAnObject e.Range typed.Type)
 
-      
+                let parTys = pars |> List.map (fun (_, _, t) -> t)
+                let argTys = typedArgs |> List.map (fun a -> a.Value.Type)
+                let assigns, res = unifyTypes [] parTys argTys res expr.Range
+
+                Log.trace("typechecker", "call: tyargs: %s, assigns: %O", String.concat "," tp, Array.ofList assigns)
+                let resTyp = substituteTypes (Map.ofList assigns) resTyp
+                Log.trace("typechecker", "call: result type: %O", resTyp)
+                return resTyp, typedArgs, res 
+            | _ -> 
+                let! res, _ = checkArguments None
+                let res = res |> addError (Errors.TypeChecker.methodMissing name.Range name.Name members)
+                return Type.Any, [], res
+        | ObjectMembers.SilentError -> 
+            let! res, typedArgs = checkArguments None
+            return Type.Any, typedArgs, res
+        | ObjectMembers.NotAnObject -> 
+            let! res, typedArgs = checkArguments None
+            return Type.Any, typedArgs, res |> addError (Errors.TypeChecker.notAnObject e.Range typed.Type) }
+
       return { Expr = ExprKind.Call(typed, name, typedArgs); Type = resTyp; Range = expr.Range }, res }
 
 let rec typeCheckCmd ctx res cmds = async {
   match cmds with
   | ({ Command = CommandKind.Let(name, expr) } as cmd)::cmds ->
-      let! typed, res = typeCheckExpr ctx res expr
+      let! typed, res = typeCheckExpr ctx None res expr
       let! cmds, res = typeCheckCmd (addVariable name.Name typed.Type ctx) res cmds
       return { Command = CommandKind.Let(name, typed); Range = cmd.Range}::cmds, res
   | ({ Command = CommandKind.Expr(expr) } as cmd)::cmds ->      
-      let! typed, res = typeCheckExpr ctx res expr
+      let! typed, res = typeCheckExpr ctx None res expr
       let! cmds, res = typeCheckCmd ctx res cmds
       return { Command = CommandKind.Expr(typed); Range = cmd.Range}::cmds, res
   | [] -> 
@@ -101,6 +216,94 @@ let rec typeCheckCmd ctx res cmds = async {
 let typeCheckProgram ctx res prog = async {
   let! cmds, res = typeCheckCmd ctx res prog.Body
   return { Body = cmds; Range = prog.Range }, res }
+
+
+// ------------------------------------------------------------------------------------------------
+// User friendly entry point
+// ------------------------------------------------------------------------------------------------
+
+open TheGamma.AstOperations
+
+let needsEscaping (s:string) = 
+  (s.[0] >= '0' && s.[0] <= '9') ||
+  (s.ToCharArray() |> Array.exists (fun c -> not ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) ))
+
+let escapeIdent s = 
+  if needsEscaping s then "'" + s + "'" else s
+
+let mapNameRanges f (n:Name) = 
+  { n  with Range = f n.Range }
+
+let rec mapExprRanges f expr = 
+  match expr.Expr with  
+  | ExprLeaf -> { expr with Range = f expr.Range }
+  | ExprNode(es, ns) -> 
+      { Expr = rebuildExprNode expr.Expr (List.map (mapExprRanges f) es) (List.map (mapNameRanges f) ns)
+        Range = f expr.Range; Type = expr.Type }
+
+let rec mapCmdRanges f cmd = 
+  match cmd.Command with
+  | CommandKind.Expr e -> { Command = CommandKind.Expr (mapExprRanges f e); Range = cmd.Range }
+  | CommandKind.Let(n, e) -> { Command = CommandKind.Let(mapNameRanges f n, mapExprRanges f e); Range = cmd.Range }
+
+let tokenize (input:string) = 
+  let input = input.Replace("\r\n", "\n")
+  let (Parsec.Parser p) = Tokenizer.tokens
+  match p (0, List.ofSeq input) with
+  | Some((offs, rest), errors, tokens) ->
+      let errors = 
+        if List.isEmpty rest then errors
+        else 
+          let rest = System.String(Array.ofList rest)
+          { Number = 11; Range = { Start = offs; End = offs + rest.Length }
+            Message = sprintf "Tokenizer stopped: %s" rest }::errors 
+      errors, tokens
+  | None ->
+      [ { Number = 11; Range = { Start = 0; End = input.Length }
+          Message = sprintf "Tokenizer did not recognize input: %s" input } ], []
+
+let parse (input:string) = 
+  let errs1, tokens = tokenize input
+  let (Parsec.Parser p) = Parser.program
+
+  let rangeLookup = tokens |> List.map (fun tok -> tok.Range) |> Array.ofSeq
+
+  let tokToChar rng =
+    let safe start n = 
+      if n >= rangeLookup.Length then rangeLookup.[rangeLookup.Length-1].End
+      elif n < 0 then 0
+      elif start then rangeLookup.[n].Start
+      else rangeLookup.[n].End
+    let rng = 
+      { Start = safe true rng.Start
+        End = safe false (rng.End-1) }
+    if rng.End < rng.Start then { rng with End = rng.Start }
+    else rng
+
+  match p (0, tokens) with
+  | Some((offs, rest), errs2, prog) ->
+      let errs2 = errs2 |> List.map (fun e -> { e with Range = tokToChar e.Range })
+      let errors = 
+        if List.isEmpty rest then errs1 @ errs2
+        else
+          { Number = 21; Range = tokToChar { Start = offs; End = offs + List.length rest }
+            Message = sprintf "Parser stopped: %A" rest } :: errs1 @ errs2
+      errors, { Range = prog.Range; Body = prog.Body |> List.map (mapCmdRanges tokToChar) }
+  | _ ->
+    { Number = 21; Range = tokToChar { Start = 0; End = List.length tokens }
+      Message = sprintf "Parser stopped: %A" tokens } :: errs1,
+    { Range = tokToChar { Start = 0; End = List.length tokens }
+      Body = [] }
+          
+let typeCheck globals input = async {
+  let errs1, untyped = parse input
+  let! checkd, ctx = typeCheckProgram { Variables = globals } { Errors = [] } untyped
+  return errs1 @ ctx.Errors, checkd }
+
+
+// ------------------------------------------------------------------------------------------------
+// Collecting editors
+// ------------------------------------------------------------------------------------------------
 
 type EditorInfo = 
   { Source : string
@@ -126,9 +329,14 @@ let rec collectExprInfo ctx expr = async {
       let! ctx = collectExprInfo ctx inst
       let! ctx = args |> Async.fold (fun ctx arg -> collectExprInfo ctx arg.Value) ctx
       return! withCompletion n.Range inst.Type ctx 
+  | ExprKind.List(els) ->
+      return! Async.fold collectExprInfo ctx els
+  | ExprKind.Function(_, e) ->
+      return! collectExprInfo ctx e
   | ExprKind.Empty
   | ExprKind.Unit
   | ExprKind.Number _
+  | ExprKind.String _
   | ExprKind.Boolean _
   | ExprKind.Variable _ -> return ctx }
 

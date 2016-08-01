@@ -83,7 +83,7 @@ type Program =
     body: Statement list }
 
 module Serializer = 
-  let createObj props = createObj (List.concat props)
+  let createObj props = JsInterop.createObj (List.concat props)
   let inline (=>) k v = [ k, box v ]
   let inline (=?>) k v = match v with Some v -> [ k, box v] | _ -> []
 

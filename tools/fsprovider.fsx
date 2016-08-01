@@ -22,6 +22,12 @@ type FunctionType =
   interface Type
   static member Create(a,r) = { kind = "function"; arguments = Array.ofSeq a; returns = r } :> Type 
 
+type ArrayType = 
+  { kind : string 
+    element : Type }
+  interface Type
+  static member Create(e) = { kind = "array"; element = e } :> Type 
+
 type NamedType = 
   { kind : string 
     name : string
@@ -74,6 +80,8 @@ let rec formatType ctx (genPars:Map<_, _>) (typ:System.Type) =
       let typars = if typ.IsGenericType then typ.GetGenericArguments() else [||]
       let nice = ctx.KnownTypes.[n]
       NamedType.Create(nice, typars |> Array.map (formatType ctx genPars) |> List.ofArray)
+  | _ when typ.IsArray -> 
+      ArrayType.Create(typ.GetElementType() |> formatType ctx genPars)      
   | "Boolean" -> PrimitiveType.Create("bool")
   | "String" -> PrimitiveType.Create("string")
   | "Double" -> PrimitiveType.Create("float")
@@ -81,6 +89,7 @@ let rec formatType ctx (genPars:Map<_, _>) (typ:System.Type) =
   | "Object" -> PrimitiveType.Create("object")
   | "Int32" -> PrimitiveType.Create("int")
   | "Void" -> PrimitiveType.Create("unit")
+  | "Unit" -> PrimitiveType.Create("unit")
   | "Tuple`2" -> PrimitiveType.Create("tuple") // TODO: Something clever
   | "FSharpOption`1" -> PrimitiveType.Create("option") // TODO: Something clever
   | "FSharpFunc`2" -> 
@@ -140,6 +149,7 @@ let toJson value =
 let fsprovider = __SOURCE_DIRECTORY__ + "/../out/fsprovider"
 System.IO.Directory.CreateDirectory(fsprovider)
 
+#r "../src/libraries/bin/Debug/gui.dll"
 let libs = __SOURCE_DIRECTORY__ + "/../src/libraries/bin/Debug/libraries.dll"
 let asm = Assembly.LoadFile(libs)
 
@@ -156,13 +166,13 @@ let recordTypes =
 let knownTypes = 
   [ yield! 
       [ "IEnumerable`1", "seq" // wishful thinking
+        "FSharpAsync`1", "async" // dtto
         "table`2", "table"
         "series`2", "series"; "value`1", "value"; "options", "options" ]
     for t in recordTypes do yield t.Name, t.Name 
     for t in chartTypes do yield t.Name, t.Name ] |> Map.ofSeq 
 
 let ctx = { KnownTypes = knownTypes }
-
 
 let e = 
   [|  for ct in chartTypes do
@@ -172,7 +182,9 @@ let e =
       yield { exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Static 
                 with instance = [| "_tables"; "table" |] }
       yield exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Instance
-      yield exportType ctx (asm.GetType("TheGamma.Series.series`2")) BindingFlags.Instance |]
+      yield exportType ctx (asm.GetType("TheGamma.Series.series`2")) BindingFlags.Instance 
+      yield { exportType ctx (asm.GetType("TheGamma.Series.series`2")) BindingFlags.Static 
+                with instance = [| "_series"; "series" |] } |]
 
 System.IO.File.WriteAllText(fsprovider + "/libraries.json", toJson e)
 

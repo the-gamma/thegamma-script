@@ -3,6 +3,9 @@
     "sourceMaps": true,
     "projFile": "thegamma.fsproj",
     "refs": {
+        "bindings": "../bindings",
+        "libraries": "../libraries",
+        "gui": "../gui"
     },
     "scripts": {
     },

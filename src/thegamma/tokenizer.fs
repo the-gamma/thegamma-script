@@ -8,7 +8,11 @@ open TheGamma
 open TheGamma.Parsec
 
 // Lookup tables for supported keywords and operators
-let keywords = Map.ofSeq [ "let", TokenKind.Let; "true", TokenKind.Boolean true; "false", TokenKind.Boolean false ]
+let keywords = 
+  [ "let", TokenKind.Let; "fun", TokenKind.Fun
+    "to", TokenKind.To; "by", TokenKind.By
+    "true", TokenKind.Boolean true; "false", TokenKind.Boolean false ]
+  |> Map.ofSeq 
 let operators = set [ '+'; '-'; '*'; '/'; '^' ]
 
 // Parsing basic things like letters and numbers
@@ -24,6 +28,10 @@ let integer = oneOrMore number |> map (fun digits ->
 
 let operator = pred operators.Contains |> map (fun op ->
   TokenKind.Operator(op.ToString()) )
+
+let stringToken = 
+  char '"' () <*>> zeroOrMore (pred ((<>) '"')) <<*> char '"' ()
+  |> map (fun s -> TokenKind.String(System.String(Array.ofList s)))
 
 /// Identifier in single-quotes can contain anything except for end of line or '
 let quotedIdent = 
@@ -57,13 +65,17 @@ let unclosedQuotedIdent =
 let tokens = 
   [ char '(' TokenKind.LParen
     char ')' TokenKind.RParen 
+    char '[' TokenKind.LSquare
+    char ']' TokenKind.RSquare
     char '=' TokenKind.Equals
     char '.' TokenKind.Dot
     char ',' TokenKind.Comma
+    string "->" TokenKind.Arrow
+    stringToken
     integer
-    operator
-    quotedIdent
     keywordOrIdent
+    quotedIdent
+    operator
     whitespace 
     // Error recovery
     unclosedQuotedIdent ] 

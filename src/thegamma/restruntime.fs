@@ -2,6 +2,10 @@
 open System
 open Fable.Extensions
 
+let convertTupleSequence f g data = async {
+  let! values = data
+  return values |> Array.map (fun (a, b) -> f a, g b) }
+
 let convertSequence f data = async {
   let! values = data
   return values |> Array.map f }

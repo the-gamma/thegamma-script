@@ -82,7 +82,7 @@ let writeSetters (wr:IO.TextWriter) =
     fprintfn wr "  { data : ChartData; typeName : string; "
     fprintfn wr "    options : %s }" t.Name
     fprintfn wr "  interface Chart"
-    fprintfn wr "  member x.show() = Helpers.showChart(x)" 
+    fprintfn wr "  member x.show(outputId) = Helpers.showChart x outputId" 
     fprintfn wr "  member x.set(%s) = " pars
     fprintfn wr "    let o = x.options"
     fprintfn wr "    let newOptions = { x.options with %s }" sets
@@ -140,6 +140,7 @@ let writeChartType (wr:IO.TextWriter) =
 let write() =
   use fs = IO.File.Create(__SOURCE_DIRECTORY__ + "/extensions.fs")
   use fw = new IO.StreamWriter(fs)
+  fprintfn fw "// AUTO-GENERATED - DO NOT EDIT"
   fprintfn fw "[<ReflectedDefinition;AutoOpen>]"
   fprintfn fw "module TheGamma.GoogleCharts.Extensions"
   fprintfn fw ""

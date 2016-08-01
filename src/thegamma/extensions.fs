@@ -13,12 +13,12 @@ let jsonParse<'R> (str:string) : 'R = failwith "JS Only"
 [<Emit("console.log.apply(console, $0)")>]
 let consoleLog (args:obj[]) : unit = failwith "JS only"
 
-let enabledCategories = set [ "COMPLETIONS"; "EDITORS"]
+let enabledCategories = set [ "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "SERVICE"; "CODEGEN" ]
 
 type Log =
   static member message(level:string, category:string, msg:string, [<System.ParamArray>] args) = 
     let category = category.ToUpper()
-    if level = "EXCEPTION" || enabledCategories.Contains category then
+    if level = "EXCEPTION" || level = "ERROR" || enabledCategories.Contains category then
       let dt = System.DateTime.Now
       let p2 (s:int) = (string s).PadLeft(2, '0')
       let p4 (s:int) = (string s).PadLeft(4, '0')
@@ -26,7 +26,8 @@ type Log =
       let color = 
         match level with
         | "TRACE" -> "color:#808080"
-        | "EXCEPTION" -> "color:#a00000"
+        | "EXCEPTION" -> "color:#c00000"
+        | "ERROR" -> "color:#900000"
         | _ -> ""
       let args = if args = null then [| |] else args
       consoleLog(FSharp.Collections.Array.append [|box ("%c" + prefix + msg); box color|] args)
@@ -36,6 +37,9 @@ type Log =
 
   static member exn(category:string, msg:string, [<System.ParamArray>] args) = 
     Log.message("EXCEPTION", category, msg, args)
+
+  static member error(category:string, msg:string, [<System.ParamArray>] args) = 
+    Log.message("ERROR", category, msg, args)
 
 type Http =
   /// Send HTTP request asynchronously
@@ -125,7 +129,7 @@ module Async =
   let rec foldMap f st l = async {
     match l with
     | x::xs ->
-        let! st, y = f st x
+        let! y, st = f st x
         let! st, ys = foldMap f st xs
         return st, y::ys
     | [] -> return st, [] }

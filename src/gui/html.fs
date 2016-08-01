@@ -19,18 +19,16 @@ type DomAttribute =
 type DomNode = 
   | Text of string
   | Element of tag:string * attributes:(string * DomAttribute)[] * children : DomNode[] * onRender : (HTMLElement -> unit) option
-  | Part of initial:obj * func:(HTMLElement -> obj -> (obj -> unit) -> unit)
+  | Part of func:(HTMLElement -> unit)
 
 let rec render node = 
   match node with
   | Text(s) -> 
       document.createTextNode(s) :> Node, ignore
 
-  | Part(initial, func) ->
+  | Part(func) ->
       let el = document.createElement("div")
-      let rec update state =
-        func el state update
-      el :> Node, (fun () -> update initial)
+      el :> Node, (fun () -> func el)
 
   | Element(tag, attrs, children, f) ->
       let el = document.createElement(tag)
@@ -69,12 +67,22 @@ type El() =
       )
     Element(n, Array.ofList a, Array.ofList b, f)
 
-  member x.part (initial:'State) (func:HTMLElement -> 'State -> ('State -> unit) -> unit) =
-    Part(unbox initial, unbox func)
+  member x.part (initial:'State) (fold:'State -> 'Event -> 'State) = 
+    let evt = Control.Event<_>()
+    let mutable state = initial
+    let mutable container = None
+    let mutable renderer = None
+    let render () =
+      match container, renderer with
+      | Some el, Some r -> r state |> renderTo el
+      | _ -> ()
+    evt.Publish.Add(fun e -> state <- fold state e; render ())
+
+    evt.Trigger,
+    fun (r:'State -> DomNode) ->
+      renderer <- Some r
+      Part(fun el -> 
+        container <- Some el
+        render() )
 
 let h = El()
-
-
-
-
-

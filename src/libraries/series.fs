@@ -125,6 +125,11 @@ and series<'k, 'v> =
     { data = data; keyName = keyName; valueName = valueName; seriesName = seriesName }
 
   // TODO: This is where the naming starts to suck
+  static member values(values) = 
+    let data = async {
+      return values |> Array.mapi (fun i v -> i, v) }
+    { data = data; keyName = "key"; valueName = "value"; seriesName = "data" }
+
   static member ordinal(data, keyName, valueName, seriesName) = 
     let data = async {
       let! values = data
@@ -213,6 +218,14 @@ and series<'k, 'v> =
 
   member s.maxBy(f) =
     s |> helpers.liftAggregation (Array.maxBy (fun (k, v) -> f v))
+
+  member s.realign(newKeys:'k[], defaultValue) = 
+    s |> helpers.lift (fun arr ->
+      let lookup = Map.ofArray (unbox<(System.IComparable * 'v)[]> arr)
+      (unbox<System.IComparable[]> newKeys) |> Array.map (fun k ->
+        match lookup.TryFind k with
+        | Some res -> unbox<'k> k, res
+        | None -> unbox<'k> k, defaultValue))
 
 (*
 open System.Runtime.CompilerServices

@@ -9,10 +9,8 @@ open Fable.Import.Browser
 type Emit = Fable.Core.EmitAttribute
 
 module TableHelpers =
-  [<Emit("document.getElementById(outputElementID)")>]
-  let outputElement() : HTMLDivElement = failwith "!"
-  [<Emit("blockCallback()")>]
-  let invokeBlockCallback() : unit = failwith "!"
+  //[<Emit("blockCallback()")>]
+  //let invokeBlockCallback() : unit = failwith "!"
 
   [<Emit("numeral($0).format($1)")>]
   let formatNumber (n:float) (format:string) : string = failwith "!"
@@ -36,51 +34,63 @@ module TableHelpers =
 open TableHelpers
 
 type table<'k,'v> =
-  { data : series<'k,'v> }
+  { data : series<'k,'v>
+    showKey : bool }
 
   static member create(data:series<_, _>) =
-    { table.data = data }
+    { table.data = data
+      showKey = true }
 
-  member t.show() =
-    let row (el:string) (things:seq<string>) =
-      h?tr [] [ for t in things -> h?(el) [] [text t] ]
+  member t.set(?title:string, ?showKey:bool) = 
+    { table.data = t.data.set(t.data.data, seriesName=defaultArg title t.data.seriesName)
+      showKey = defaultArg showKey t.showKey }
+
+  member t.show(outputId) =
+    let row (el:string) k (things:seq<string>) =
+      h?tr [] [ 
+        if t.showKey then yield h?(el) [] [text k]
+        for t in things -> h?(el) [] [text t] 
+      ]
 
     let render nd = 
-      nd |> renderTo (outputElement())
+      nd |> renderTo (document.getElementById(outputId))
 
-    let makeTable header body = 
+    let makeTable k header body = 
       h?table ["class" => "table table-striped"] [
         h?caption [] [ text t.data.seriesName ]
-        h?thead [] [ row "th" header ]
+        h?thead [] [ row "th" k header ]
         h?tbody [] body
       ]
 
-    [ h?tr [] [ h?td ["colspan" => "2"] [text "Loading data..."] ] ]
-    |> makeTable [ t.data.keyName; t.data.valueName ]
-    |> render
+    // [ h?tr [] [ h?td ["colspan" => "2"] [text "Loading data..."] ] ]
+    // |> makeTable t.data.keyName [ t.data.valueName ]
+    // |> render
 
-    invokeBlockCallback()
+    //invokeBlockCallback()
 
     async {
-      let! vs = t.data.data
+      try
+        let! vs = t.data.data
 
-      let _, first = vs |> Seq.head
-      let headers = 
-        if isObject first then t.data.keyName::[ for kv in properties first -> kv.key ]
-        else [ t.data.keyName; t.data.valueName ]
+        let _, first = vs |> Seq.head
+        let headers = 
+          if isObject first then [ for kv in properties first -> kv.key ]
+          else [ t.data.valueName ]
       
-      [ for k, v in vs ->
-          let formattedVals =
-            if isObject v then [ for kv in properties v -> unbox kv.value ]
-            elif not (isNumber v) then [ v.ToString() ]
-            elif isNaN (unbox v) then [ "" ]
-            else [ formatNumber (unbox v) "0,0.00" ]
-          row "td" (unbox k :: formattedVals) ]
-      |> makeTable headers
-      |> render }
+        [ for k, v in vs ->
+            let formattedVals =
+              if isObject v then [ for kv in properties v -> unbox kv.value ]
+              elif not (isNumber v) then [ v.ToString() ]
+              elif isNaN (unbox v) then [ "" ]
+              else [ unbox v ] // formatNumber (unbox v) "0,0.00" ]
+            row "td" (unbox k) formattedVals ]
+        |> makeTable t.data.keyName headers
+        |> render 
+      with e ->
+        console.log("Getting data for table failed: %O", e) }
     |> Async.StartImmediate
 
 type empty =
-  static member show() =
-    outputElement().innerHTML <- """<div class="loading"><p>No output produced.</p></div>"""
-    invokeBlockCallback()
+  static member show(outputId) =
+    document.getElementById(outputId).innerHTML <- """<div class="loading"><p>No output produced.</p></div>"""
+    //invokeBlockCallback()

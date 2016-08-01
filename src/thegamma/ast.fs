@@ -21,9 +21,16 @@ type [<RequireQualifiedAccess>] TokenKind =
   | Dot
   | Comma
   | Let
+  | LSquare
+  | RSquare
+  | Fun
+  | Arrow
+  | To
+  | By
   | Operator of string
   | Boolean of bool
   | Number of string * float
+  | String of string
   | Ident of string
   | QIdent of string
   | White of string
@@ -53,8 +60,11 @@ and [<RequireQualifiedAccess>] ExprKind<'T> =
   | Variable of Name
   | Property of Expr<'T> * Name
   | Call of Expr<'T> * Name * Argument<'T> list
+  | Function of Name * Expr<'T>
+  | String of string
   | Number of float
   | Boolean of bool
+  | List of Expr<'T> list
   | Empty
   | Unit
 
@@ -76,12 +86,13 @@ type Schema =
 
 type [<RequireQualifiedAccess>] Member = 
   | Property of name:string * typ:Type * schema:Schema option * emitter:Emitter
-  | Method of name:string * arguments:(string * bool * Type) list * typ:Type * emitter:Emitter
+  | Method of name:string * typars:string list * arguments:(string * bool * Type) list * typ:Type * emitter:Emitter
   member x.Name = 
     match x with Property(name=s) | Method(name=s) -> s
 
 and ObjectType = 
-  { Members : Member[] }
+  { Members : Member[] 
+    Typepars : string list }
 
 and [<RequireQualifiedAccess>] Type =
   | Delayed of guid:string * Future<Type>
@@ -89,6 +100,7 @@ and [<RequireQualifiedAccess>] Type =
   | Object of ObjectType
   | Function of arguments:Type list * returns:Type
   | Parameter of string
+  | List of elementType:Type
   | Unit
   | Any
 

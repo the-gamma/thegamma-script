@@ -5,7 +5,7 @@ open Fable.Import
 open Fable.Extensions
 
 type ProvidedType = 
-  | NamedType of string * Type
+  | NamedType of name:string * typars:string list * typ:Type
   | GlobalValue of string * Expression * Type
 
 // ------------------------------------------------------------------------------------------------
@@ -19,6 +19,10 @@ module FSharpProvider =
   type GenericParameterType = 
     { kind : string 
       name : string }
+
+  type ArrayType = 
+    { kind : string 
+      element : AnyType }
 
   type PrimitiveType = 
     { kind : string 
@@ -56,11 +60,10 @@ module FSharpProvider =
 
   type ExportedType = 
     { name : string
-      typepars : AnyType
+      typepars : AnyType[]
       ``static`` : bool 
       instance : string[]
       members : Member[] }
-
 
   let provideFSharpTypes lookupNamed url = 
 
@@ -72,9 +75,16 @@ module FSharpProvider =
           Type.Function(List.ofSeq (Array.map mapType t.arguments),mapType t.returns)
       | "named" -> 
           let t = (unbox<NamedType> t)
-          lookupNamed t.name (Array.map mapType t.typargs)
+          lookupNamed t.name (List.ofArray (Array.map mapType t.typargs))
       | "parameter" -> Type.Parameter (unbox<GenericParameterType> t).name
+      | "array" -> Type.List(mapType (unbox<ArrayType> t).element)
       | _ -> failwith "provideFSharpType: Unexpected type"
+
+    let getTypeParameters typars = 
+      typars |> Array.map (fun t -> 
+        match mapType t with
+        | Type.Parameter(n) -> n
+        | _ -> failwith "importProvidedType: expected type parameter") |> List.ofArray
 
     // Needs to be delayed to avoid calling lookupNamed too early
     let importProvidedType exp = async {
@@ -88,9 +98,10 @@ module FSharpProvider =
               CallExpression
                 ( MemberExpression(inst, IdentifierExpression(m.name, None), false, None), 
                   List.map snd args, None) }
-            Some(Member.Method(m.name, args, mapType m.returns, emitter))
+            Some(Member.Method(m.name, getTypeParameters m.typepars, args, mapType m.returns, emitter))
           else None)
-      return Type.Object { Members = mems } } |> Async.AsFuture 
+
+      return Type.Object { Typepars = getTypeParameters exp.typepars; Members = mems } } |> Async.AsFuture 
             
     async {
       let! json = Http.Request("GET", url)
@@ -106,7 +117,7 @@ module FSharpProvider =
                 | Some e -> Some(MemberExpression(e, IdentifierExpression(s, None), false, None)) ) None |> Option.get
               ProvidedType.GlobalValue(exp.name, e, ty)
             else
-              ProvidedType.NamedType(exp.name, ty) ] }
+              ProvidedType.NamedType(exp.name, getTypeParameters exp.typepars, ty) ] }
     
 
 // ------------------------------------------------------------------------------------------------
@@ -204,17 +215,22 @@ module RestProvider =
   let rec getTypeAndEmitter (lookupNamed:string -> TheGamma.Type list -> TheGamma.Type) ty = 
     match ty with
     | Primitive("string") -> Type.Primitive("string"), id
-    | Primitive("int") -> Type.Primitive("num"), id
-    | Primitive("float") -> Type.Primitive("num"), id
+    | Primitive("int") 
+    | Primitive("float") -> 
+        Type.Primitive("num"), 
+        fun e -> CallExpression(IdentifierExpression("Number", None), [e], None)
     | Generic("seq", [|Generic("tuple", [|t1; t2|])|]) -> 
-        // let t1, _ = getTypeAndEmitter lookupNamed t1
-        // let t2, _ = getTypeAndEmitter lookupNamed t2
-        let typ = lookupNamed "series" [] // TODO: Generics 
+        let t1, e1 = getTypeAndEmitter lookupNamed t1
+        let t2, e2 = getTypeAndEmitter lookupNamed t2
+        let typ = lookupNamed "series" [t1; t2]
         typ, 
-        fun d -> ident("_series")?series?create /@/ [d; str "key"; str "value"; str "series"] // TODO: We don't have any info - that sucks
+        fun d -> 
+          ident("_series")?series?create /@/ 
+            [ ident("_restruntime")?convertTupleSequence /@/ [func "v" e1; func "v" e2; d] 
+              str "key"; str "value"; str "series" ] // TODO: We don't have any info - that sucks
     | Generic("seq", [|ty|]) ->
         let elTy, emitter = getTypeAndEmitter lookupNamed ty
-        let serTy = lookupNamed "series" [Type.Primitive "int"; elTy]
+        let serTy = lookupNamed "series" [Type.Primitive "num"; elTy]
         serTy, 
         // This is over async, but the child `emitter` is not over async
         fun d -> 
@@ -227,7 +243,7 @@ module RestProvider =
             let memTy, memConv = getTypeAndEmitter lookupNamed ty
             let emitter = { Emit = fun (inst, _) -> memConv <| inst?(name) }
             Member.Property(name, memTy, None, emitter))
-        let obj = TheGamma.Type.Object { Members = membs }
+        let obj = TheGamma.Type.Object { Members = membs; Typepars = [] }
         obj, id
     | _ -> 
         Browser.console.log("getTypeAndEmitter: Cannot handle %O", ty)
@@ -236,12 +252,17 @@ module RestProvider =
   [<Fable.Core.Emit("$0[$1]")>]
   let getProperty<'T> (obj:obj) (name:string) : 'T = failwith "never"
 
+  let mapParamType = function
+    | "int" | "float" -> "num"
+    | _ -> failwith "mapParamType: Unsupported parameter type"
+
   let rec createRestType lookupNamed root cookies url = 
     let future = async {
       let! members = load (concatUrl root url) cookies 
       return 
         Type.Object
-          { Members = 
+          { Typepars = []
+            Members = 
               members |> Array.map (fun m ->
                 let schema = m.schema |> Option.map (fun s -> { Type = getProperty s "@type"; JSON = s })
                 match m.returns.kind with
@@ -250,9 +271,9 @@ module RestProvider =
                     let retTyp = createRestType lookupNamed root cookies returns.endpoint
                     match m.parameters with 
                     | Some parameters ->
-                        let args = [ for p in parameters -> p.name, false, Type.Primitive p.``type``] // TODO: Check this is OK type
+                        let args = [ for p in parameters -> p.name, false, Type.Primitive (mapParamType p.``type``)] // TODO: Check this is OK type
                         let argNames = [ for p in parameters -> p.name ]
-                        Member.Method(m.name, args, retTyp, methCall m.trace)
+                        Member.Method(m.name, [], args, retTyp, methCall m.trace)
                     | None -> 
                         Member.Property(m.name, retTyp, schema, propAccess m.trace) 
                 | "primitive" ->  

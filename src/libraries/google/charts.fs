@@ -40,6 +40,10 @@ type chart =
   static member line(data:series<int, float>) = 
     { Line.data = ChartDataOperations.oneKeyValue "number" data; 
       typeName = "LineChart"; options = LineChartOptions.empty }
+
+  static member lines(data:series<'a, series<int, float>>) = 
+    { Line.data = ChartDataOperations.oneKeyNValues "number" data; 
+      typeName = "LineChart"; options = LineChartOptions.empty }
 (*
   static member line(data:series<string, float>) = 
     { Line.data = ChartDataOperations.oneKeyValue "string" data; 
