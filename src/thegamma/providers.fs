@@ -69,7 +69,11 @@ module FSharpProvider =
 
     let rec mapType (t:AnyType) = 
       match t.kind with
-      | "primitive" -> Type.Primitive (unbox<PrimitiveType> t).name
+      | "primitive" -> 
+          let name = (unbox<PrimitiveType> t).name
+          if name = "object" then Type.Any 
+          elif name = "int" || name = "float" then Type.Primitive "num"
+          else Type.Primitive name
       | "function"->
           let t = unbox<FunctionType> t
           Type.Function(List.ofSeq (Array.map mapType t.arguments),mapType t.returns)
@@ -98,10 +102,10 @@ module FSharpProvider =
               CallExpression
                 ( MemberExpression(inst, IdentifierExpression(m.name, None), false, None), 
                   List.map snd args, None) }
-            Some(Member.Method(m.name, getTypeParameters m.typepars, args, mapType m.returns, emitter))
+            Some(Member.Method(m.name, getTypeParameters m.typepars, args, mapType m.returns, Documentation.Text "", emitter))
           else None)
 
-      return Type.Object { Typepars = getTypeParameters exp.typepars; Members = mems } } |> Async.AsFuture 
+      return Type.Object { Typeargs = List.map Type.Parameter (getTypeParameters exp.typepars); Members = mems } } |> Async.AsFuture 
             
     async {
       let! json = Http.Request("GET", url)
@@ -137,10 +141,15 @@ module RestProvider =
     { name : string 
       ``type`` : string }
 
+  type Documentation = 
+    { title : string option
+      details : string option }
+
   type Member =
     { name : string
       returns : AnyType
       parameters : Parameter[] option
+      documentation : obj option // This can be Documentation or string or an endpoint
       schema : obj option
       trace : string[] }
 
@@ -157,6 +166,15 @@ module RestProvider =
     { name : string 
       fields : RawField[]
       ``params`` : obj[] }
+
+  let parseDoc (json:obj option) =
+    if json.IsNone then Documentation.None
+    elif jstypeof json.Value = "string" then Documentation.Text(unbox json)
+    else 
+      let doc = unbox<Documentation> json.Value
+      match doc.title, doc.details with 
+      | Some title, Some dets -> Documentation.Details(title, dets)
+      | _ -> Documentation.None
 
   let rec fromRawType (json:obj) =
     if jstypeof json = "string" then Primitive(unbox json)
@@ -227,7 +245,7 @@ module RestProvider =
         fun d -> 
           ident("_series")?series?create /@/ 
             [ ident("_restruntime")?convertTupleSequence /@/ [func "v" e1; func "v" e2; d] 
-              str "key"; str "value"; str "series" ] // TODO: We don't have any info - that sucks
+              str "key"; str "value"; str "" ] // TODO: We don't have any info - that sucks
     | Generic("seq", [|ty|]) ->
         let elTy, emitter = getTypeAndEmitter lookupNamed ty
         let serTy = lookupNamed "series" [Type.Primitive "num"; elTy]
@@ -236,14 +254,14 @@ module RestProvider =
         fun d -> 
           ident("_series")?series?ordinal /@/ 
             [ ident("_restruntime")?convertSequence /@/ [func "v" emitter; d] 
-              str "key"; str "value"; str "series" ]
+              str "key"; str "value"; str "" ]
     | Record(membs) ->
         let membs = 
           membs |> Array.map (fun (name, ty) ->
             let memTy, memConv = getTypeAndEmitter lookupNamed ty
             let emitter = { Emit = fun (inst, _) -> memConv <| inst?(name) }
-            Member.Property(name, memTy, None, emitter))
-        let obj = TheGamma.Type.Object { Members = membs; Typepars = [] }
+            Member.Property(name, memTy, None, Documentation.Text "", emitter))
+        let obj = TheGamma.Type.Object { Members = membs; Typeargs = [] }
         obj, id
     | _ -> 
         Browser.console.log("getTypeAndEmitter: Cannot handle %O", ty)
@@ -261,7 +279,7 @@ module RestProvider =
       let! members = load (concatUrl root url) cookies 
       return 
         Type.Object
-          { Typepars = []
+          { Typeargs = []
             Members = 
               members |> Array.map (fun m ->
                 let schema = m.schema |> Option.map (fun s -> { Type = getProperty s "@type"; JSON = s })
@@ -273,14 +291,14 @@ module RestProvider =
                     | Some parameters ->
                         let args = [ for p in parameters -> p.name, false, Type.Primitive (mapParamType p.``type``)] // TODO: Check this is OK type
                         let argNames = [ for p in parameters -> p.name ]
-                        Member.Method(m.name, [], args, retTyp, methCall m.trace)
+                        Member.Method(m.name, [], args, retTyp, parseDoc m.documentation, methCall m.trace)
                     | None -> 
-                        Member.Property(m.name, retTyp, schema, propAccess m.trace) 
+                        Member.Property(m.name, retTyp, schema, parseDoc m.documentation, propAccess m.trace) 
                 | "primitive" ->  
                     let returns = unbox<TypePrimitive> m.returns                      
                     let ty = fromRawType returns.``type``
                     let typ, parser = getTypeAndEmitter lookupNamed ty
-                    Member.Property(m.name, typ, schema, dataCall parser m.trace returns.endpoint)
+                    Member.Property(m.name, typ, schema, parseDoc m.documentation, dataCall parser m.trace returns.endpoint)
                 | _ -> failwith "?" ) } }
     let guid = concatUrl root url
     Type.Delayed(guid, Async.AsFuture(future))

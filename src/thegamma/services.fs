@@ -25,10 +25,10 @@ type EditorService(checker, delay) =
     let filteredEds = 
       eds 
       |> List.filter (fun (i, ed1) ->
-          eds |> List.exists (fun (j, ed2) -> j <> i && Ranges.subRange ed1.Range ed2.Range) |> not)
+          eds |> List.exists (fun (j, ed2) -> j <> i && Ranges.strictSubRange ed1.Range ed2.Range) |> not)
       |> List.map snd
-            
-    Log.trace("service", "Rendering %s out of %s", eds.Length, filteredEds.Length)
+
+    Log.trace("service", "Rendering %s out of %s", filteredEds.Length, eds.Length)
     renderEditors.Trigger filteredEds }
 
   let agent = MailboxProcessor.Start(fun inbox ->

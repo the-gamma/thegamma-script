@@ -84,15 +84,20 @@ type Emitter =
 type Schema = 
   { Type : string; JSON : obj }
 
+type [<RequireQualifiedAccess>] Documentation = 
+  | Text of string
+  | Details of string * string
+  | None 
+
 type [<RequireQualifiedAccess>] Member = 
-  | Property of name:string * typ:Type * schema:Schema option * emitter:Emitter
-  | Method of name:string * typars:string list * arguments:(string * bool * Type) list * typ:Type * emitter:Emitter
+  | Property of name:string * typ:Type * schema:Schema option * docs:Documentation * emitter:Emitter
+  | Method of name:string * typars:string list * arguments:(string * bool * Type) list * typ:Type * docs:Documentation * emitter:Emitter
   member x.Name = 
     match x with Property(name=s) | Method(name=s) -> s
 
 and ObjectType = 
   { Members : Member[] 
-    Typepars : string list }
+    Typeargs : Type list }
 
 and [<RequireQualifiedAccess>] Type =
   | Delayed of guid:string * Future<Type>
@@ -108,5 +113,6 @@ and [<RequireQualifiedAccess>] Type =
 module Ranges = 
   let unionRanges r1 r2 =
     { Start = min r1.Start r2.Start; End = max r1.End r2.End }
-  let subRange first second = 
-    first.Start >= second.Start && first.End <= second.End
+  let strictSubRange first second = 
+    (first.Start > second.Start && first.End <= second.End) ||
+    (first.Start >= second.Start && first.End < second.End)

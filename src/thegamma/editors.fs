@@ -14,14 +14,14 @@ type Property =
   | Property of string * Schema option * Type
 
 type Editor = 
-  | SingleChoice of Name * Property[]
-  | NestedChoice of Name * Name * (Property * Property[])[]
-  | CreateList of Name * Name[] * Property[]
+  | SingleChoice of Documentation * Name * Property[]
+  | NestedChoice of Documentation * Documentation * Name * Name * (Property * Property[])[]
+  | CreateList of Documentation * Name * Name[] * Property[]
   member x.Range = 
     match x with
-    | SingleChoice(n, _) -> n.Range
-    | NestedChoice(n1, n2, _) -> Ranges.unionRanges n1.Range n2.Range
-    | CreateList(n, n2, _) -> n2 |> Array.fold (fun r n -> Ranges.unionRanges r n.Range) n.Range 
+    | SingleChoice(_, n, _) -> n.Range
+    | NestedChoice(_, _, n1, n2, _) -> Ranges.unionRanges n1.Range n2.Range
+    | CreateList(_, n, n2, _) -> n2 |> Array.fold (fun r n -> Ranges.unionRanges r n.Range) { n.Range with Start = n.Range.End }
 
 let rec getMembers typ = async {
   match typ with
@@ -30,11 +30,13 @@ let rec getMembers typ = async {
   | Type.Delayed(_, f) ->
       let! typ = Async.AwaitFuture f
       return! getMembers typ 
-  | _ -> return failwith "Not an object" }
+  | _ -> 
+    Log.error("editors", "getMembers: Type %O is not an object", typ)
+    return failwith "getMembers: Not an object" }
 
 let getProperty (name:Name) members = 
   members |> Array.tryPick (function 
-    | Member.Property(name=n; schema=s; typ=t) when n=name.Name -> Some(s, t) 
+    | Member.Property(name=n; schema=s; typ=t; docs=d) when n=name.Name -> Some(s, t, d) 
     | _ -> None)
 
 let filterProperties f members = async {
@@ -46,12 +48,12 @@ let filterProperties f members = async {
 let dominant all subset =
   let nall = Seq.length all
   let nsub = Seq.length subset
-  nsub > 2 && nsub >= nall * 2 / 3
+  nsub >= 2 && nsub >= nall * 2 / 3
 
 let chooseableProperty equalTyp (name:Name) typ = async {
   let! members = getMembers typ
   match getProperty name members with
-  | Some(Some propSchema, propTyp) ->
+  | Some(Some propSchema, propTyp, _) ->
       let! alts = members |> filterProperties (function
         | _, Some s, t -> s.Type = propSchema.Type && (not equalTyp || TypeChecker.typesEqual t propTyp)
         | _ -> false )
@@ -67,8 +69,8 @@ let pickChainSuffixes f expr =
     | ExprKind.Property(inst, name) ->
         let! members = getMembers inst.Type
         match getProperty name members with
-        | Some(propSch, propTy) ->
-            let suffix = (inst.Type, name, propSch, propTy)::suffix
+        | Some(propSch, propTy, propDoc) ->
+            let suffix = (inst.Type, name, propSch, propTy, propDoc)::suffix
             let! picked = f suffix
             match picked with 
             | Some newRes -> return! loop (newRes::res) suffix inst
@@ -82,22 +84,27 @@ let pickChainSuffixes f expr =
 let collectSingleChoiceEditors =
   pickChainSuffixes (fun chain -> async {
     match chain with
-    | (ty, name, _, _)::_ -> 
-        let! ed = chooseableProperty true name ty 
-        return Option.map SingleChoice ed
+    | (tyParent, name, _, _, doc)::_ -> 
+        let! ed = chooseableProperty true name tyParent
+        return Option.map (fun (n, p) -> SingleChoice(doc, n, p)) ed
     | _ -> return None })
 
 let collectNestedChoiceEditors = 
   pickChainSuffixes (fun chain -> async {
     match chain with
-    | (catParentTy, catName, catSch, catTy)::(valParentTy, valName, (Some valSch), valTy)::_ ->
+    | (catParentTy, catName, catSch, catTy, catDoc)::
+          (valParentTy, valName, (Some valSch), valTy, valDoc)::_ ->
         Log.trace("editors", "checking %s.%s", catName.Name, valName.Name)
         let! catp = chooseableProperty false catName catParentTy
         let! valp = chooseableProperty true valName valParentTy
         match catp, valp with
         | Some(catName, catMembers), Some(valName, valMembers) ->
             Log.trace("editors", "collecting %s nested members", catMembers.Length)
-            let! nestedMembers = catMembers |> Async.Array.map (fun (Property(n, _, t) as p) -> async {
+            let! nestedMembers = 
+              catMembers 
+                |> Seq.truncate 5 (* take at most 5...  - Array.truncate TBD *) 
+                |> Array.ofSeq
+                |> Async.Array.map (fun (Property(n, _, t) as p) -> async {
               let! members = getMembers t
               let! filtered = members |> filterProperties (function
                 | (n, Some s, t) -> s.Type = valSch.Type && TypeChecker.typesEqual t valTy
@@ -106,7 +113,7 @@ let collectNestedChoiceEditors =
             if dominant (Seq.collect (snd >> fst) nestedMembers) (Seq.collect (snd >> snd) nestedMembers) then
               let props = nestedMembers |> Array.map (fun (p, (_, filtered)) ->
                 p, filtered)
-              return Some(NestedChoice(catName, valName, props))
+              return Some(NestedChoice(catDoc, valDoc, catName, valName, props))
             else return None
         | _ -> return None
     | _ -> return None })
@@ -118,13 +125,13 @@ type AddActionSchema = { targetCollection : ItemListSchema }
 let collectItemListEditors =
   pickChainSuffixes (fun chain -> async {
     match chain with
-    | (caParentTy, caName, Some caSch, caTy)::addActions when caSch.Type = "CreateAction" ->
+    | (caParentTy, caName, Some caSch, caTy, catDoc)::addActions when caSch.Type = "CreateAction" ->
         let listName = (unbox<CreateActionSchema> caSch.JSON).result.name
 
         /// Collect all AddActions in the rest of the chain and return
         /// the added options together with the type of the last member 
         let rec collectAdds added lastTy = function
-          | (addParentTy, addName, Some addSch, addTy)::addActions when 
+          | (addParentTy, addName, Some addSch, addTy, _)::addActions when 
                 addSch.Type = "AddAction" &&
                 listName = (unbox<AddActionSchema> addSch.JSON).targetCollection.name ->
               collectAdds (addName::added) addTy addActions
@@ -137,7 +144,7 @@ let collectItemListEditors =
         let! availableAdds = members |> filterProperties (function
           | (n, Some s, t) when s.Type = "AddAction" -> (unbox<AddActionSchema> s.JSON).targetCollection.name = listName
           | _ -> false )
-        return Some(CreateList(caName, Array.ofList adds, availableAdds))
+        return Some(CreateList(catDoc, caName, Array.ofList adds, availableAdds))
     | _ -> return None })
 
 let collectCmdEditors (cmd:Command<_>) = async {
@@ -180,18 +187,34 @@ let removeRangeWithPrecendingDot (text:string) (rng:Range) =
   
 let insertDotTextAfter (origText:string) (rng:Range) ins =
   origText.Substring(0, rng.End) + "." + escapeIdent ins + origText.Substring(rng.End)
-  
+
+let renderDoc = function
+  | Documentation.Text(s) -> h?h3 [] [ text s ]
+  | Documentation.None -> h?span [] []
+  | Documentation.Details(title, details) -> 
+      h?div [] [ 
+        h?h3 [] [ text title ]
+        h?p [] [ text details ] ]
+
+let renderNestedDoc = function
+  | Documentation.Details(_, d1), Documentation.Details(t2, d2) ->
+      h?h3 [] [ text t2 ], h?p [] [ text d1; text d2 ]
+  | _ ->
+      h?h3 [] [ text "Choose a value" ], h?p [] [text "First choose a category, then choose a value."]
+    
 let renderEditor typeCheck (setValue:string -> unit) origText = function
-  | SingleChoice(n, ms) ->
-      h?div [] [
-        h?h2 [] [text "choose one"]
-        h?select 
-          [ "change" =!> fun el e -> replaceNameWithValue origText n el |> setValue ] 
-          [ for (Property.Property(name, _, _)) in ms ->
-              let sel = if name = n.Name then ["selected" => "selected"] else []
-              h?option sel [ text name ] ]
+  | SingleChoice(doc, n, ms) ->
+      h?div ["class" => "ed-single"] [
+        renderDoc doc
+        h?div ["class" => "control"] [ 
+          h?select 
+            [ "change" =!> fun el e -> replaceNameWithValue origText n el |> setValue ] 
+            [ for (Property.Property(name, _, _)) in ms ->
+                let sel = if name = n.Name then ["selected" => "selected"] else []
+                h?option sel [ text name ] ]
+        ]
       ]
-  | CreateList(ca, ns, ms) ->
+  | CreateList(doc, ca, ns, ms) ->
       let edits = ns |> Array.map (fun n -> n, removeRangeWithPrecendingDot origText n.Range)
       let trigger, render = h.part Set.empty (fun s n -> Set.add n s) 
       
@@ -200,35 +223,36 @@ let renderEditor typeCheck (setValue:string -> unit) origText = function
                 if safe then trigger n.Name } |> Async.StartImmediate)
       
       render <| fun safe ->
-        Browser.console.log("Safe: %O", String.concat "," safe)
-        h?div [] [
-          h?h2 [] [text "create list"]
-          h?ul [] [
-            for n, edit in edits -> 
-              h?li [] [ 
-                yield text n.Name 
-                yield text " "
-                yield h?button [
-                  if not (Set.contains n.Name safe) then 
-                    yield "disabled" => "disabled"
-                  yield "click" =!> fun el e -> setValue edit ] [ text "X" ]
+        h?div ["class" => "ed-list"] [
+          renderDoc doc
+          h?div ["class" => "control"] [ 
+            h?ul [] [
+              for n, edit in edits -> 
+                h?li [] [ 
+                  let dis = not (Set.contains n.Name safe)
+                  yield text n.Name 
+                  yield text " "
+                  yield h?button [
+                    if dis then yield "disabled" => "disabled"
+                    yield "click" =!> fun el e -> setValue edit ] 
+                    [ h?i ["class" => if dis then "fa fa-ban" else "fa fa-times" ] [] ]
+                ]
+            ]
+            h?select 
+              [ "data-placeholder" => "add another item..."
+                "change" =!> fun el e -> 
+                  let sel = (el :?> Browser.HTMLSelectElement).value
+                  let last = if ns.Length = 0 then ca else ns.[ns.Length - 1]
+                  insertDotTextAfter origText last.Range sel |> setValue
+              ] 
+              [ yield h?option [] []
+                for (Property.Property(name, _, _)) in ms ->
+                  h?option [] [ text name ]
               ]
           ]
-          h?select 
-            [ "data-placeholder" => "Add another item..."
-              "change" =!> fun el e -> 
-                let sel = (el :?> Browser.HTMLSelectElement).value
-                let last = if ns.Length = 0 then ca else ns.[ns.Length - 1]
-                insertDotTextAfter origText last.Range sel |> setValue
-            ] 
-            [ yield h?option [] []
-              for (Property.Property(name, _, _)) in ms ->
-                h?option [] [ text name ]
-            ]
         ]
 
-
-  | NestedChoice(n1, n2, props) ->
+  | NestedChoice(doc1, doc2, n1, n2, props) ->
       let update, render = h.part (n1.Name, n2.Name) (fun _ n -> n)
       render <| fun (name1, name2) ->
         let selected = 
@@ -237,20 +261,24 @@ let renderEditor typeCheck (setValue:string -> unit) origText = function
           |> Option.map snd
         let nested = defaultArg selected [||]
 
-        h?div [] [
-          h?h2 [] [text "nested choice"]
-          h?select 
-            [ "change" =!> fun el e -> update ((unbox<Browser.HTMLSelectElement> el).value, "") ] 
-            [ for (Property.Property(name, _, _), nested) in props ->
-                let sel = if name = name1 then ["selected" => "selected"] else []
-                h?option sel [ text name ] ]
-          h?select 
-            [ "data-placeholder" => "Choose an item..." 
-              "change" =!> fun el e -> 
-                  let name2 = (unbox<Browser.HTMLSelectElement> el).value
-                  replaceTwoNamesWithValues origText (n1, n2) (name1, name2) |> setValue ] 
-            [ if name2 = "" then yield h?option [] []
-              for Property.Property(name, _, _) in nested ->
-                let sel = if name = name2 then ["selected" => "selected"] else []
-                h?option sel [ text name ] ]
+        let heading, p = renderNestedDoc (doc1, doc2)
+        h?div ["class" => "ed-nested"] [
+          heading
+          p
+          h?div ["class" => "control"] [ 
+            h?select 
+              [ "change" =!> fun el e -> update ((unbox<Browser.HTMLSelectElement> el).value, "") ] 
+              [ for (Property.Property(name, _, _), nested) in props ->
+                  let sel = if name = name1 then ["selected" => "selected"] else []
+                  h?option sel [ text name ] ]
+            h?select 
+              [ "data-placeholder" => "Choose an item..." 
+                "change" =!> fun el e -> 
+                    let name2 = (unbox<Browser.HTMLSelectElement> el).value
+                    replaceTwoNamesWithValues origText (n1, n2) (name1, name2) |> setValue ] 
+              [ if name2 = "" then yield h?option [] []
+                for Property.Property(name, _, _) in nested ->
+                  let sel = if name = name2 then ["selected" => "selected"] else []
+                  h?option sel [ text name ] ]
+          ]
         ]

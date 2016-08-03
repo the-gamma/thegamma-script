@@ -37,6 +37,10 @@ type chart =
     { Column.data = ChartDataOperations.oneKeyValue "string" data; 
       typeName = "ColumnChart"; options = ColumnChartOptions.empty }
 
+  static member columns(data:series<string, float>[], colors:string[]) = 
+    { Line.data = ChartDataOperations.oneKeyAppendValues "string" data colors; 
+      typeName = "ColumnChart"; options = LineChartOptions.empty }
+
   static member line(data:series<int, float>) = 
     { Line.data = ChartDataOperations.oneKeyValue "number" data; 
       typeName = "LineChart"; options = LineChartOptions.empty }

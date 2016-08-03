@@ -184,7 +184,9 @@ let e =
       yield exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Instance
       yield exportType ctx (asm.GetType("TheGamma.Series.series`2")) BindingFlags.Instance 
       yield { exportType ctx (asm.GetType("TheGamma.Series.series`2")) BindingFlags.Static 
-                with instance = [| "_series"; "series" |] } |]
+                with instance = [| "_series"; "series" |] }
+      yield { exportType ctx (asm.GetType("TheGamma.html")) BindingFlags.Static 
+                with instance = [| "_tables"; "html" |] } |]
 
 System.IO.File.WriteAllText(fsprovider + "/libraries.json", toJson e)
 

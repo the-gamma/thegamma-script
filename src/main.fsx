@@ -19,6 +19,9 @@ open Fable.Core
 // Global provided types
 // ------------------------------------------------------------------------------------------------
 
+// let services = "http://127.0.0.1:10042/"
+let services = "http://thegamma-services.azurewebsites.net/"
+
 type ProvidedTypes = 
   { LookupNamed : string -> Type list -> Type
     Globals : Map<string, Expression * Type> }
@@ -38,13 +41,13 @@ let types = async {
 
   let restTys = 
     [ TypePoviders.RestProvider.provideRestType lookupNamed 
-        "olympics1" "http://127.0.0.1:10042/olympics" ""
+        "olympics1" (services + "olympics") ""
       TypePoviders.RestProvider.provideRestType lookupNamed 
-        "olympics" "http://127.0.0.1:10042/pivot" "source=http://127.0.0.1:10042/olympics"
+        "olympics" (services + "pivot") ("source=" + services + "olympics")
       TypePoviders.RestProvider.provideRestType lookupNamed 
-        "adventure" "http://127.0.0.1:10042/adventure" ""
+        "adventure" (services + "adventure") ""
       TypePoviders.RestProvider.provideRestType lookupNamed 
-        "world" "http://127.0.0.1:10042/worldbank" ""
+        "world" (services + "worldbank") ""
       
       // TODO: some more types 
       TypePoviders.NamedType("value", ["a"], Type.Any)
@@ -88,7 +91,7 @@ let findElements f (el:Element) =
       loop (loop acc el.firstChild) el.nextSibling
   loop [] el.firstChild
 
-let findChildElement f (el:Element) = 
+let tryFindChildElement f (el:Element) = 
   let rec loop (el:Node) = 
     if el = null then None
     elif el.nodeType = 1.0 && f (el :?> HTMLElement) then Some (el :?> HTMLElement)
@@ -96,7 +99,9 @@ let findChildElement f (el:Element) =
       match loop el.firstChild with
       | None -> loop el.nextSibling
       | res -> res  
-  loop el.firstChild |> FsOption.get
+  loop el.firstChild 
+
+let findChildElement f e = tryFindChildElement f e |> FsOption.get
 
 let withClass cls (el:Element) = el.classList.contains cls
 
@@ -113,7 +118,7 @@ let callShowMethod outId cmd = async {
       match m with 
       | ObjectMembers.Members(members) ->
           let hasShow = members |> Array.exists (function 
-            | Member.Method("show", [], [_, _, Type.Primitive "string"], _, _) -> true
+            | Member.Method("show", [], [_, _, Type.Primitive "string"], _, _, _) -> true
             | _ -> false)
           if hasShow then
             let rng = { Start = e.Range.End; End = e.Range.End }
@@ -134,66 +139,89 @@ let renderErrors el errors =
           text "error "; text (string e.Number); text ": "; text (e.Message)] ]
   |> renderTo el
 
-Monaco.setupMonacoServices(globalTypes)
-
-let setupEditor (parent:HTMLElement) id outId errs opts (runBtn:HTMLElement) source =
+let setupEditor (parent:HTMLElement) =
+  let source = (findChildElement (withClass "ia-source") parent).innerText.Trim()
+  let outputId = (findChildElement (withClass "ia-output") parent).id
+    
+  let runBtn = findChildElement (withClass "ia-run") parent
+  let showCodeBtn = findChildElement (withClass "ia-show-source") parent
+  let showOptionsBtn = tryFindChildElement (withClass "ia-show-options") parent
+  
+  let editorEl = findChildElement (withClass "ia-editor") parent
+  let monacoEl = findChildElement (withClass "ia-monaco") parent
+  let errorsEl = findChildElement (withClass "ia-errors") parent
+  let optionsEl = findChildElement (withClass "ia-options") parent
 
   let checkingService = CheckingService(globalTypes)
-  checkingService.ErrorsReported.Add (renderErrors errs)
-
   let editorService = EditorService(checkingService.TypeCheck, 2000)
+  checkingService.ErrorsReported.Add (renderErrors errorsEl)
 
   let run text = async {
     let! prog = checkingService.TypeCheck(text)
-    let! newBody = prog.Body |> Async.map (callShowMethod outId)      
+    let! newBody = prog.Body |> Async.map (callShowMethod outputId)
     let prog = { prog with Body = newBody }
     return! CodeGenerator.compileAndRun globalExprs text prog }
 
   run source |> Async.StartImmediate
 
-  let edDiv = document.getElementById(id)
-  let ed = Monaco.createMonacoEditor id source (fun opts ->
-    opts.fontFamily <- Some "Inconsolata"
-    opts.fontSize <- Some 16.0
-    opts.lineHeight <- Some 20.0 )
+  let ed = Lazy.Create(fun () ->   
+    let ed = Monaco.createMonacoEditor monacoEl.id source (fun opts ->
+      opts.fontFamily <- Some "Inconsolata"
+      opts.fontSize <- Some 15.0
+      opts.lineHeight <- Some 20.0 )
+
+    let resizeEditor (text:string) =
+      let dim = JsInterop.createEmpty<monaco.editor.IDimension>
+      dim.width <- parent.clientWidth - 40.0
+      dim.height <- max 100.0 (20.0 + float (text.Split('\n').Length) * 20.0)
+      ed.layout(dim)
+      monacoEl.style.height <- string dim.height + "px" 
+
+    ed.getModel().onDidChangeContent(fun _ ->
+      let text = ed.getModel().getValue(monaco.editor.EndOfLinePreference.LF, false)
+      editorService.UpdateSource(text) 
+      resizeEditor text) |> ignore
+      
+    resizeEditor source
+    ed )
   
-  let getText() = ed.getModel().getValue(monaco.editor.EndOfLinePreference.LF, false)
+  let getText() = 
+    if not ed.IsValueCreated then source
+    else ed.Value.getModel().getValue(monaco.editor.EndOfLinePreference.LF, false)
 
   let setText t = 
-    ed.getModel().setValue(t)
-    editorService.UpdateSource(t, true)
+    ed.Value.getModel().setValue(t)
+    if showOptionsBtn.IsSome then
+      editorService.UpdateSource(t, true)
     run(t) |> Async.StartImmediate
 
-  let resizeEditor (text:string) =
-    let dim = JsInterop.createEmpty<monaco.editor.IDimension>
-    dim.width <- parent.clientWidth
-    dim.height <- max 100.0 (20.0 + float (text.Split('\n').Length) * 20.0)
-    ed.layout(dim)
-    edDiv.style.height <- string dim.height + "px" 
+  let mutable optionsVisible = false
+  let mutable editorVisible = false
 
-  resizeEditor (getText ())
+  showOptionsBtn |> FsOption.iter (fun btn -> 
+    editorService.EditorsUpdated.Add (fun eds ->
+      h?div ["class" => "ia-editor-panel"] (List.map (Editors.renderEditor checkingService.IsWellTyped setText (getText())) eds)
+      |> renderTo optionsEl )
+  
+    btn.onclick <- fun _ ->
+      optionsVisible <- not optionsVisible
+      optionsEl.style.display <- if optionsVisible then "block" else "none"
+      if optionsVisible then editorService.UpdateSource(source)
+      box () )
 
-  editorService.EditorsUpdated.Add (fun eds ->
-    h?div [] (List.map (Editors.renderEditor checkingService.IsWellTyped setText (getText())) eds)
-    |> renderTo opts )
-  editorService.UpdateSource(source)
-
-  ed.getModel().onDidChangeContent(fun _ ->
-    let text = getText()
-    editorService.UpdateSource(text) 
-    resizeEditor text) |> ignore
+  showCodeBtn.onclick <- fun _ ->
+    editorVisible <- not editorVisible
+    editorEl.style.display <- if editorVisible then "block" else "none"
+    if editorVisible then ed.Force() |> ignore
+    box ()
   
   runBtn.onclick <- fun e -> getText() |> run |> Async.StartImmediate |> box
 
 
+Monaco.setupMonacoServices(globalTypes)
+
 for el in findElements (withClass "ia-figure") document.body do
-  let runBtn = findChildElement (withClass "ia-run") el
-  let sourceEl = findChildElement (withClass "ia-source") el
-  let editorEl = findChildElement (withClass "ia-editor") el
-  let errorsEl = findChildElement (withClass "ia-errors") el
-  let optionsEl = findChildElement (withClass "ia-options") el
-  let outputEl = findChildElement (withClass "ia-output") el
-  setupEditor (unbox el) editorEl.id outputEl.id errorsEl optionsEl runBtn (sourceEl.innerText.Trim())
+  setupEditor (el :?> HTMLElement)
 
 
 (*

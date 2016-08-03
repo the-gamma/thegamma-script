@@ -128,7 +128,10 @@ and series<'k, 'v> =
   static member values(values) = 
     let data = async {
       return values |> Array.mapi (fun i v -> i, v) }
-    { data = data; keyName = "key"; valueName = "value"; seriesName = "data" }
+    { data = data; keyName = "key"; valueName = "value"; seriesName = "" }
+
+  static member range(from, ``to``) = 
+    series<int, int>.values [| from .. ``to`` |]
 
   static member ordinal(data, keyName, valueName, seriesName) = 
     let data = async {

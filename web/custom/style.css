@@ -15,7 +15,7 @@ header {
   min-height:500px;
 }
 header h1 {
-  font-size:40pt;
+  font-size:36pt;
   margin:0px;
   line-height:1.4em;
 }
@@ -30,8 +30,9 @@ header .content span {
   padding:3px 10px 3px 10px;
 }
 header .content {
+  text-align:center;
   font-family:Kreon,'Times New Roman',times,serif;
-  margin:25vw -100px 0px -100px;
+  margin:20vw 0px 0px 0px;
 }
 header img {
   float:right;
@@ -105,6 +106,53 @@ nav.affix-top {
   width: 100%;
 }
 
+/***************************************************************************************************
+  Interactive figure styling
+***************************************************************************************************/
+
+.ia-figure {
+  background:white;
+  border:1px solid #d8d8d8;
+  border-radius:6px;
+  padding:5px 15px 10px 15px;
+  margin:10px 10px 30px 10px;
+}
+
+.ia-figure .tools a {
+  font-size:10pt;
+  color:#b0b0b0;
+  text-decoration:none;
+}
+.ia-figure .tools a:hover {
+  color:#808080;
+}
+.ia-figure .tools-right {
+  float:right;
+}
+.ia-figure .tools-right a {
+  margin-left:10px;
+}
+
+.ia-figure .loading {
+  padding:60px 0px 80px 0px;
+  text-align:center;
+  color:#c0c0c0;
+}
+.ia-figure .ia-editor {
+  margin:10px 0px 10px 0px;
+}
+.ia-figure .ia-scrollable {
+  max-height:500px;
+  overflow-y:auto;
+  margin-bottom:10px;
+}
+.spinner {
+  margin-left:auto;
+  margin-right:auto;
+  width:21px;
+  height:21px;
+  background-image:url('../img/spinner.png');
+}
 
 /***************************************************************************************************
   ...
@@ -118,7 +166,7 @@ body {
   overflow-y:scroll;
 }
 
-article .content {
+article .new-content {
   padding-top:50px;
 }
 article h1 {
@@ -135,25 +183,39 @@ article h2 {
   margin:0px 0px 20px 0px;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-button:disabled {
-  color:red;
+article h3 {
+  font:300 18pt Kreon,'Times New Roman',times,serif;
+  margin:0px 0px 10px 0px;
 }
+
+article p {
+  margin:0px 0px 20px 0px;
+}
+
+article table td, article table th {
+  font-size:11pt;
+  color:#505050;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 /* */
+.olympic-medals .ia-output table img {
+  width:14px;
+  height:14px;
+  margin:2px;
+}

@@ -17,7 +17,7 @@ let noState =
 
 let getColorClass = function
   | TokenKind.String _ -> "string" 
-  | TokenKind.QIdent _ | TokenKind.Ident _ -> "" 
+  | TokenKind.QIdent _ | TokenKind.Ident _ -> "ident" 
   | TokenKind.Dot _ -> "operator" 
   | TokenKind.By | TokenKind.To | TokenKind.Let 
   | TokenKind.Boolean _ | TokenKind.Fun | TokenKind.Arrow -> "keyword" 

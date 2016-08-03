@@ -82,6 +82,7 @@ type Microsoft.FSharp.Control.Async with
                   let! r = op
                   res <- Choice2Of3 r                  
                 with e ->
+                  Log.exn("future", "Evaluating future failed: %O", e)
                   res <- Choice3Of3 e
                 for h in handlers do trigger h } |> Async.StartImmediate
     if start = Some true then ensureStarted()

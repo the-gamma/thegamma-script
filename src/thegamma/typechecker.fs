@@ -30,21 +30,24 @@ let rec arraysEqual (l1:_[]) (l2:_[]) f =
     else false
   loop 0
 
-let rec typesEqual t1 t2 = 
+let rec membersEqual m1 m2 = // Ignoring types, because generics make that hard
+  match m1, m2 with 
+  | Member.Property(n1, t1, s1, d1, _), Member.Property(n2, t2, s2, d2, _) -> n1 = n2 && s1 = s2 && d1 = d2 // && typesEqual t1 t2
+  | Member.Method(n1, t1, a1, r1, d1, _), Member.Method(n2, t2, a2, r2, d2, _) -> 
+      n1 = n2 && d1 = d2 && // t1 = t2 && typesEqual r1 r2 && 
+        listsEqual a1 a2 (fun (s1, b1, t1) (s2, b2, t2) -> 
+          s1 = s2 && b1 = b2(* && typesEqual t1 t2 *) )
+  | _ -> false
+
+and typesEqual t1 t2 = 
   match t1, t2 with
   | Type.Any, Type.Any -> true
   | Type.Delayed(g1, _), Type.Delayed(g2, _) -> g1 = g2
   | Type.Function(a1, r1), Type.Function(a2, r2) -> 
       listsEqual (r1::a1) (r2::a2) typesEqual
   | Type.Object(o1), Type.Object(o2) -> 
-      arraysEqual o1.Members o2.Members (fun m1 m2 ->
-          match m1, m2 with 
-          | Member.Property(n1, t1, s1, _), Member.Property(n2, t2, s2, _) -> n1 = n2 && s1 = s2 && typesEqual t1 t2
-          | Member.Method(n1, t1, a1, r1, _), Member.Method(n2, t2, a2, r2, _) -> 
-              n1 = n2 && t1 = t2 && typesEqual r1 r2 && 
-                listsEqual a1 a2 (fun (s1, b1, t1) (s2, b2, t2) -> 
-                  s1 = s2 && b1 = b2 && typesEqual t1 t2)
-          | _ -> false)
+      listsEqual o1.Typeargs o2.Typeargs typesEqual &&
+      arraysEqual o1.Members o2.Members membersEqual
   | Type.Parameter n1, Type.Parameter n2 -> n1 = n2
   | Type.Primitive n1, Type.Primitive n2 -> n1 = n2
   | Type.Unit, Type.Unit -> true
@@ -70,7 +73,15 @@ let rec getObjectMembers t = async {
 
 let rec unifyTypes assigns ts1 ts2 =
   match ts1, ts2 with
+  | Type.Delayed(id1, f1)::ts1, Type.Delayed(id2, f2)::ts2 -> async {
+      let! o1 = f1 |> Async.AwaitFuture
+      let! o2 = f2 |> Async.AwaitFuture
+      return! unifyTypes assigns (o1::ts1) (o2::ts2) }      
+      
   | t1::ts1, t2::ts2 when typesEqual t1 t2 -> unifyTypes assigns ts1 ts2
+
+  | Type.Object(o1)::ts1, Type.Object(o2)::ts2 when arraysEqual o1.Members o2.Members membersEqual ->
+      unifyTypes assigns (o1.Typeargs @ ts1) (o2.Typeargs @ ts2)
   | Type.Any::ts1, t::ts2 | t::ts1, Type.Any::ts2 -> unifyTypes assigns ts1 ts2
   | (Type.Parameter n)::ts1, t::ts2 | t::ts1, (Type.Parameter n)::ts2 -> 
       unifyTypes ((n, t)::assigns) ts1 ts2
@@ -79,11 +90,11 @@ let rec unifyTypes assigns ts1 ts2 =
   | Type.List(t1)::ts1, Type.List(t2)::ts2 -> 
       unifyTypes assigns (t1::ts1) (t2::ts2)
   | [], [] -> 
-      (fun res rng -> assigns, res)
+      async { return (fun res rng -> assigns, res) }
   | ts1, ts2 -> 
-      (fun res rng ->
+      async { return (fun res rng ->
           Log.trace("typechecker", "Cannot unify types: %O and %O", Array.ofList ts1, Array.ofList ts2)
-          assigns, addError (Errors.TypeChecker.cannotUnityTypes rng) res)
+          assigns, addError (Errors.TypeChecker.cannotUnityTypes rng) res) }
 
 let rec substituteTypes assigns t =
   match t with
@@ -93,11 +104,12 @@ let rec substituteTypes assigns t =
   | Type.List(t) -> Type.List(substituteTypes assigns t)
   | Type.Object(o) ->
       let members = o.Members |> Array.map (function
-        | Member.Method(n,tp,ars,t,e) -> 
+        | Member.Method(n,tp,ars,t,d,e) -> 
             let nars = ars |> List.map (fun (n,o,t) -> n, o, substituteTypes assigns t)
-            Member.Method(n,tp,nars,substituteTypes assigns t,e)
-        | Member.Property(n,t,s,e) -> Member.Property(n,substituteTypes assigns t,s,e))
-      Type.Object({ o with Members = members })
+            Member.Method(n,tp,nars,substituteTypes assigns t,d,e)
+        | Member.Property(n,t,s,d,e) -> Member.Property(n,substituteTypes assigns t,s,d,e))
+      { Typeargs = List.map (substituteTypes assigns) o.Typeargs
+        Members = members } |> Type.Object
   | Type.Delayed(g, f) -> 
       let f = 
         { new Future<Type> with 
@@ -146,8 +158,10 @@ let rec typeCheckExpr ctx ctxTyp res (expr:Expr<unit>) = async {
       return { Expr = ExprKind.List els; Type = Type.List(ty); Range = expr.Range }, res
 
   | ExprKind.Property(e, name) ->
+      Log.trace("typechecker", "checking access %s", name.Name)
       let! typed, res = typeCheckExpr ctx None res e
       let! members = getObjectMembers typed.Type 
+      Log.trace("typechecker", "checked access %s", name.Name)
       let resTyp, res = 
         match members with
         | ObjectMembers.Members members ->
@@ -181,11 +195,12 @@ let rec typeCheckExpr ctx ctxTyp res (expr:Expr<unit>) = async {
 
                 let parTys = pars |> List.map (fun (_, _, t) -> t)
                 let argTys = typedArgs |> List.map (fun a -> a.Value.Type)
-                let assigns, res = unifyTypes [] parTys argTys res expr.Range
+                let! unifyFunc = unifyTypes [] parTys argTys 
+                let assigns, res = unifyFunc res expr.Range
 
-                Log.trace("typechecker", "call: tyargs: %s, assigns: %O", String.concat "," tp, Array.ofList assigns)
+                Log.trace("typechecker", "call %s: tyargs: %s, assigns: %O", name.Name, String.concat "," tp, Array.ofList assigns)
                 let resTyp = substituteTypes (Map.ofList assigns) resTyp
-                Log.trace("typechecker", "call: result type: %O", resTyp)
+                Log.trace("typechecker", "call %s: result type: %O", name.Name, resTyp)
                 return resTyp, typedArgs, res 
             | _ -> 
                 let! res, _ = checkArguments None

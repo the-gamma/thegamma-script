@@ -11,7 +11,7 @@ module GoogleCharts =
   type DataTable =
     abstract addRows : obj[][] -> unit
     abstract addColumn : string * string -> unit 
-
+    
   [<Emit("new google.visualization.DataTable()")>]
   let createTable() : DataTable = failwith "Never"
 
@@ -59,6 +59,14 @@ module Helpers =
       |> Async.StartImmediate
 
 module ChartDataOperations =
+  let rec collect f l = async {
+    match l with 
+    | x::xs -> 
+        let! y = f x
+        let! ys = collect f xs
+        return List.append y ys
+    | [] -> return [] }
+
   let oneKeyValue keyType (v:series<'k, float>) = { data = async {
     let data = GoogleCharts.createTable()
     data.addColumn(keyType, v.keyName) |> ignore
@@ -74,6 +82,22 @@ module ChartDataOperations =
     data.addColumn("number", v.seriesName) |> ignore
     let! vals = v.mapPairs(fun k (v1, v2) -> [| box k; box v1; box v2 |]).data
     vals |> Array.map snd |> data.addRows |> ignore
+    return data } }
+
+  let oneKeyAppendValues keyType (vs:series<'k, float>[]) colors = { data = async {
+    let data = GoogleCharts.createTable()
+    data.addColumn(keyType, vs.[0].keyName) |> ignore
+    data.addColumn("number", vs.[0].valueName) |> ignore
+    JsInterop.(?) data "addColumn" (JsInterop.createObj [ "type", box "string"; "role", box "style" ]) |> ignore    
+    let! all = Array.zip vs colors |> List.ofArray |> collect (fun (v, clr) -> async {
+      let! res = v.mapPairs(fun k v -> k, v, clr).data 
+      return res |> Array.map snd |> List.ofArray })
+
+    all 
+    |> List.sortByDescending (fun (_, v, _) -> v) |> Array.ofList
+    |> Array.map (fun (k, v, c) -> [| box k; box v; box c |])
+    |> data.addRows 
+
     return data } }
 
 (*

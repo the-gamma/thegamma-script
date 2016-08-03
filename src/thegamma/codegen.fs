@@ -30,7 +30,7 @@ let rec getEmitter name typ = async {
   | Type.Delayed(_, f) ->
       let! typ = Async.AwaitFuture f
       return! getEmitter name typ 
-  | _ -> return failwith "Not an object" }
+  | _ -> return failwith "getEmitter: Not an object" }
 
 let rec compileExpression ctx (expr:Expr<Type>) = async {
   match expr.Expr with 
