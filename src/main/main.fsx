@@ -258,4 +258,3 @@ let sample = """let data =
 table.create(data).show()"""
 
 *)
-

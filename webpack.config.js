@@ -5,8 +5,8 @@ var cfg = {
   devtool: "source-map",
   entry: "./out/js/main/main.js",
   output: {
-    path: path.join(__dirname, "out/build"),
-    filename: "bundle.js"
+    path: path.join(__dirname, "out"),
+    filename: "thegamma-script.js"
   },
   externals: [ { "monaco":true } ], 
   resolve: {
