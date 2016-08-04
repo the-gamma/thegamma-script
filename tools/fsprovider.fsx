@@ -146,9 +146,6 @@ let toJson value =
   serializer.Serialize(tw, value)
   sb.ToString() 
 
-let fsprovider = __SOURCE_DIRECTORY__ + "/../out/fsprovider"
-System.IO.Directory.CreateDirectory(fsprovider)
-
 #r "../src/libraries/bin/Debug/gui.dll"
 let libs = __SOURCE_DIRECTORY__ + "/../src/libraries/bin/Debug/libraries.dll"
 let asm = Assembly.LoadFile(libs)
@@ -188,6 +185,8 @@ let e =
       yield { exportType ctx (asm.GetType("TheGamma.html")) BindingFlags.Static 
                 with instance = [| "_tables"; "html" |] } |]
 
+let fsprovider = __SOURCE_DIRECTORY__ + "/../out"
+System.IO.Directory.CreateDirectory(fsprovider)
 System.IO.File.WriteAllText(fsprovider + "/libraries.json", toJson e)
 
 
