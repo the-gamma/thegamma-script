@@ -41,6 +41,7 @@ Target "justrun" (fun _ ->
 //
 // --------------------------------------------------------------------------------------
 
+(*
 let npm command args workingDir =
   let args = sprintf "%s %s" command (String.concat " " args)
   let cmd, args = if EnvironmentHelper.isUnix then "npm", args else "cmd", ("/C npm " + args)
@@ -67,19 +68,12 @@ Target "justfable" (fun _ ->
   __SOURCE_DIRECTORY__ </> "src" </> "thegamma" |> spawnNode fable ["-w"]
   __SOURCE_DIRECTORY__ </> "src" </> "libraries" |> spawnNode fable ["-w"]
 )
-
+*)
 let sleep _ = 
   traceImportant "Press any key to stop!"
   Console.ReadKey() |> ignore
 
-
 Target "run" sleep
-Target "fable" sleep
-Target "all" sleep
-
 "justrun" ==> "run"
-"justfable" ==> "fable"
-"justrun" ==> "all"
-"justfable" ==> "all"
 
-RunTargetOrDefault "all"
+RunTargetOrDefault "run"

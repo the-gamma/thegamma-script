@@ -84,7 +84,7 @@ module SeriesInternals =
 
 open SeriesInternals
 
-type value<'k> = { value : Async<'k> }
+//type value<'k> = { value : Async<'k> }
 
 type internal helpers = 
   static member inline lift (f:('a*'b)[] -> ('c*'d)[]) (s:series<_, _>) =
@@ -95,12 +95,12 @@ type internal helpers =
       keyName = s.keyName
       valueName = s.valueName
       seriesName = s.seriesName }
-    
+(*    
   static member inline liftAggregation f (s:series<_, _>) =
     { value = async {
         let! vs = s.data
         return f vs } }
-
+*)
 
 and series<'k, 'v> = 
   internal 
@@ -165,7 +165,7 @@ and series<'k, 'v> =
 
   member s.map(f) =
     s |> helpers.lift (Array.map (fun (k, v) -> k, f v))
-
+(*
   member s.mapTask(f:'v -> value<'r>) =
     s.set(async {
       let! arr = s.data
@@ -175,7 +175,7 @@ and series<'k, 'v> =
         res.[i] <- Some r
       return Array.init arr.Length (fun i -> fst arr.[i], res.[i].Value)
     })
-
+*)
   member s.mapPairs(f) =
     s |> helpers.lift (Array.map (fun (k, v) -> k, f k v))
 
@@ -197,19 +197,19 @@ and series<'k, 'v> =
 
   member s.appendScalar(key:'k, value:'v) =
     s |> helpers.lift (fun arr -> Array.append arr [| key, value |])
-
+(*
   member s.appendValue(key:'k, value:value<'v>) =
     s.set(async {
       let! arr = s.data
       let! v = value.value
       return Array.append arr [| key, v |] })
-
+*)
   member s.append(s2:series<'k, 'v>) =
     s.set(async {
       let! arr1 = s.data
       let! arr2 = s2.data
       return Array.append arr1 arr2 })
-
+(*
   member s.last() =
     s |> helpers.liftAggregation (fun arr -> snd arr.[arr.Length - 1])
 
@@ -221,7 +221,7 @@ and series<'k, 'v> =
 
   member s.maxBy(f) =
     s |> helpers.liftAggregation (Array.maxBy (fun (k, v) -> f v))
-
+*)
   member s.realign(newKeys:'k[], defaultValue) = 
     s |> helpers.lift (fun arr ->
       let lookup = Map.ofArray (unbox<(System.IComparable * 'v)[]> arr)

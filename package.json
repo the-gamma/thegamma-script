@@ -1,18 +1,38 @@
 {
   "private": true,
-  "name": "the-gamma",
+  "name": "thegamma",
   "version": "0.0.1",
-  "description": "",
+  "description": "To run things, install Node, then:",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server"
+    "build": "fable src/gui & fable src/libraries & fable src/thegamma & fable src/main",
+    "webpack": "webpack"
   },
   "author": "Tomas Petricek",
   "license": "Apache-2.0",
   "dependencies": {
-    "core-js": "^2.4.0",
+    "babel-standalone": "^6.10.3",
+    "core-js": "^2.4.1",
+    "fable-core": "^0.5.1",
     "monaco-editor": "^0.5.1",
-    "requirejs": "^2.2.0",
-    "babel-standalone": "^6.10.3"
-  }
+    "requirejs": "^2.2.0"
+  },
+  "main": "main.js",
+  "devDependencies": {
+    "fable-compiler": "^0.5.1",
+    "source-map-loader": "^0.1.5",
+    "webpack": "^1.13.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/the-gamma/thegamma-experiments.git"
+  },
+  "keywords": [
+    "data",
+    "storytelling"
+  ],
+  "bugs": {
+    "url": "https://github.com/the-gamma/thegamma-experiments/issues"
+  },
+  "homepage": "https://github.com/the-gamma/thegamma-experiments#readme"
 }

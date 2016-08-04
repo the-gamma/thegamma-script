@@ -1,8 +1,8 @@
-﻿#r "../paket-files/github.com/fsprojects/Fable/build/fable/bin/Fable.Core.dll"
-#r "libraries/bin/Debug/libraries.dll"
-#r "thegamma/bin/Debug/thegamma.dll"
-#r "bindings/bin/Debug/bindings.dll"
-#r "gui/bin/Debug/gui.dll"
+﻿#r "../../node_modules/fable-core/Fable.Core.dll"
+#r "../libraries/bin/Debug/libraries.dll"
+#r "../thegamma/bin/Debug/thegamma.dll"
+#r "../bindings/bin/Debug/bindings.dll"
+#r "../gui/bin/Debug/gui.dll"
 open Fable.Core.Extensions
 open Fable.Import
 open Fable.Import.Browser
@@ -14,6 +14,8 @@ open TheGamma.Html
 open TheGamma.Babel
 open TheGamma.TypeChecker
 open Fable.Core
+ 
+Fable.Import.Node.require.Invoke("core-js") |> ignore
 
 // ------------------------------------------------------------------------------------------------
 // Global provided types

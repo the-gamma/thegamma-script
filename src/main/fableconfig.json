@@ -1,14 +1,12 @@
 {
-    "outDir": "../out/js",
+    "outDir": "../../out/js/main",
     "sourceMaps": true,
     "projFile": "main.fsx",
     "refs": {
-        "bindings": "bindings",
-        "libraries": "libraries",
-        "thegamma": "thegamma",
-        "gui": "gui"
-    },
-    "scripts": {
+        "bindings": "../bindings",
+        "libraries": "../libraries",
+        "thegamma": "../thegamma",
+        "gui": "../gui"
     },
     "targets": {
         "debug": {

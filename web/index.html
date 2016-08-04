@@ -6,7 +6,15 @@
 
   <link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css" rel="stylesheet"
     integrity="sha384-1q8mTJOASx8j1Au+a5WDVnPi2lkFfwwEAa8hDDdjZlpLegxhjVME1fgjWPGmkzs7" crossorigin="anonymous">
+	<link href="https://maxcdn.bootstrapcdn.com/font-awesome/4.6.3/css/font-awesome.min.css" rel="stylesheet"
+	  integrity="sha384-T8Gy5hrqNKT+hzMclPo118YTQO6cYprQmhrYwIiQ/3axmI1hQomh7Ud2hPOy8SP1" crossorigin="anonymous">
+	<link href="lib/chosen.min.css" rel="stylesheet">
   <link href="custom/style.css" rel="stylesheet">
+	
+	<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+	<link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png">
+	<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+	<meta name="theme-color" content="#F4C300">	
 </head>
 <body>
 
@@ -391,39 +399,34 @@ chart.column(all)
 
 
 
-<!-- <script src="node_modules/core-js/client/core.min.js"></script> -->
-
-
-<link href="https://maxcdn.bootstrapcdn.com/font-awesome/4.6.3/css/font-awesome.min.css" rel="stylesheet"
-  integrity="sha384-T8Gy5hrqNKT+hzMclPo118YTQO6cYprQmhrYwIiQ/3axmI1hQomh7Ud2hPOy8SP1" crossorigin="anonymous">
-
+<!-- Third-party standard CDN references -->
 <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/numeral.js/1.5.3/numeral.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-core/5.6.15/browser-polyfill.min.js"></script>
 <script src="https://code.jquery.com/jquery-2.1.4.js" integrity="sha256-siFczlgw4jULnUICcdm9gjQPZkw/YPDqhQ9+nAOScE4="   crossorigin="anonymous"></script>
 <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js"
 	integrity="sha384-0mSbJDEHialfmuBBQP6A4Qrprq5OVfW37PRR3j5ELqxss1yVqOtnepnHVP9aJ7xS" crossorigin="anonymous"></script>
 
+<!-- Standard local references -->
 <script src="lib/chosen.jquery.min.js"></script>
-<link href="lib/chosen.min.css" rel="stylesheet">
+<script type="text/javascript" src="custom/common.js"></script>
 
+<!-- More fancy libraries -->
 <script src="//cdnjs.cloudflare.com/ajax/libs/d3/3.5.3/d3.min.js"></script>
 <script src="//cdnjs.cloudflare.com/ajax/libs/topojson/1.6.9/topojson.min.js"></script>
 <script src="lib/datamaps.world.min.js"></script>
-<script type="text/javascript" src="custom/common.js"></script>
 
+<!-- Loading Monaco and TheGamma scripts -->
 <script src="node_modules/babel-standalone/babel.js"></script>
 <script src="node_modules/requirejs/require.js"></script>
 <script>
 	require.config({
-		baseUrl: 'out/js',
-		paths: { 'vs': '../../node_modules/monaco-editor/dev/vs' },
-		map: {
-			"*": {
-				"monaco": "vs/editor/editor.main",
-				"fable-core": "../../paket-files/github.com/fsprojects/Fable/src/fable/Fable.Core/npm/fable-core"
-			}
-    }})
-	require(["main"])
+			baseUrl: 'out/build',
+			paths: { 'vs': '../../node_modules/monaco-editor/dev/vs' },
+			map: { "*": { "monaco": "vs/editor/editor.main" }}
+	});
+	require(['monaco'], function() {
+		require(["bundle"]);
+  });
 </script>
 
 <script type="text/javascript" src="//www.google.com/jsapi"></script>
