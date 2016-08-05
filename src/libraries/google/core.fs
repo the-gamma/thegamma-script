@@ -46,7 +46,7 @@ module Helpers =
     | _ when isNull o -> undefined<_>()
     | _ -> getProperty o prop
 
-  [<Emit("drawChart($0, $1, $2, blockCallback);")>]
+  [<Emit("drawChart($0, $1, $2);")>]
   let drawChart<'T> (chart:obj) data outputId : unit = failwith "!"
 
   let showChart (chart:#Chart) (outputId:string) =

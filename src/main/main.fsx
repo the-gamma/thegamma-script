@@ -21,7 +21,7 @@ Fable.Import.Node.require.Invoke("core-js") |> ignore
 // Global provided types
 // ------------------------------------------------------------------------------------------------
 
-// let services = "http://127.0.0.1:10042/"
+//let services = "http://127.0.0.1:10042/"
 let services = "http://thegamma-services.azurewebsites.net/"
 
 type ProvidedTypes = 
@@ -113,6 +113,9 @@ let withClass cls (el:Element) = el.classList.contains cls
 
 open TheGamma.Services
 
+[<Emit("setRunner($0, $1)")>]
+let setRunner (article:string) (f:unit -> unit) = failwith "JS"
+
 let callShowMethod outId cmd = async {
   match cmd.Command with
   | CommandKind.Expr(e) ->
@@ -164,7 +167,8 @@ let setupEditor (parent:HTMLElement) =
     let prog = { prog with Body = newBody }
     return! CodeGenerator.compileAndRun globalExprs text prog }
 
-  run source |> Async.StartImmediate
+  setRunner (parent.dataset.["article"]) (fun () -> 
+    run source |> Async.StartImmediate)
 
   let ed = Lazy.Create(fun () ->   
     let ed = Monaco.createMonacoEditor monacoEl.id source (fun opts ->
