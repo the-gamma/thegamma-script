@@ -171,8 +171,8 @@ open TheGamma.TypeChecker
 let replace (rng:Range) newValue (text:string) = 
   text.Substring(0, rng.Start) + newValue + text.Substring(rng.End)
 
-let replaceNameWithValue (text:string) (n:Name) el =
-  let newValue = escapeIdent (unbox<Browser.HTMLSelectElement> el).value
+let replaceNameWithValue (text:string) (n:Name) value =
+  let newValue = escapeIdent value
   replace n.Range newValue text
 
 /// Replace the second string first, assuming it is later in the text
@@ -202,13 +202,15 @@ let renderNestedDoc = function
   | _ ->
       h?h3 [] [ text "Choose a value" ], h?p [] [text "First choose a category, then choose a value."]
     
-let renderEditor typeCheck (setValue:string -> unit) origText = function
+let renderEditor typeCheck (setValue:string -> string -> string -> unit) origText = function
   | SingleChoice(doc, n, ms) ->
       h?div ["class" => "ed-single"] [
         renderDoc doc
         h?div ["class" => "control"] [ 
           h?select 
-            [ "change" =!> fun el e -> replaceNameWithValue origText n el |> setValue ] 
+            [ "change" =!> fun el e -> 
+                let value = (unbox<Browser.HTMLSelectElement> el).value
+                replaceNameWithValue origText n value |> setValue "single" value ] 
             [ for (Property.Property(name, _, _)) in ms ->
                 let sel = if name = n.Name then ["selected" => "selected"] else []
                 h?option sel [ text name ] ]
@@ -234,7 +236,7 @@ let renderEditor typeCheck (setValue:string -> unit) origText = function
                   yield text " "
                   yield h?button [
                     if dis then yield "disabled" => "disabled"
-                    yield "click" =!> fun el e -> setValue edit ] 
+                    yield "click" =!> fun el e -> setValue "list-delete" n.Name edit ] 
                     [ h?i ["class" => if dis then "fa fa-ban" else "fa fa-times" ] [] ]
                 ]
             ]
@@ -243,7 +245,7 @@ let renderEditor typeCheck (setValue:string -> unit) origText = function
                 "change" =!> fun el e -> 
                   let sel = (el :?> Browser.HTMLSelectElement).value
                   let last = if ns.Length = 0 then ca else ns.[ns.Length - 1]
-                  insertDotTextAfter origText last.Range sel |> setValue
+                  insertDotTextAfter origText last.Range sel |> setValue "list-add" sel
               ] 
               [ yield h?option [] []
                 for (Property.Property(name, _, _)) in ms ->
@@ -275,7 +277,8 @@ let renderEditor typeCheck (setValue:string -> unit) origText = function
               [ "data-placeholder" => "Choose an item..." 
                 "change" =!> fun el e -> 
                     let name2 = (unbox<Browser.HTMLSelectElement> el).value
-                    replaceTwoNamesWithValues origText (n1, n2) (name1, name2) |> setValue ] 
+                    replaceTwoNamesWithValues origText (n1, n2) (name1, name2) 
+                    |> setValue "nested" name2  ] 
               [ if name2 = "" then yield h?option [] []
                 for Property.Property(name, _, _) in nested ->
                   let sel = if name = name2 then ["selected" => "selected"] else []

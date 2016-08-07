@@ -14,9 +14,10 @@ type EditorWorkerMessage =
   | UpdateNow of string
   | Refersh of string
 
-type EditorService(checker, delay) = 
+type EditorService(article, checker, delay) = 
   let renderEditors = Control.Event<_>()
   let update text = async {
+    Log.event("options", "update", article, text)
     let! prg = checker text 
         
     Log.trace("service", "Collecting editors")
@@ -70,7 +71,7 @@ type CheckingMessage =
   | TypeCheck of code:string * AsyncReplyChannel<Program<Type>>
   | IsWellTyped of code:string * AsyncReplyChannel<bool>
 
-type CheckingService(globals) =
+type CheckingService(article, globals) =
   let errorsReported = Control.Event<_>()
   let emptyProg = { Body = []; Range = { Start = 0; End = 0 } }
   let agent = MailboxProcessor.Start(fun inbox ->
@@ -96,9 +97,10 @@ type CheckingService(globals) =
           Log.trace("service", "Type checking source code")
           let! globals = Async.AwaitFuture globals
           try
+            Log.event("compiler", "check-source", article, code)
             let! errors, result = TypeChecker.typeCheck globals code
             Log.trace("service", "Type checking completed")
-            errorsReported.Trigger(errors)
+            errorsReported.Trigger(code, errors)
             repl.Reply(result)
             return! loop code result
           with e ->

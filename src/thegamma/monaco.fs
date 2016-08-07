@@ -48,6 +48,7 @@ let createCompletionProvider globals =
         async {          
           try
             let input = model.getValue(editor.EndOfLinePreference.LF, false)
+            Log.event("editor", "completions", "", JsInterop.createObj ["source", box input; "position", box position])
             let lines = input.Split('\n')
             let! globals = Async.AwaitFuture globals
             let! errs, ty = typeCheck globals input

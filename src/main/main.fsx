@@ -21,8 +21,9 @@ Fable.Import.Node.require.Invoke("core-js") |> ignore
 // Global provided types
 // ------------------------------------------------------------------------------------------------
 
-//let services = "http://127.0.0.1:10042/"
-let services = "http://thegamma-services.azurewebsites.net/"
+let services = 
+  if isLocalHost() then "http://127.0.0.1:10042/"
+  else "http://thegamma-services.azurewebsites.net/"
 
 type ProvidedTypes = 
   { LookupNamed : string -> Type list -> Type
@@ -136,7 +137,10 @@ let callShowMethod outId cmd = async {
       | _ -> return cmd
   | _ -> return cmd }
 
-let renderErrors el errors = 
+let renderErrors article el (source, errors) = 
+  if not (Seq.isEmpty errors) then
+    Log.event("compiler", "errors", article, 
+      JsInterop.createObj ["source", box source; "errors", box [| for e in errors -> e.Number |] ])
   h?div ["class" => "error"] 
     [ for (e:Error) in errors -> 
         h?div [] [
@@ -156,18 +160,21 @@ let setupEditor (parent:HTMLElement) =
   let monacoEl = findChildElement (withClass "ia-monaco") parent
   let errorsEl = findChildElement (withClass "ia-errors") parent
   let optionsEl = findChildElement (withClass "ia-options") parent
+  
+  let article = parent.dataset.["article"]
 
-  let checkingService = CheckingService(globalTypes)
-  let editorService = EditorService(checkingService.TypeCheck, 2000)
-  checkingService.ErrorsReported.Add (renderErrors errorsEl)
+  let checkingService = CheckingService(article, globalTypes)
+  let editorService = EditorService(article, checkingService.TypeCheck, 2000)
+  checkingService.ErrorsReported.Add (renderErrors article errorsEl)
 
   let run text = async {
+    Log.event("compiler", "run", article, text)
     let! prog = checkingService.TypeCheck(text)
     let! newBody = prog.Body |> Async.map (callShowMethod outputId)
     let prog = { prog with Body = newBody }
     return! CodeGenerator.compileAndRun globalExprs text prog }
 
-  setRunner (parent.dataset.["article"]) (fun () -> 
+  setRunner article (fun () -> 
     run source |> Async.StartImmediate)
 
   let ed = Lazy.Create(fun () ->   
@@ -195,7 +202,8 @@ let setupEditor (parent:HTMLElement) =
     if not ed.IsValueCreated then source
     else ed.Value.getModel().getValue(monaco.editor.EndOfLinePreference.LF, false)
 
-  let setText t = 
+  let setText (edit:string) membr t = 
+    Log.event("options", "set-text", article, JsInterop.createObj ["edit", box edit; "member", box membr ])
     ed.Value.getModel().setValue(t)
     if showOptionsBtn.IsSome then
       editorService.UpdateSource(t, true)
@@ -206,22 +214,27 @@ let setupEditor (parent:HTMLElement) =
 
   showOptionsBtn |> FsOption.iter (fun btn -> 
     editorService.EditorsUpdated.Add (fun eds ->
-      h?div ["class" => "ia-editor-panel"] (List.map (Editors.renderEditor checkingService.IsWellTyped setText (getText())) eds)
+      List.map (Editors.renderEditor checkingService.IsWellTyped setText (getText())) eds
+      |> h?div ["class" => "ia-editor-panel"]
       |> renderTo optionsEl )
   
     btn.onclick <- fun _ ->
       optionsVisible <- not optionsVisible
       optionsEl.style.display <- if optionsVisible then "block" else "none"
-      if optionsVisible then editorService.UpdateSource(source)
+      Log.event("gui", "options", article, box optionsVisible)
+      if optionsVisible then editorService.UpdateSource(getText())
       box () )
 
   showCodeBtn.onclick <- fun _ ->
     editorVisible <- not editorVisible
+    Log.event("gui", "editor", article, editorVisible)
     editorEl.style.display <- if editorVisible then "block" else "none"
     if editorVisible then ed.Force() |> ignore
     box ()
   
-  runBtn.onclick <- fun e -> getText() |> run |> Async.StartImmediate |> box
+  runBtn.onclick <- fun e -> 
+    Log.event("gui", "run", article, "click")
+    getText() |> run |> Async.StartImmediate |> box
 
 
 Monaco.setupMonacoServices(globalTypes)

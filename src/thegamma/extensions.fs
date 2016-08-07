@@ -13,11 +13,27 @@ let jsonParse<'R> (str:string) : 'R = failwith "JS Only"
 [<Emit("console.log.apply(console, $0)")>]
 let consoleLog (args:obj[]) : unit = failwith "JS only"
 
-let enabledCategories = set [ "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "SERVICE"; "CODEGEN" ]
+[<Emit("logEvent($0, $1, $2, $3)")>]
+let logEvent (category:string) (evt:string) (article:string) (data:obj) : unit = failwith "JS only"
+
+let isLocalHost() = 
+  window.location.hostname = "localhost" || 
+  window.location.hostname = "127.0.0.1"
+
+let enabledCategories = 
+  if not (isLocalHost ()) then set []
+  else set [ "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "SERVICE"; "CODEGEN" ]
 
 type Log =
+  static member event(category:string, evt:string, article:string, data:obj) = 
+    logEvent category evt article data
+
   static member message(level:string, category:string, msg:string, [<System.ParamArray>] args) = 
+    let args = if args = null then [| |] else args
     let category = category.ToUpper()
+    if level = "EXCEPTION" then
+      logEvent "system" "exception" "" (JsInterop.createObj ["category", box category; "msg", box msg; "args", box args ])
+
     if level = "EXCEPTION" || level = "ERROR" || enabledCategories.Contains category then
       let dt = System.DateTime.Now
       let p2 (s:int) = (string s).PadLeft(2, '0')
@@ -29,7 +45,6 @@ type Log =
         | "EXCEPTION" -> "color:#c00000"
         | "ERROR" -> "color:#900000"
         | _ -> ""
-      let args = if args = null then [| |] else args
       consoleLog(FSharp.Collections.Array.append [|box ("%c" + prefix + msg); box color|] args)
 
   static member trace(category:string, msg:string, [<System.ParamArray>] args) = 
