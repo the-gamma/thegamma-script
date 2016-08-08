@@ -45,6 +45,8 @@ let rec compileExpression ctx (expr:Expr<Type>) = async {
       let! emitter = getEmitter n.Name inst.Type
       let! inst = compileExpression ctx inst
       return emitter.Emit(inst, [])
+  | ExprKind.Null ->
+      return NullLiteral(rangeToLoc ctx expr.Range)
   | ExprKind.Number(n) ->
       return NumericLiteral(n, rangeToLoc ctx expr.Range)
   | ExprKind.String(s) ->

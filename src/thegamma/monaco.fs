@@ -100,6 +100,17 @@ let createCompletionProvider globals =
                       ci.label <- n
                       ci.insertText <- Some(if needsEscaping n then "'" + n + "'" else n)
                       ci.filterText <- Some(n)
+                      match m with
+                      | Member.Method(arguments=args) -> 
+                          let acc, l = 
+                            [ for n, opt, t in args -> (if opt then "?" else "") + n ] 
+                            |> Seq.fold (fun (acc, l:string) s ->
+                                if l.Length > 100 then (l::acc, s)
+                                else (acc, if l = "" then s else l+","+s)) ([], "")
+                          let args = l::acc |> List.rev |> String.concat ",\n"
+                          ci.documentation <- Some("(" + args + ")")
+                      | _ -> ()
+
                       let eo = JsInterop.createEmpty<editor.ISingleEditOperation>
                       eo.text <- if needsEscaping n then "'" + n + "'" else n
                       eo.range <- nameRange

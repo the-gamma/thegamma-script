@@ -54,4 +54,8 @@ module TypeChecker =
     
   let cannotUnityTypes rng = 
     { Number = 35; Range = rng 
-      Message = "Cannot unify types" }
+      Message = "Cannot unify types." }
+
+  let nameBasedParamMustBeLast rng = 
+    { Number = 36; Range = rng 
+      Message = "All named parameters must be at the end of parameter list." }

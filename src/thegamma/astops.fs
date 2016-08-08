@@ -11,6 +11,7 @@ let (|ExprLeaf|ExprNode|) e =
   | ExprKind.Boolean _
   | ExprKind.String _
   | ExprKind.Unit
+  | ExprKind.Null
   | ExprKind.Empty -> ExprLeaf()
 
 let rebuildExprNode e es ns =
@@ -36,6 +37,7 @@ let rebuildExprNode e es ns =
   | ExprKind.Boolean _, _, _
   | ExprKind.String _, _, _
   | ExprKind.Empty, _, _ 
+  | ExprKind.Null, _, _ 
   | ExprKind.Unit, _, _ -> failwith "rebuildExprNode: Not a node"
 
 

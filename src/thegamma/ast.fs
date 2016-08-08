@@ -67,6 +67,7 @@ and [<RequireQualifiedAccess>] ExprKind<'T> =
   | List of Expr<'T> list
   | Empty
   | Unit
+  | Null
 
 and Expr<'T> =
   { Expr : ExprKind<'T>

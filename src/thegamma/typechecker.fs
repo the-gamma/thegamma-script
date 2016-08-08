@@ -152,6 +152,8 @@ let rec applyTypes assigns t =
 
 let rec typeCheckExpr ctx ctxTyp res (expr:Expr<unit>) = async {
   match expr.Expr with
+  | ExprKind.Null ->
+      return failwith "Unexpected null in source code."
   | ExprKind.Unit ->
       return { Expr = ExprKind.Unit; Type = Type.Unit; Range = expr.Range }, res
   | ExprKind.Empty ->
@@ -209,11 +211,36 @@ let rec typeCheckExpr ctx ctxTyp res (expr:Expr<unit>) = async {
       let! typed, res = typeCheckExpr ctx None res e
       let! members = getObjectMembers typed.Type 
 
-      let checkArguments argTys = 
-        let argTys = match argTys with Some tys -> List.map Some tys | _ -> List.map (fun _ -> None) args
-        List.zip args argTys |> Async.foldMap (fun res (arg, argTy) -> async {
-          let! t, res = typeCheckExpr ctx argTy res arg.Value
-          return { Name = arg.Name; Value = t }, res }) res
+      let positionBased, nameBased, res = 
+        let pb = args |> List.takeWhile (fun arg -> arg.Name.IsNone) 
+        let nb = args |> List.skipWhile (fun arg -> arg.Name.IsNone)
+        pb |> List.map (fun arg -> arg.Value) |> Array.ofList,
+        nb |> List.choose (fun arg -> arg.Name |> Option.map (fun n -> n.Name, arg.Value)) |> Map.ofList,
+        match nb |> List.tryFind (fun arg -> arg.Name.IsNone) with
+        | Some arg -> res |> addError (Errors.TypeChecker.nameBasedParamMustBeLast arg.Value.Range)
+        | _ -> res
+                
+      let noRange = { Start = 0; End = 0 }
+      let checkArguments pars = 
+        pars |> List.mapi (fun i p -> i, p) |> Async.foldMap (fun res (index, (name, optional, typ)) -> async {
+          let arg = 
+            if index < positionBased.Length then Some(positionBased.[index]) 
+            else Map.tryFind name nameBased 
+          match arg with
+          | Some arg -> 
+              let! t, res = typeCheckExpr ctx (Some typ) res arg
+              return { Name = Some { Name = name; Range = arg.Range }; Value = t }, res  // Here we are returning wrong range 
+          | None when optional ->
+              let v = { Expr = ExprKind.Null; Range = noRange; Type = typ }
+              return { Name = Some { Name = name; Range = noRange }; Value = v }, res // dtto
+          | _ ->
+              let v = { Expr = ExprKind.Empty; Range = noRange; Type = typ }
+              return { Name = Some { Name = name; Range = noRange }; Value = v }, res }) res
+        
+
+        //List.zip args argTys |> Async.foldMap (fun res (arg, argTy) -> async {
+          //let! t, res = typeCheckExpr ctx argTy res arg.Value
+          //return { Name = arg.Name; Value = t }, res }) res
 
       let! resTyp, typedArgs, res = async {
         match members with
@@ -221,7 +248,7 @@ let rec typeCheckExpr ctx ctxTyp res (expr:Expr<unit>) = async {
             match members |> Seq.tryPick (function Member.Method(name=n; typars=tp; arguments=args; typ=r) when n = name.Name -> Some(tp, r, args) | _ -> None) with
             | Some(tp, resTyp, pars) -> 
                 // TODO: check arguments
-                let! res, typedArgs = checkArguments (pars |> List.map (fun (_, _, t) -> t) |> Some)
+                let! res, typedArgs = checkArguments pars
                 let typedArgs = 
                   List.zip pars typedArgs |> List.map (fun ((n, _, _), ta) ->
                      { ta with Name = Some { Name = n; Range = ta.Value.Range }})
@@ -237,15 +264,15 @@ let rec typeCheckExpr ctx ctxTyp res (expr:Expr<unit>) = async {
                 Log.trace("typechecker", "call %s: result type: %O", name.Name, resTyp)
                 return resTyp, typedArgs, res 
             | _ -> 
-                let! res, _ = checkArguments None
+                //let! res, _ = checkArguments None
                 let res = res |> addError (Errors.TypeChecker.methodMissing name.Range name.Name members)
                 return Type.Any, [], res
         | ObjectMembers.SilentError -> 
-            let! res, typedArgs = checkArguments None
-            return Type.Any, typedArgs, res
+            //let! res, typedArgs = checkArguments None
+            return Type.Any, [], res
         | ObjectMembers.NotAnObject -> 
-            let! res, typedArgs = checkArguments None
-            return Type.Any, typedArgs, res |> addError (Errors.TypeChecker.notAnObject e.Range typed.Type) }
+            //let! res, typedArgs = checkArguments None
+            return Type.Any, [], res |> addError (Errors.TypeChecker.notAnObject e.Range typed.Type) }
 
       return { Expr = ExprKind.Call(typed, name, typedArgs); Type = resTyp; Range = expr.Range }, res }
 
@@ -384,6 +411,7 @@ let rec collectExprInfo ctx expr = async {
       return! collectExprInfo ctx e
   | ExprKind.Empty
   | ExprKind.Unit
+  | ExprKind.Null
   | ExprKind.Number _
   | ExprKind.String _
   | ExprKind.Boolean _
