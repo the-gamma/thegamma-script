@@ -96,18 +96,34 @@ let rec unifyTypes assigns ts1 ts2 =
           Log.trace("typechecker", "Cannot unify types: %O and %O", Array.ofList ts1, Array.ofList ts2)
           assigns, addError (Errors.TypeChecker.cannotUnityTypes rng) res) }
 
-let rec substituteTypes assigns t =
+let avoidCapture bound assigns =
+  let renames = bound |> List.choose (fun n -> 
+    let assigned = Map.tryFindKey (fun k v -> match v with Type.Parameter nn -> n = nn | _ -> false) assigns
+    if assigned.IsSome then Some(n, n + "0") else None) 
+  renames |> List.fold (fun assigns (o, n) -> Map.add o (Type.Parameter n) assigns) assigns,
+  Map.ofSeq renames   
+
+let rec substituteMembers assigns members = 
+  members |> Array.map (function
+    | Member.Method(n,tp,ars,t,d,e) -> 
+        let assigns0 = assigns
+        let assigns, renames = avoidCapture tp assigns
+        // Log.trace("typechecker", "Substituting in %s<%s>, renaming: %O, assings: %O", n, String.concat "," tp, Map.toArray renames, Map.toArray assigns0)
+        let tp = tp |> List.map (fun tp -> match Map.tryFind tp renames with Some r -> r | _ -> tp)
+        let nars = ars |> List.map (fun (n,o,t) -> n, o, substituteTypes assigns t)
+        Member.Method(n,tp,nars,substituteTypes assigns t,d,e)
+    | Member.Property(n,t,s,d,e) -> Member.Property(n,substituteTypes assigns t,s,d,e))      
+
+and substituteTypes assigns t =
   match t with
   | Type.Parameter s when Map.containsKey s assigns -> assigns.[s]
   | Type.Parameter _ | Type.Any | Type.Primitive _ | Type.Unit -> t
   | Type.Function(ts, t) -> Type.Function(List.map (substituteTypes assigns) ts, substituteTypes assigns t)
   | Type.List(t) -> Type.List(substituteTypes assigns t)
   | Type.Object(o) ->
-      let members = o.Members |> Array.map (function
-        | Member.Method(n,tp,ars,t,d,e) -> 
-            let nars = ars |> List.map (fun (n,o,t) -> n, o, substituteTypes assigns t)
-            Member.Method(n,tp,nars,substituteTypes assigns t,d,e)
-        | Member.Property(n,t,s,d,e) -> Member.Property(n,substituteTypes assigns t,s,d,e))
+      let members = substituteMembers assigns o.Members
+      let bound = o.Typeargs |> List.choose (function Type.Parameter n -> Some n | _ -> None)
+      let assigns, _ = avoidCapture bound assigns
       { Typeargs = List.map (substituteTypes assigns) o.Typeargs
         Members = members } |> Type.Object
   | Type.Delayed(g, f) -> 
@@ -116,6 +132,23 @@ let rec substituteTypes assigns t =
             member x.Then(g) =             
               f.Then(fun t -> g (substituteTypes assigns t)) }
       Type.Delayed(g, f)
+
+let rec applyTypes assigns t = 
+  match t with 
+  | Type.Delayed(g, f) ->
+      let f = 
+        { new Future<Type> with 
+            member x.Then(g) =             
+              f.Then(fun t -> g (applyTypes assigns t)) }
+      Type.Delayed(g, f)
+  | Type.Object(o) ->
+      { Typeargs = List.map (substituteTypes assigns) o.Typeargs
+        Members = substituteMembers assigns o.Members } |> Type.Object      
+  | t when List.isEmpty (Map.toList assigns) -> t
+  | Type.Any -> Type.Any
+  | _ -> 
+      Log.error("typechecker", "Invalid type application %O with %O", t, Map.toArray assigns)
+      failwith "Invalid type application"
 
 let rec typeCheckExpr ctx ctxTyp res (expr:Expr<unit>) = async {
   match expr.Expr with
@@ -195,11 +228,12 @@ let rec typeCheckExpr ctx ctxTyp res (expr:Expr<unit>) = async {
 
                 let parTys = pars |> List.map (fun (_, _, t) -> t)
                 let argTys = typedArgs |> List.map (fun a -> a.Value.Type)
+                Log.trace("typechecker", "unifying %s: pars: %O, args: %O", name.Name, Array.ofList parTys, Array.ofList argTys)
                 let! unifyFunc = unifyTypes [] parTys argTys 
                 let assigns, res = unifyFunc res expr.Range
 
                 Log.trace("typechecker", "call %s: tyargs: %s, assigns: %O", name.Name, String.concat "," tp, Array.ofList assigns)
-                let resTyp = substituteTypes (Map.ofList assigns) resTyp
+                let resTyp = applyTypes (Map.ofList assigns) resTyp
                 Log.trace("typechecker", "call %s: result type: %O", name.Name, resTyp)
                 return resTyp, typedArgs, res 
             | _ -> 

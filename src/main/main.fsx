@@ -28,7 +28,7 @@ let services =
 type ProvidedTypes = 
   { LookupNamed : string -> Type list -> Type
     Globals : Map<string, Expression * Type> }
-
+    
 let types = async {
   let mutable named = Map.empty
   let lookupNamed n tyargs = 
@@ -37,7 +37,7 @@ let types = async {
         if List.length tya <> List.length tyargs then 
           Log.error("Named type '%s' has mismatching length of type arguments", n)
           failwith (sprintf "Named type '%s' has mismatching length of type arguments" n)
-        TypeChecker.substituteTypes (Map.ofList (List.zip tya tyargs)) r
+        TypeChecker.applyTypes (Map.ofList (List.zip tya tyargs)) r
     | None -> 
         Log.error("Could not find named type '%s'", n)
         failwith (sprintf "Could not find named type '%s'" n)
