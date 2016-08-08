@@ -9,10 +9,10 @@ type Range =
   { Start : int
     End : int }
 
-type Error =
+type Error<'Range> =
   { Number : int
     Message : string
-    Range : Range }
+    Range : 'Range }
 
 type [<RequireQualifiedAccess>] TokenKind = 
   | LParen

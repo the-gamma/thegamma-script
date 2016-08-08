@@ -9,7 +9,7 @@ type ParseStream<'T> = int * list<'T>
 
 /// A parser takes a list of inputs and either fails or produces a list
 /// of unconsumed inputs together with the result of the parsing
-type Parser<'T, 'R> = Parser of (ParseStream<'T> -> option<ParseStream<'T> * Error list * 'R>)
+type Parser<'T, 'R> = Parser of (ParseStream<'T> -> option<ParseStream<'T> * Error<Range> list * 'R>)
 
 /// Returned by the `slot` function to create a parser slot that is filled later
 type ParserSetter<'T, 'R> = 

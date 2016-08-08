@@ -71,6 +71,19 @@ type CheckingMessage =
   | TypeCheck of code:string * AsyncReplyChannel<bool * Program<Type>>
   | IsWellTyped of code:string * AsyncReplyChannel<bool>
 
+type Position = { Line:int; Column:int }
+type LineRange = { Start:Position; End:Position }
+
+let rec offsetToLocation lines offs lengths =
+  match lengths with
+  | l::lengths when offs <= l -> { Line = lines; Column = offs }
+  | l::lengths -> offsetToLocation (lines+1) (offs-l-1) lengths
+  | [] -> { Line = lines; Column = offs  } // error? out of range
+
+let rangeToLoc lengths (rng:Range) = 
+  { Start = offsetToLocation 1 rng.Start lengths
+    End = offsetToLocation 1 rng.Start lengths }
+
 type CheckingService(article, globals) =
   let errorsReported = Control.Event<_>()
   let emptyProg = { Body = []; Range = { Start = 0; End = 0 } }
@@ -100,6 +113,11 @@ type CheckingService(article, globals) =
             Log.event("compiler", "check-source", article, code)
             let! errors, result = TypeChecker.typeCheck globals code
             Log.trace("service", "Type checking completed")
+
+            let lengths = code.Split('\n') |> Array.toList |> List.map (fun l -> l.Length)
+            let errors = errors |> List.map (fun e -> 
+              { Number = e.Number; Message = e.Message; Range = rangeToLoc lengths e.Range })
+
             errorsReported.Trigger(code, errors)
             let result = (List.isEmpty errors, result)
             repl.Reply(result) 

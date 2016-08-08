@@ -133,7 +133,7 @@ let callShowMethod outId cmd = async {
             | Member.Method("show", [], [_, _, Type.Primitive "string"], _, _, _) -> true
             | _ -> false)
           if hasShow then
-            let rng = { Start = e.Range.End; End = e.Range.End }
+            let rng = { Range.Start = e.Range.End; End = e.Range.End }
             let outExpr = { Expr = ExprKind.String(outId); Range = rng; Type = Type.Primitive("string") }
             let args = [{ Argument.Name = None; Argument.Value = outExpr }]
             let newE = { e with Expr = ExprKind.Call(e, { Name = "show"; Range = rng }, args) }
@@ -147,11 +147,13 @@ let renderErrors article el (source, errors) =
   if not (Seq.isEmpty errors) then
     Log.event("compiler", "errors", article, 
       JsInterop.createObj ["source", box source; "errors", box [| for e in errors -> e.Number |] ])
-  h?div ["class" => "error"] 
-    [ for (e:Error) in errors -> 
-        h?div [] [
-          text (sprintf "%d:%d" e.Range.Start e.Range.End); 
-          text "error "; text (string e.Number); text ": "; text (e.Message)] ]
+  h?ul["class" => "error"] 
+    [ for e in errors |> Seq.sortBy (fun e -> e.Range.Start) -> 
+        h?li [] [
+          h?span ["class" => "err"] [ text (sprintf "error %d" e.Number) ]
+          text " "
+          h?span ["class" => "loc"] [ text (sprintf "at line %d col %d" e.Range.Start.Line e.Range.Start.Column) ]
+          text (": " + e.Message) ] ]
   |> renderTo el
 
 [<Emit("eval($0)")>]
@@ -244,7 +246,9 @@ let setupEditor (parent:HTMLElement) =
 
   showOptionsBtn |> FsOption.iter (fun btn -> 
     editorService.EditorsUpdated.Add (fun eds ->
-      List.map (Editors.renderEditor checkingService.IsWellTyped setText (getText())) eds
+      eds
+      |> List.sortBy (fun ed -> ed.Range.Start)
+      |> List.map (Editors.renderEditor checkingService.IsWellTyped setText (getText())) 
       |> h?div ["class" => "ia-editor-panel"]
       |> renderTo optionsEl )
   
@@ -269,7 +273,7 @@ let setupEditor (parent:HTMLElement) =
     Log.event("gui", "share", article, text)
     async { 
       let! ok, prog = checkingService.TypeCheck(text)
-      let! newBody = prog.Body |> Async.map (callShowMethod outputId)
+      let! newBody = prog.Body |> Async.map (callShowMethod "output-id-placeholder")
       let prog = { prog with Body = newBody }
       let! compiled = CodeGenerator.compileAndRun globalExprs text prog         
       if not ok then cannotShareSnippet()

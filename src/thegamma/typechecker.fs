@@ -11,7 +11,7 @@ type CheckingContext =
   { Variables : Map<string, Type> }
 
 type CheckingResult = 
-  { Errors : Error list }
+  { Errors : Error<Range> list }
 
 let addError e ctx = { ctx with Errors = e::ctx.Errors }
 let addVariable k v ctx = { ctx with Variables = Map.add k v ctx.Variables }
@@ -257,7 +257,7 @@ let rec typeCheckExpr ctx ctxTyp res (expr:Expr<unit>) = async {
                 let argTys = typedArgs |> List.map (fun a -> a.Value.Type)
                 Log.trace("typechecker", "unifying %s: pars: %O, args: %O", name.Name, Array.ofList parTys, Array.ofList argTys)
                 let! unifyFunc = unifyTypes [] parTys argTys 
-                let assigns, res = unifyFunc res expr.Range
+                let assigns, res = unifyFunc res name.Range
 
                 Log.trace("typechecker", "call %s: tyargs: %s, assigns: %O", name.Name, String.concat "," tp, Array.ofList assigns)
                 let resTyp = applyTypes (Map.ofList assigns) resTyp
