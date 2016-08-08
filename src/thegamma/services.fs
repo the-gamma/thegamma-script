@@ -18,7 +18,7 @@ type EditorService(article, checker, delay) =
   let renderEditors = Control.Event<_>()
   let update text = async {
     Log.event("options", "update", article, text)
-    let! prg = checker text 
+    let! (_:bool), prg = checker text 
         
     Log.trace("service", "Collecting editors")
     let! eds = Async.collect collectCmdEditors prg.Body 
@@ -68,7 +68,7 @@ type EditorService(article, checker, delay) =
 // ------------------------------------------------------------------------------------------------
 
 type CheckingMessage = 
-  | TypeCheck of code:string * AsyncReplyChannel<Program<Type>>
+  | TypeCheck of code:string * AsyncReplyChannel<bool * Program<Type>>
   | IsWellTyped of code:string * AsyncReplyChannel<bool>
 
 type CheckingService(article, globals) =
@@ -101,13 +101,14 @@ type CheckingService(article, globals) =
             let! errors, result = TypeChecker.typeCheck globals code
             Log.trace("service", "Type checking completed")
             errorsReported.Trigger(code, errors)
-            repl.Reply(result)
+            let result = (List.isEmpty errors, result)
+            repl.Reply(result) 
             return! loop code result
           with e ->
             Log.exn("service", "Type checking failed: %O", e)
-            repl.Reply(emptyProg)
+            repl.Reply((false, emptyProg))
             return! loop lastCode lastResult }
-    loop "" emptyProg)
+    loop "" (false, emptyProg))
 
   member x.ErrorsReported = errorsReported.Publish
   member x.TypeCheck(code) = agent.PostAndAsyncReply(fun ch -> TypeCheck(code, ch))

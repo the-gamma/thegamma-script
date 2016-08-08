@@ -98,9 +98,6 @@ type BabelResult =
 type Babel =
   abstract transformFromAst : obj * string * BabelOptions -> BabelResult
 
-[<Emit("eval($0)")>]
-let eval (s:string) : unit = ()
-
 [<Emit("Babel")>]
 let babel : Babel = Unchecked.defaultof<_> 
 
@@ -111,14 +108,7 @@ let compileAndRun globals (text:string) prog = async {
     let! res = compileProgram ctx prog
     let code = babel.transformFromAst(Serializer.serializeProgram res, text, { presets = [| "es2015" |] })
     Log.trace("codegen", "Evaluating: %O", code)
-
-    // Get fable to reference everything
-    let s = TheGamma.Series.series<int, int>.create(async { return [||] }, "", "", "") 
-    TheGamma.TypePovidersRuntime.RuntimeContext("lol", "", "troll") |> ignore
-    TypePovidersRuntime.trimLeft |> ignore
-    TheGamma.GoogleCharts.chart.bar |> ignore
-    TheGamma.table<int, int>.create(s) |> ignore
-    TheGamma.Series.series<int, int>.values([| 1 |]) |> ignore
-    eval code.code
+    return code.code;
   with e ->
-    Log.exn("codegen", "Evaluating code failed: %O", e) }
+    Log.exn("codegen", "Evaluating code failed: %O", e)
+    return "" }

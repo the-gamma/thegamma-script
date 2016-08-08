@@ -195,20 +195,22 @@ module RestProvider =
     (trimRight '/' a) + "/" + (trimLeft '/' b)
 
   let addTraceCall inst trace =
-    let mem = MemberExpression(inst, IdentifierExpression("addTrace", None), false, None)
-    CallExpression(mem, [trace], None)
+    if Seq.isEmpty trace then inst 
+    else
+      let trace = StringLiteral(String.concat "&" trace, None)    
+      let mem = MemberExpression(inst, IdentifierExpression("addTrace", None), false, None)
+      CallExpression(mem, [trace], None)
 
   let propAccess trace = 
-    let trace = StringLiteral(String.concat "&" trace, None)
     { Emit = fun (inst, _args) -> addTraceCall inst trace }
 
   let methCall trace =
-    let trace = StringLiteral(String.concat "&" trace, None)
     { Emit = fun (inst, args) ->
         let withTrace = addTraceCall inst trace
         args |> Seq.fold (fun inst (name, value) ->
           let trace = BinaryExpression(BinaryPlus, StringLiteral(name + "=", None), value, None)
-          addTraceCall inst trace ) withTrace }
+          let mem = MemberExpression(inst, IdentifierExpression("addTrace", None), false, None)
+          CallExpression(mem, [trace], None) ) withTrace }
 
   let dataCall parser trace endp = 
     { Emit = fun (inst, args) ->
@@ -223,9 +225,6 @@ module RestProvider =
   let func v f = 
     let body = BlockStatement([ReturnStatement(f (ident v), None)], None)
     FunctionExpression(None, [IdentifierPattern(v, None)], body, false, false, None)
-
-//  Member.Property
-//  Type.Object ObjectType
 
 
   // Turn "Async<string>" into the required type

@@ -57,7 +57,7 @@ let types = async {
       TypePoviders.NamedType("seq", ["a"], Type.Any) 
       TypePoviders.NamedType("async", ["a"], Type.Any) ]
 
-  let! fsTys = TypePoviders.FSharpProvider.provideFSharpTypes lookupNamed "ext/libraries.json"     
+  let! fsTys = TypePoviders.FSharpProvider.provideFSharpTypes lookupNamed "/ext/libraries.json"     
   let allTys = restTys @ fsTys
 
   named <- 
@@ -117,6 +117,12 @@ open TheGamma.Services
 [<Emit("setRunner($0, $1)")>]
 let setRunner (article:string) (f:unit -> unit) = failwith "JS"
 
+[<Emit("shareSnippet($0, $1)")>]
+let shareSnippet (snippet:string) (compiled:string) = failwith "JS"
+
+[<Emit("cannotShareSnippet()")>]
+let cannotShareSnippet () = failwith "JS"
+
 let callShowMethod outId cmd = async {
   match cmd.Command with
   | CommandKind.Expr(e) ->
@@ -148,11 +154,16 @@ let renderErrors article el (source, errors) =
           text "error "; text (string e.Number); text ": "; text (e.Message)] ]
   |> renderTo el
 
+[<Emit("eval($0)")>]
+let eval (s:string) : unit = ()
+
 let setupEditor (parent:HTMLElement) =
   let source = (findChildElement (withClass "ia-source") parent).innerText.Trim()
+  let compiled = tryFindChildElement (withClass "ia-compiled") parent |> FsOption.map (fun el -> el.innerText.Trim())
   let outputId = (findChildElement (withClass "ia-output") parent).id
     
   let runBtn = findChildElement (withClass "ia-run") parent
+  let shareBtn = findChildElement (withClass "ia-share") parent
   let showCodeBtn = findChildElement (withClass "ia-show-source") parent
   let showOptionsBtn = tryFindChildElement (withClass "ia-show-options") parent
   
@@ -169,10 +180,23 @@ let setupEditor (parent:HTMLElement) =
 
   let run text = async {
     Log.event("compiler", "run", article, text)
-    let! prog = checkingService.TypeCheck(text)
-    let! newBody = prog.Body |> Async.map (callShowMethod outputId)
-    let prog = { prog with Body = newBody }
-    return! CodeGenerator.compileAndRun globalExprs text prog }
+    let! code = async {
+      match compiled with
+      | Some compiled when text = source -> return compiled
+      | _ ->
+        let! _, prog = checkingService.TypeCheck(text)
+        let! newBody = prog.Body |> Async.map (callShowMethod outputId)
+        let prog = { prog with Body = newBody }
+        return! CodeGenerator.compileAndRun globalExprs text prog }
+
+    // Get fable to reference everything
+    let s = TheGamma.Series.series<int, int>.create(async { return [||] }, "", "", "") 
+    TheGamma.TypePovidersRuntime.RuntimeContext("lol", "", "troll") |> ignore
+    TypePovidersRuntime.trimLeft |> ignore
+    TheGamma.GoogleCharts.chart.bar |> ignore
+    TheGamma.table<int, int>.create(s) |> ignore
+    TheGamma.Series.series<int, int>.values([| 1 |]) |> ignore
+    eval code }
 
   setRunner article (fun () -> 
     run source |> Async.StartImmediate)
@@ -212,6 +236,12 @@ let setupEditor (parent:HTMLElement) =
   let mutable optionsVisible = false
   let mutable editorVisible = false
 
+  let showOrHideActions () =
+    let vis = if optionsVisible || editorVisible then "inline" else "none"
+    let modf = getText() <> source
+    runBtn.style.display <- vis
+    shareBtn.style.display <- if modf then "inline" else vis
+
   showOptionsBtn |> FsOption.iter (fun btn -> 
     editorService.EditorsUpdated.Add (fun eds ->
       List.map (Editors.renderEditor checkingService.IsWellTyped setText (getText())) eds
@@ -220,6 +250,7 @@ let setupEditor (parent:HTMLElement) =
   
     btn.onclick <- fun _ ->
       optionsVisible <- not optionsVisible
+      showOrHideActions()
       optionsEl.style.display <- if optionsVisible then "block" else "none"
       Log.event("gui", "options", article, box optionsVisible)
       if optionsVisible then editorService.UpdateSource(getText())
@@ -227,11 +258,24 @@ let setupEditor (parent:HTMLElement) =
 
   showCodeBtn.onclick <- fun _ ->
     editorVisible <- not editorVisible
-    Log.event("gui", "editor", article, editorVisible)
+    showOrHideActions()
     editorEl.style.display <- if editorVisible then "block" else "none"
+    Log.event("gui", "editor", article, editorVisible)
     if editorVisible then ed.Force() |> ignore
     box ()
-  
+
+  shareBtn.onclick <- fun e -> 
+    let text = getText()
+    Log.event("gui", "share", article, text)
+    async { 
+      let! ok, prog = checkingService.TypeCheck(text)
+      let! newBody = prog.Body |> Async.map (callShowMethod outputId)
+      let prog = { prog with Body = newBody }
+      let! compiled = CodeGenerator.compileAndRun globalExprs text prog         
+      if not ok then cannotShareSnippet()
+      else shareSnippet text compiled } |> Async.StartImmediate
+    box ()
+
   runBtn.onclick <- fun e -> 
     Log.event("gui", "run", article, "click")
     getText() |> run |> Async.StartImmediate |> box
