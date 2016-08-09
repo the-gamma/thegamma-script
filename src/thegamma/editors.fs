@@ -39,11 +39,11 @@ let getProperty (name:Name) members =
     | Member.Property(name=n; schema=s; typ=t; docs=d) when n=name.Name -> Some(s, t, d) 
     | _ -> None)
 
-let filterProperties f members = async {
+let filterProperties f members = 
   let filtered = members |> Array.choose (function 
     | Member.Property(name=n; schema=s; typ=t) when f (n, s, t) -> Some(Property.Property(n, s, t))
     | _ -> None)
-  return filtered }
+  filtered 
 
 let dominant all subset =
   let nall = Seq.length all
@@ -54,7 +54,7 @@ let chooseableProperty equalTyp (name:Name) typ = async {
   let! members = getMembers typ
   match getProperty name members with
   | Some(Some propSchema, propTyp, _) ->
-      let! alts = members |> filterProperties (function
+      let alts = members |> filterProperties (function
         | _, Some s, t -> s.Type = propSchema.Type && (not equalTyp || TypeChecker.typesEqual t propTyp)
         | _ -> false )
       if dominant members alts then return Some(name, alts)
@@ -103,7 +103,7 @@ let collectNestedChoiceEditors =
             let nestedMembers trunc = 
               catMembers |> trunc |> Async.Array.map (fun (Property(n, _, t) as p) -> async {
               let! members = getMembers t
-              let! filtered = members |> filterProperties (function
+              let filtered = members |> filterProperties (function
                 | (n, Some s, t) -> s.Type = valSch.Type && TypeChecker.typesEqual t valTy
                 | _ -> false )
               return p, (members, filtered) })
@@ -140,7 +140,7 @@ let collectItemListEditors =
         // actions of the last type in the chain (that can be added)
         let adds, lastTy = collectAdds [] caTy addActions
         let! members = getMembers lastTy
-        let! availableAdds = members |> filterProperties (function
+        let availableAdds = members |> filterProperties (function
           | (n, Some s, t) when s.Type = "AddAction" -> (unbox<AddActionSchema> s.JSON).targetCollection.name = listName
           | _ -> false )
         return Some(CreateList(catDoc, caName, Array.ofList adds, availableAdds))
@@ -273,7 +273,7 @@ let renderEditor typeCheck (setValue:string -> string -> string -> unit) origTex
                   let sel = if name = name1 then ["selected" => "selected"] else []
                   h?option sel [ text name ] ]
             h?select 
-              [ "data-placeholder" => "Choose an item..." 
+              [ "data-placeholder" => "choose an item..." 
                 "change" =!> fun el e -> 
                     let name2 = (unbox<Browser.HTMLSelectElement> el).value
                     replaceTwoNamesWithValues origText (n1, n2) (name1, name2) 

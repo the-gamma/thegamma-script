@@ -22,7 +22,7 @@ let isLocalHost() =
 
 let enabledCategories = 
   if not (isLocalHost ()) then set []
-  else set [ "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "SERVICE"; "CODEGEN" ]
+  else set [ "SYSTEM"; "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "SERVICE"; "CODEGEN" ]
 
 type Log =
   static member event(category:string, evt:string, article:string, data:obj) = 
@@ -79,7 +79,7 @@ type Microsoft.FSharp.Control.Async with
   static member AwaitFuture (f:Future<'T>) = Async.FromContinuations(fun (cont, _, _) ->
     f.Then(cont))
 
-  static member AsFuture(op, ?start) = 
+  static member Future (n:string) op start = 
     let mutable res = Choice1Of3()
     let mutable handlers = []
     let mutable running = false
@@ -92,25 +92,37 @@ type Microsoft.FSharp.Control.Async with
 
     let ensureStarted() = 
       if not running then 
+        Log.trace("system", "Starting future '%s'....", n)
         running <- true
         async { try 
                   let! r = op
                   res <- Choice2Of3 r                  
                 with e ->
-                  Log.exn("future", "Evaluating future failed: %O", e)
+                  Log.exn("system", "Evaluating future failed: %O", e)
                   res <- Choice3Of3 e
                 for h in handlers do trigger h } |> Async.StartImmediate
-    if start = Some true then ensureStarted()
+    if start = true then ensureStarted()
 
     { new Future<_> with
         member x.Then(f) = 
           ensureStarted()
           trigger f }
 
-  static member StartAsFuture(op) = Async.AsFuture(op, true)
+  static member AsFuture n op = Async.Future n op false
+  static member StartAsFuture n op = Async.Future n op true
 
 module Async = 
   module Array =
+    module Parallel =
+      let rec map f (ar:_[]) = async {
+        let res = FSharp.Collections.Array.zeroCreate ar.Length
+        let work = 
+          [ for i in 0 .. ar.Length-1 -> async {
+              let! v = f ar.[i]
+              res.[i] <- v } ] |> Async.Parallel
+        let! _ = work
+        return res }
+
     let rec map f (ar:_[]) = async {
       let res = FSharp.Collections.Array.zeroCreate ar.Length
       for i in 0 .. ar.Length-1 do

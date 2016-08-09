@@ -105,7 +105,7 @@ module FSharpProvider =
             Some(Member.Method(m.name, getTypeParameters m.typepars, args, mapType m.returns, Documentation.Text "", emitter))
           else None)
 
-      return Type.Object { Typeargs = List.map Type.Parameter (getTypeParameters exp.typepars); Members = mems } } |> Async.AsFuture 
+      return Type.Object { Typeargs = List.map Type.Parameter (getTypeParameters exp.typepars); Members = mems } } |> Async.AsFuture exp.name
             
     async {
       let! json = Http.Request("GET", url)
@@ -273,34 +273,41 @@ module RestProvider =
     | "int" | "float" -> "num"
     | _ -> failwith "mapParamType: Unsupported parameter type"
 
+  let restTypeCache = System.Collections.Generic.Dictionary<_, _>()
+
   let rec createRestType lookupNamed root cookies url = 
-    let future = async {
-      let! members = load (concatUrl root url) cookies 
-      return 
-        Type.Object
-          { Typeargs = []
-            Members = 
-              members |> Array.map (fun m ->
-                let schema = m.schema |> Option.map (fun s -> { Type = getProperty s "@type"; JSON = s })
-                match m.returns.kind with
-                | "nested" ->
-                    let returns = unbox<TypeNested> m.returns 
-                    let retTyp = createRestType lookupNamed root cookies returns.endpoint
-                    match m.parameters with 
-                    | Some parameters ->
-                        let args = [ for p in parameters -> p.name, false, Type.Primitive (mapParamType p.``type``)] // TODO: Check this is OK type
-                        let argNames = [ for p in parameters -> p.name ]
-                        Member.Method(m.name, [], args, retTyp, parseDoc m.documentation, methCall m.trace)
-                    | None -> 
-                        Member.Property(m.name, retTyp, schema, parseDoc m.documentation, propAccess m.trace) 
-                | "primitive" ->  
-                    let returns = unbox<TypePrimitive> m.returns                      
-                    let ty = fromRawType returns.``type``
-                    let typ, parser = getTypeAndEmitter lookupNamed ty
-                    Member.Property(m.name, typ, schema, parseDoc m.documentation, dataCall parser m.trace returns.endpoint)
-                | _ -> failwith "?" ) } }
     let guid = concatUrl root url
-    Type.Delayed(guid, Async.AsFuture(future))
+    match restTypeCache.TryGetValue guid with
+    | true, res -> res
+    | _ ->
+      let future = async {
+        let! members = load (concatUrl root url) cookies 
+        return 
+          Type.Object
+            { Typeargs = []
+              Members = 
+                members |> Array.map (fun m ->
+                  let schema = m.schema |> Option.map (fun s -> { Type = getProperty s "@type"; JSON = s })
+                  match m.returns.kind with
+                  | "nested" ->
+                      let returns = unbox<TypeNested> m.returns 
+                      let retTyp = createRestType lookupNamed root cookies returns.endpoint
+                      match m.parameters with 
+                      | Some parameters ->
+                          let args = [ for p in parameters -> p.name, false, Type.Primitive (mapParamType p.``type``)] // TODO: Check this is OK type
+                          let argNames = [ for p in parameters -> p.name ]
+                          Member.Method(m.name, [], args, retTyp, parseDoc m.documentation, methCall m.trace)
+                      | None -> 
+                          Member.Property(m.name, retTyp, schema, parseDoc m.documentation, propAccess m.trace) 
+                  | "primitive" ->  
+                      let returns = unbox<TypePrimitive> m.returns                      
+                      let ty = fromRawType returns.``type``
+                      let typ, parser = getTypeAndEmitter lookupNamed ty
+                      Member.Property(m.name, typ, schema, parseDoc m.documentation, dataCall parser m.trace returns.endpoint)
+                  | _ -> failwith "?" ) } }
+      let ty = Type.Delayed(guid, Async.AsFuture guid future)
+      restTypeCache.[guid] <- ty
+      ty
 
   let rec provideRestType lookupNamed name root cookies = 
     let ctx = ident("_restruntime")?RuntimeContext

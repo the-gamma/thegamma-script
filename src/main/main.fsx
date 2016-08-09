@@ -70,15 +70,15 @@ let types = async {
     |> List.choose (function TypePoviders.GlobalValue(s, e, t) -> Some(s, (e, t)) | _ -> None)
     |> Map.ofSeq
   
-  return { Globals = globals; LookupNamed = lookupNamed } } |> Async.StartAsFuture 
+  return { Globals = globals; LookupNamed = lookupNamed } } |> Async.StartAsFuture "types"
 
 let globalTypes = async { 
   let! ty = types |> Async.AwaitFuture
-  return ty.Globals |> Map.map (fun _ (_, t) -> t) } |> Async.StartAsFuture
+  return ty.Globals |> Map.map (fun _ (_, t) -> t) } |> Async.StartAsFuture "global types"
 
 let globalExprs = async { 
   let! ty = types |> Async.AwaitFuture
-  return ty.Globals |> Map.map (fun _ (e, _) -> e) } |> Async.StartAsFuture
+  return ty.Globals |> Map.map (fun _ (e, _) -> e) } |> Async.StartAsFuture "global exps"
 
 // ------------------------------------------------------------------------------------------------
 // HTML helpers
