@@ -100,18 +100,17 @@ let collectNestedChoiceEditors =
         match catp, valp with
         | Some(catName, catMembers), Some(valName, valMembers) ->
             Log.trace("editors", "collecting %s nested members", catMembers.Length)
-            let! nestedMembers = 
-              catMembers 
-                |> Seq.truncate 5 (* take at most 5...  - Array.truncate TBD *) 
-                |> Array.ofSeq
-                |> Async.Array.map (fun (Property(n, _, t) as p) -> async {
+            let nestedMembers trunc = 
+              catMembers |> trunc |> Async.Array.map (fun (Property(n, _, t) as p) -> async {
               let! members = getMembers t
               let! filtered = members |> filterProperties (function
                 | (n, Some s, t) -> s.Type = valSch.Type && TypeChecker.typesEqual t valTy
                 | _ -> false )
               return p, (members, filtered) })
-            if dominant (Seq.collect (snd >> fst) nestedMembers) (Seq.collect (snd >> snd) nestedMembers) then
-              let props = nestedMembers |> Array.map (fun (p, (_, filtered)) ->
+            let! checkMembers = nestedMembers (Seq.truncate 5 >> Array.ofSeq) (* take at most 5...  - Array.truncate TBD *) 
+            if dominant (Seq.collect (snd >> fst) checkMembers) (Seq.collect (snd >> snd) checkMembers) then
+              let! allMembers = nestedMembers id
+              let props = allMembers |> Array.map (fun (p, (_, filtered)) ->
                 p, filtered)
               return Some(NestedChoice(catDoc, valDoc, catName, valName, props))
             else return None
