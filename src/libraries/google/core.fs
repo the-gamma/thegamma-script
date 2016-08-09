@@ -46,17 +46,18 @@ module Helpers =
     | _ when isNull o -> undefined<_>()
     | _ -> getProperty o prop
 
-  [<Emit("drawChart($0, $1, $2);")>]
-  let drawChart<'T> (chart:obj) data outputId : unit = failwith "!"
+  [<Emit("drawChart($0);")>]
+  let drawChart (f:(obj[] -> unit) -> unit) : unit = failwith "!"
 
   let showChart (chart:#Chart) (outputId:string) =
-    async {
-      try
-        let! dt = (getProperty<ChartData> chart "data").data
-        drawChart chart dt outputId
-      with e ->
-        Browser.window.alert("SOmething went wrong: " + unbox e) }
-      |> Async.StartImmediate
+    drawChart (fun cont ->
+      async {
+        try
+          let! dt = (getProperty<ChartData> chart "data").data
+          cont [| box chart; box dt; box outputId |]
+        with e ->
+          Browser.window.alert("SOmething went wrong: " + unbox e) }
+        |> Async.StartImmediate)
 
 module ChartDataOperations =
   let rec collect f l = async {
