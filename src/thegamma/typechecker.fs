@@ -93,7 +93,7 @@ let rec unifyTypes assigns ts1 ts2 =
       async { return (fun res rng -> assigns, res) }
   | ts1, ts2 -> 
       async { return (fun res rng ->
-          Log.trace("typechecker", "Cannot unify types: %O and %O", Array.ofList ts1, Array.ofList ts2)
+          Log.error("typechecker", "Cannot unify types: %O and %O", Array.ofList ts1, Array.ofList ts2)
           assigns, addError (Errors.TypeChecker.cannotUnityTypes rng) res) }
 
 let avoidCapture bound assigns =

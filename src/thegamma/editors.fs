@@ -108,7 +108,7 @@ let collectNestedChoiceEditors =
                 | _ -> false )
               return p, (members, filtered) })
             let! checkMembers = nestedMembers (Seq.truncate 5 >> Array.ofSeq) (* take at most 5...  - Array.truncate TBD *) 
-            if dominant (Seq.collect (snd >> fst) checkMembers) (Seq.collect (snd >> snd) checkMembers) then
+            if Seq.length checkMembers > 2 && dominant (Seq.collect (snd >> fst) checkMembers) (Seq.collect (snd >> snd) checkMembers) then
               let! allMembers = nestedMembers id
               let props = allMembers |> Array.map (fun (p, (_, filtered)) ->
                 p, filtered)

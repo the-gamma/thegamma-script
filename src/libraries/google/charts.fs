@@ -62,8 +62,20 @@ type chart =
 (*
   static member histogram(data) = 
     { Histogram.data = data; options = HistogramOptions.empty }
-  static member area(data) = 
-    { Area.data = data; options = AreaChartOptions.empty }
+*)
+  static member area(data:series<int, float>) = 
+    { Area.data = ChartDataOperations.oneKeyValue "number" data; 
+      typeName = "AreaChart"; options = AreaChartOptions.empty }
+
+  static member areas(data:series<'a, series<int, float>>, ?names:string[]) = 
+    let i = ref 0;
+    let data = 
+      match names with 
+      | Some names -> data.map(fun s -> incr i; s.setProperties(seriesName=names.[i.Value-1]))
+      | None -> data
+    { Area.data = ChartDataOperations.oneKeyNValues "number" data; 
+      typeName = "AreaChart"; options = AreaChartOptions.empty }
+(*
   static member annotation(data) = 
     { Annotation.data = data; options = AnnotationChartOptions.empty }
   static member steppedArea(data) = 

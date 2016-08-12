@@ -95,6 +95,14 @@ type internal helpers =
       keyName = s.keyName
       valueName = s.valueName
       seriesName = s.seriesName }
+  static member inline asyncLift (f:('a*'b)[] -> Async<('c*'d)[]>) (s:series<_, _>) =
+    let nd = async {
+      let! vs = s.data
+      return! f vs }
+    { data = nd
+      keyName = s.keyName
+      valueName = s.valueName
+      seriesName = s.seriesName }
 (*    
   static member inline liftAggregation f (s:series<_, _>) =
     { value = async {
@@ -132,6 +140,9 @@ and series<'k, 'v> =
 
   static member range(from, ``to``) = 
     series<int, int>.values [| from .. ``to`` |]
+
+  static member rangeBy(from, ``to``, step) = 
+    series<int, int>.values [| from .. step .. ``to`` |]
 
   static member ordinal(data, keyName, valueName, seriesName) = 
     let data = async {
@@ -222,13 +233,15 @@ and series<'k, 'v> =
   member s.maxBy(f) =
     s |> helpers.liftAggregation (Array.maxBy (fun (k, v) -> f v))
 *)
-  member s.realign(newKeys:'k[], defaultValue) = 
-    s |> helpers.lift (fun arr ->
+  member s.realign(newKeys:series<'k, 'v>, defaultValue) = 
+    s |> helpers.asyncLift (fun arr -> async {
+      let! newKeys = newKeys.data 
+      let newKeys = newKeys |> Array.map (fun (k, v) -> unbox<System.IComparable> v)
       let lookup = Map.ofArray (unbox<(System.IComparable * 'v)[]> arr)
-      (unbox<System.IComparable[]> newKeys) |> Array.map (fun k ->
+      return newKeys |> Array.map (fun k ->
         match lookup.TryFind k with
         | Some res -> unbox<'k> k, res
-        | None -> unbox<'k> k, defaultValue))
+        | None -> unbox<'k> k, defaultValue) })
 
 (*
 open System.Runtime.CompilerServices
