@@ -57,7 +57,7 @@ let types = async {
       TypePoviders.NamedType("seq", ["a"], Type.Any) 
       TypePoviders.NamedType("async", ["a"], Type.Any) ]
 
-  let! fsTys = TypePoviders.FSharpProvider.provideFSharpTypes lookupNamed "/ext/libraries.json"     
+  let! fsTys = TypePoviders.FSharpProvider.provideFSharpTypes lookupNamed ("/ext/libraries.json?" + string System.DateTime.Now.Ticks)     
   let allTys = restTys @ fsTys
 
   named <- 
