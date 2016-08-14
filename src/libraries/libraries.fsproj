@@ -53,6 +53,7 @@
   <ItemGroup>
     <Compile Include="series.fs" />
     <Compile Include="tables.fs" />
+    <Compile Include="maps.fs" />
     <Compile Include="google/core.fs" />
     <Compile Include="google/options.fs" />
     <Compile Include="google/extensions.fs" />

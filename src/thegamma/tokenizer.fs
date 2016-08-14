@@ -26,6 +26,10 @@ let integer = oneOrMore number |> map (fun digits ->
   let str = System.String(Array.ofList digits)
   TokenKind.Number(str, 1.0 * float str) )
 
+let float = oneOrMore number <<*> char '.' () <*> oneOrMore number |> map (fun (d1, d2) ->
+  let str = System.String(Array.ofList d1) + "." + System.String(Array.ofList d2)
+  TokenKind.Number(str, 1.0 * float str) )
+
 let operator = pred operators.Contains |> map (fun op ->
   TokenKind.Operator(op.ToString()) )
 
@@ -72,7 +76,8 @@ let tokens =
     char ',' TokenKind.Comma
     string "->" TokenKind.Arrow
     stringToken
-    integer
+    float
+    integer 
     keywordOrIdent
     quotedIdent
     operator
@@ -82,3 +87,5 @@ let tokens =
   |> List.map range
   |> sequenceChoices 
   |> map (List.map (fun (rng, tok) -> { Token = tok; Range = rng }))
+
+

@@ -165,6 +165,7 @@ let knownTypes =
       [ "IEnumerable`1", "seq" // wishful thinking
         "FSharpAsync`1", "async" // dtto
         "table`2", "table"
+        "timeline`2", "timeline"
         "series`2", "series"; "value`1", "value"; "options", "options" ]
     for t in recordTypes do yield t.Name, t.Name 
     for t in chartTypes do yield t.Name, t.Name ] |> Map.ofSeq 
@@ -179,6 +180,13 @@ let e =
       yield { exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Static 
                 with instance = [| "_tables"; "table" |] }
       yield exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Instance
+      yield exportType ctx (asm.GetType("TheGamma.Maps.timeline`2")) BindingFlags.Instance 
+      yield { exportType ctx (asm.GetType("TheGamma.Maps.timeline`2")) BindingFlags.Static 
+                with instance = [| "_maps"; "timeline" |] }
+      yield { exportType ctx (asm.GetType("TheGamma.Maps.geo")) BindingFlags.Static 
+                with instance = [| "_maps"; "geo" |] }
+      yield { exportType ctx (asm.GetType("TheGamma.Maps.math")) BindingFlags.Static 
+                with instance = [| "_maps"; "math" |] }
       yield exportType ctx (asm.GetType("TheGamma.Series.series`2")) BindingFlags.Instance 
       yield { exportType ctx (asm.GetType("TheGamma.Series.series`2")) BindingFlags.Static 
                 with instance = [| "_series"; "series" |] }

@@ -124,6 +124,10 @@ type AddActionSchema = { targetCollection : ItemListSchema }
 let collectItemListEditors =
   pickChainSuffixes (fun chain -> async {
     match chain with
+    | (_, _, Some caSch1, _, _)::(_, _, Some caSch2, _, _)::_ when caSch1.Type = "CreateAction" && caSch2.Type = "CreateAction" ->
+        // Ad-hoc case when we have multiple keys in 'group by'
+        return None
+
     | (caParentTy, caName, Some caSch, caTy, catDoc)::addActions when caSch.Type = "CreateAction" ->
         let listName = (unbox<CreateActionSchema> caSch.JSON).result.name
 
