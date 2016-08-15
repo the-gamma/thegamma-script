@@ -77,9 +77,9 @@ let createCompletionProvider globals =
               let s = CodeGenerator.offsetToLocation 1 rng.Start lengths
               let e = CodeGenerator.offsetToLocation 1 rng.End lengths
               let res = JsInterop.createEmpty<IRange>
-              res.startColumn <- float s.column
+              res.startColumn <- float s.column+1.0
               res.startLineNumber <- float s.line
-              res.endColumn <- float e.column
+              res.endColumn <- float e.column+1.0
               res.endLineNumber <- float e.line
               res
 
@@ -114,7 +114,7 @@ let createCompletionProvider globals =
                       let eo = JsInterop.createEmpty<editor.ISingleEditOperation>
                       eo.text <- if needsEscaping n then "'" + n + "'" else n
                       eo.range <- nameRange
-                      //ci.textEdit <- Some eo
+                      ci.textEdit <- Some eo
                       ci ] 
                 Log.trace("completions", "returning %O", Array.ofSeq completion)
                 return ResizeArray(completion)
