@@ -222,6 +222,7 @@ type timeline<'k,'v> =
     infoSelector : 'v -> string
     locSelector : 'v -> Async<int[]>
     sizeSelector : 'v -> float
+    detailsSelector : option<'v -> obj[]>
     timeSelector : 'v -> int }
 
   static member create(data:series<_, _>) =
@@ -229,6 +230,7 @@ type timeline<'k,'v> =
       colors = [| "red" |]
       defaultFill = "blue"
       delay = 750
+      detailsSelector = None
       overflowDelay = 2000
       titleTemplate = "%title"
       infoSelector = fun _ -> ""
@@ -236,10 +238,11 @@ type timeline<'k,'v> =
       sizeSelector = fun _ -> 10.0
       locSelector = fun _ -> failwith "!" }
 
-  member t.set(?fill, ?colors, ?title, ?delay, ?overflowDelay) = 
+  member t.set(?fill, ?colors, ?title, ?delay, ?overflowDelay, ?details) = 
     { t with 
         colors = defaultArg colors t.colors; defaultFill = defaultArg fill t.defaultFill 
         titleTemplate = defaultArg title t.titleTemplate; delay = defaultArg delay t.delay
+        detailsSelector = match details with Some d -> Some d | _ -> t.detailsSelector
         overflowDelay = defaultArg overflowDelay t.overflowDelay  }
 
   member t.using(coordinates, time, size, info) = 
@@ -272,6 +275,9 @@ type timeline<'k,'v> =
       for i in 0 .. data.Length - 1 do
         let color, (loc:_[]), v, ct = data.[i]
         if ct = time then
+          ( match t.detailsSelector with 
+            | Some os -> [ "details", os v |> Seq.map string |> String.concat "" |> box ] 
+            | _ -> [] ) @
           [ "radius", box (t.sizeSelector v)
             "borderWidth", box "1px"
             "fillKey", box (sprintf "item%d" (color % fills.Length))
@@ -301,6 +307,9 @@ type timeline<'k,'v> =
 
       let player = document.getElementById(id + "_player") :?> HTMLInputElement
       let btn = document.getElementById(id + "_btn") :?> HTMLAnchorElement
+      if times.Length = 1 then 
+        player.style.display <- "none"
+        btn.style.display <- "none"
       player.min <- string 0
       player.value <- string 0
       player.max <- string (times.Length - 1)
@@ -311,7 +320,9 @@ type timeline<'k,'v> =
         let config = 
           { key = System.Func<_, _>(fun data -> jsonStringify [| getProp data "latitude"; getProp data "longitude" |])
             popupTemplate = System.Func<_, _, _>(fun geo data -> 
-              sprintf "<div style='pointer-events:none' class='hoverinfo'>%s</div>" (getProp data "info")) }
+              match t.detailsSelector with
+              | None -> sprintf "<div style='pointer-events:none' class='hoverinfo'>%s</div>" (getProp data "info")
+              | Some _ -> sprintf "<div style='pointer-events:none' class='hoverinfo'><strong>%s</strong><br /> %s </div>" (getProp data "info") (getProp data "details")) }
         map.bubbles(o, config) 
 
       let mutable autoPlay = true

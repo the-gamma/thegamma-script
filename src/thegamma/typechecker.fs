@@ -189,7 +189,9 @@ let rec typeCheckExpr ctx ctxTyp res (expr:Expr<unit>) = async {
         match tys with
         | [] -> Type.Any, res // TODO: Something clever
         | [ty] -> ty, res
-        | ty::_ -> ty, res |> addError (Errors.TypeChecker.mismatchingListTypes expr.Range)
+        | ty::_ -> Type.Any, res 
+            // TODO: Ideally we would avoid explicit boxing
+            // |> addError (Errors.TypeChecker.mismatchingListTypes expr.Range)
       return { Expr = ExprKind.List els; Type = Type.List(ty); Range = expr.Range }, res
 
   | ExprKind.Property(e, name) ->
