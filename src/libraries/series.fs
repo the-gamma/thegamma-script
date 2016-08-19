@@ -122,7 +122,7 @@ and series<'k, 'v> =
       keyName = defaultArg keyName x.keyName
       valueName = defaultArg valueName x.valueName
       seriesName = defaultArg seriesName x.seriesName }
-  member internal x.setProperties(?keyName, ?valueName, ?seriesName) = 
+  member x.setProperties(?keyName, ?valueName, ?seriesName) = 
     { x with 
         keyName = defaultArg keyName x.keyName
         valueName = defaultArg valueName x.valueName
@@ -187,6 +187,9 @@ and series<'k, 'v> =
       return Array.init arr.Length (fun i -> fst arr.[i], res.[i].Value)
     })
 *)
+  member s.mapKeys(f) =
+    s |> helpers.lift (Array.map (fun (k, v) -> f k, v))
+
   member s.mapPairs(f) =
     s |> helpers.lift (Array.map (fun (k, v) -> k, f k v))
 

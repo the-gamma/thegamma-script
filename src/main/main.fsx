@@ -197,7 +197,7 @@ let setupEditor (parent:HTMLElement) =
     TypePovidersRuntime.trimLeft |> ignore
     TheGamma.GoogleCharts.chart.bar |> ignore
     TheGamma.table<int, int>.create(s) |> ignore
-    TheGamma.Maps.timeline<int, int>.create(s, fun _ -> [||]) |> ignore
+    TheGamma.Maps.timeline<int, int>.create(s) |> ignore
     TheGamma.Series.series<int, int>.values([| 1 |]) |> ignore
     eval code }
 
