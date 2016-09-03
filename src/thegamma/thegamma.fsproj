@@ -74,6 +74,7 @@
     <Compile Include="typechecker.fs" />
     <Compile Include="restruntime.fs" />
     <Compile Include="providers.fs" />
+    <Compile Include="pivot.fs" />
     <Compile Include="codegen.fs" />
     <Compile Include="editors.fs" />
     <Compile Include="monaco.fs" />

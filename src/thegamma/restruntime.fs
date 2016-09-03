@@ -32,5 +32,13 @@ type RuntimeContext(root:string, cookies:string, trace:string) =
       // TODO: This is wrong - it may return an integer too!
       return jsonParse<obj> res }
 
-
-
+type PivotContext(root, calls) = 
+  member x.addCall(callid:string, values:obj[]) =
+    PivotContext(root, Array.append [| callid, values |] calls)
+  member x.getData(tfs:string) = async {
+    let url = calls |> Array.fold (fun (tfs:string) (id, vals) -> 
+      if vals.Length <> 1 then failwith "PivotContext.getData: Expected one argument"
+      tfs.Replace(id, string vals.[0])) tfs
+    Log.trace("runtime", "Pivot: %s", concatUrl root url)
+    let! res = Http.Request("GET", concatUrl root url)
+    return jsonParse<obj> res }

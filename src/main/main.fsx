@@ -48,10 +48,25 @@ let types = async {
       TypePoviders.RestProvider.provideRestType lookupNamed 
         "olympics" (services + "pivot") ("source=" + services + "olympics")
       TypePoviders.RestProvider.provideRestType lookupNamed 
+        "smlouvy1" (services + "smlouvy") ""
+      TypePoviders.RestProvider.provideRestType lookupNamed 
+        "smlouvy2" (services + "pivot") ("source=" + services + "smlouvy")
+      TypePoviders.RestProvider.provideRestType lookupNamed 
         "adventure" (services + "adventure") ""
       TypePoviders.RestProvider.provideRestType lookupNamed 
         "world" (services + "worldbank") ""
       
+      TypeProviders.Pivot.providePivotType (services + "pdata/olympics") "olympics2" lookupNamed
+        [ "Games", "string"; "Year", "num";  "Sport", "string"; "Discipline", "string" 
+          "Athlete", "string"; "Team", "string"; "Gender", "string"; "Event", "string" 
+          "Medal", "string"; "Gold", "num"; "Silver", "num"; "Bronze", "num" ]
+      
+      TypeProviders.Pivot.providePivotType (services + "pdata/smlouvy") "smlouvy" lookupNamed
+        [ "Uzavřeno", "string"; "Publikováno", "string"; "Hodnota", "num"
+          "Chybí hodnota", "string"; "Subjekt", "string"; "Útvar", "string"
+          "Schválil", "string"; "Předmět", "string"; "Odkaz", "string"
+          "Platnost", "string"; "Příjemci", "string"; "Příjemci (IČO)", "string" ]            
+
       // TODO: some more types 
       TypePoviders.NamedType("value", ["a"], Type.Any)
       TypePoviders.NamedType("seq", ["a"], Type.Any) 

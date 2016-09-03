@@ -22,7 +22,7 @@ let isLocalHost() =
 
 let enabledCategories = 
   if not (isLocalHost ()) then set []
-  else set [ "SYSTEM"; "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "SERVICE"; "CODEGEN" ]
+  else set [ "SYSTEM"; "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "SERVICE"; "CODEGEN"; "RUNTIME" ]
 
 type Log =
   static member event(category:string, evt:string, article:string, data:obj) = 

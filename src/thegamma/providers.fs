@@ -1,5 +1,6 @@
-﻿module TheGamma.TypePoviders
+﻿namespace TheGamma.TypePoviders
 
+open TheGamma
 open TheGamma.Babel
 open Fable.Import
 open Fable.Extensions
@@ -276,7 +277,7 @@ module RestProvider =
   let restTypeCache = System.Collections.Generic.Dictionary<_, _>()
 
   let rec createRestType lookupNamed root cookies url = 
-    let guid = concatUrl root url
+    let guid = (concatUrl root url) + cookies
     match restTypeCache.TryGetValue guid with
     | true, res -> res
     | _ ->
