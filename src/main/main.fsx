@@ -305,37 +305,3 @@ Monaco.setupMonacoServices(globalTypes)
 
 for el in findElements (withClass "ia-figure") document.body do
   setupEditor (el :?> HTMLElement)
-
-
-(*
-let sample1 = """let data =
-  world
-    .byCountry.China
-    .'Climate Change'.'CO2 emissions (kt)'
-    .take(10)
-
-chart.show(chart.column(data))"""
-let sample2 = """let phelps = 
-  olympics.'by athlete'.'United States'  
-    .'PHELPS, Michael'.then.data
-  .'filter columns'
-    .'drop Athlete'.'drop Sport'.'drop Gold'.'drop Silver'.'drop Bronze'
-  .then.'get the data'
-
-table.create(phelps).show()"""
-
-let sample = """let data = 
-  olympics.data
-    .'group data'.'by Athlete'
-      .'count all'.'sum Gold'.'sum Silver'.'sum Bronze'
-      .'concatenate values of NOC'.then
-    .'sort data'
-      .'by Gold descending'.'and by Silver descending'
-      .'and by Bronze descending'.then
-    .paging
-      .take(10)
-    .'get the data'
-
-table.create(data).show()"""
-
-*)

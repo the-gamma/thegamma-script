@@ -32,6 +32,7 @@ type Transformation =
   | DropColumns of string list
   | SortBy of (string * SortDirection) list
   | GroupBy of string list * Aggregation list
+  | FilterBy of (string * bool * string) list
   | Paging of Paging list
   | GetSeries of string * string
   | Empty
@@ -54,6 +55,7 @@ module Transform =
   let toUrl transforms = 
     [ for t in List.rev transforms ->
         match t with
+        | FilterBy(conds) -> "filter"::(List.collect (fun (f,b,v) -> [f; (if b then "eq" else "neq"); v]) conds)
         | DropColumns(columns) -> "drop"::columns
         | SortBy(columns) -> "sort"::(List.collect (fun (c, o) -> [c; (if o = Ascending then "asc" else "desc")]) columns)
         | GroupBy(flds, aggs) -> "group"::((List.map (fun f -> "by-" + f) flds) @ (List.collect formatAgg aggs))
@@ -68,6 +70,7 @@ module Transform =
     | Empty -> fields
     | SortBy _ -> fields
     | Paging _ -> fields
+    | FilterBy _ -> fields
     | GetSeries(k, v) -> 
         [ fields |> List.find (fun f -> f.Name = k)
           fields |> List.find (fun f -> f.Name = v) ]
@@ -93,18 +96,11 @@ module Transform =
 // Pivot provider
 // ------------------------------------------------------------------------------------------------
 
-    (*
-let nada = { Emit = fun (inst, args) -> Babel.NullLiteral(None) }
+let trimLeft c (s:string) = s.ToCharArray() |> Array.skipWhile ((=) c) |> System.String
+let trimRight c (s:string) = s.ToCharArray() |> Array.rev |> Array.skipWhile ((=) c) |> Array.rev |> System.String
 
-let rec seriesTy() = 
-  { new Future<_> with
-      member x.Then(f) = 
-        Type.Object 
-          { Members = 
-            [ Member.Method("sortValues", ["reverse", Type.Primitive "bool"], seriesTy (), nada)
-              Member.Method("take", ["count", Type.Primitive "num"], seriesTy (), nada) ] } |> f } |> Type.Delayed
-              *)
-
+let concatUrl (a:string) (b:string) =
+  (trimRight '/' a) + "/" + (trimLeft '/' b)
 
 let withDocs title details membr = 
   match membr with
@@ -183,22 +179,28 @@ let makeDataEmitter isSeries tfs =
 // Transformations
 // ----------------------------------------------------------------------------
 
-let rec makeProperty lookupNamed fields name tfs = 
-  Member.Property(name, makePivotType lookupNamed fields tfs, None, Documentation.None, propertyEmitter)
+type Context = 
+  { Root : string
+    LookupNamed : string -> Type list -> Type
+    InputFields : Field list
+    Fields : Field list }
+
+let rec makeProperty ctx name tfs = 
+  Member.Property(name, makePivotType ctx tfs, None, Documentation.None, propertyEmitter)
   
-and makeMethod lookupNamed fields name tfs callid args = 
+and makeMethod ctx name tfs callid args = 
   Member.Method
-    ( name, [], [ for n, t in args -> n, false, Type.Primitive t ], makePivotType lookupNamed fields tfs, 
+    ( name, [], [ for n, t in args -> n, false, Type.Primitive t ], makePivotType ctx tfs, 
       Documentation.None, makeMethodEmitter callid args )
 
-and makeDataMember (lookupNamed:string -> Type list -> Type) inputFields name tfs =
-  let fields = Transform.transformFields inputFields (List.rev tfs)
+and makeDataMember ctx name tfs =
+  let fields = Transform.transformFields ctx.InputFields (List.rev tfs)
   let dataTyp, isSeries = 
     match tfs with 
     | (GetSeries _)::_ -> 
-        match fields with
+        match ctx.Fields with
         | [kf; vf] ->  
-            lookupNamed "series" [Type.Primitive kf.Type; Type.Primitive vf.Type], true
+            ctx.LookupNamed "series" [Type.Primitive kf.Type; Type.Primitive vf.Type], true
         | _ -> failwith "makeDataMember: Series should have key and value"
     | _ -> 
         let membs = 
@@ -207,80 +209,80 @@ and makeDataMember (lookupNamed:string -> Type list -> Type) inputFields name tf
             let emitter = { Emit = fun (inst, _) -> memConv <| (inst /?/ str fld.Name) }
             Member.Property(fld.Name, memTy, None, Documentation.Text "", emitter))
         let recTyp = Type.Object { Members = membs; Typeargs = [] }
-        lookupNamed "series" [Type.Primitive "num"; recTyp ], false
+        ctx.LookupNamed "series" [Type.Primitive "num"; recTyp ], false
   Member.Property(name, dataTyp, None, Documentation.None, makeDataEmitter isSeries tfs)
 
-and handleGetSeriesRequest lookupNamed inputFields fields rest k v = 
+and handleGetSeriesRequest ctx rest k v = 
   match k, v with
   | "!", "!" ->
-    [ for field in fields ->
-        makeProperty lookupNamed fields ("with key " + field.Name) (GetSeries(field.Name, "!")::rest)
+    [ for field in ctx.Fields ->
+        makeProperty ctx ("with key " + field.Name) (GetSeries(field.Name, "!")::rest)
         |> withDocs "Get the data" "Here, we select one of the attribute of the data set as the 'key' and one as a 'value'. In the first list, you can choose the key." 
         |> withThingSchema "ListItem" "series key" ]
     |> makeObjectType
   | k, "!" ->
-    [ for field in fields ->
-        makeDataMember lookupNamed inputFields ("and value " + field.Name) (GetSeries(k, field.Name)::rest) 
+    [ for field in ctx.Fields ->
+        makeDataMember ctx ("and value " + field.Name) (GetSeries(k, field.Name)::rest) 
         |> withDocs "Get the data" "In the second list, choose attribute that you want to use as the value."
         |> withThingSchema "ListItem" "series value" ]
     |> makeObjectType
   | _ -> 
     failwith "handleGetSeriesRequest: Should not happen"
   
-and handlePagingRequest lookupNamed fields rest pgid ops =
+and handlePagingRequest ctx rest pgid ops =
   let takeMemb = 
-    makeMethod lookupNamed fields "take" (Empty::Paging(List.rev (Take(pgid + "-take")::ops))::rest) (pgid + "-take") ["count", "num"] 
+    makeMethod ctx "take" (Empty::Paging(List.rev (Take(pgid + "-take")::ops))::rest) (pgid + "-take") ["count", "num"] 
     |> withDocs "" "Take the specified number of rows and drop the rest"
   let skipMemb = 
-    makeMethod lookupNamed fields "skip" (Paging(Skip(pgid + "-skip")::ops)::rest) (pgid + "-skip") ["count", "num"] 
+    makeMethod ctx "skip" (Paging(Skip(pgid + "-skip")::ops)::rest) (pgid + "-skip") ["count", "num"] 
     |> withDocs "" "Skip the specified number of rows and keep the rest"
   let thenMemb = 
-    makeProperty lookupNamed fields "then" (Empty::Paging(List.rev ops)::rest)
+    makeProperty ctx "then" (Empty::Paging(List.rev ops)::rest)
     |> withDocs "" "Return the data"
   ( match ops with
     | [] -> [skipMemb; takeMemb]
     | [Skip _] -> [takeMemb; thenMemb]
     | _ -> failwith "handlePagingRequest: Shold not happen" ) |> makeObjectType
 
-and handleDropRequest lookupNamed fields rest dropped = 
+and handleDropRequest ctx rest dropped = 
   let droppedFields = set dropped
-  [ yield makeProperty lookupNamed fields "then" (Empty::DropColumns(dropped)::rest) |> withDocs "" "Return the data"
-    for field in fields do
+  [ yield makeProperty ctx "then" (Empty::DropColumns(dropped)::rest) |> withDocs "" "Return the data"
+    for field in ctx.Fields do
       if not (droppedFields.Contains field.Name) then
         yield 
-          makeProperty lookupNamed fields ("drop " + field.Name) (DropColumns(field.Name::dropped)::rest) 
+          makeProperty ctx ("drop " + field.Name) (DropColumns(field.Name::dropped)::rest) 
           |> withDocs "" (sprintf "Removes the field '%s' from the returned data set" field.Name)
-          |> withAddAction "Dropped fields" ]
+          |> withAddAction "Dropped ctx.Fields" ]
   |> makeObjectType    
 
-and handleSortRequest lookupNamed fields rest keys = 
+and handleSortRequest ctx rest keys = 
   let usedKeys = set (List.map fst keys)
-  [ yield makeProperty lookupNamed fields "then" (Empty::SortBy(keys)::rest) |> withDocs "" "Return the data"
-    for field in fields do
+  [ yield makeProperty ctx "then" (Empty::SortBy(keys)::rest) |> withDocs "" "Return the data"
+    for field in ctx.Fields do
       if not (usedKeys.Contains field.Name) then
         let doc = sprintf "Use the field '%s' as the next sorting keys" field.Name
         let prefix = if keys = [] then "by " else "and by "
-        yield makeProperty lookupNamed fields (prefix + field.Name) (SortBy((field.Name, Ascending)::keys)::rest) 
+        yield makeProperty ctx (prefix + field.Name) (SortBy((field.Name, Ascending)::keys)::rest) 
               |> withDocs "" doc 
               |> withAddAction "Fields used for sorting"
-        yield makeProperty lookupNamed fields (prefix + field.Name + " descending") (SortBy((field.Name, Descending)::keys)::rest) 
+        yield makeProperty ctx (prefix + field.Name + " descending") (SortBy((field.Name, Descending)::keys)::rest) 
               |> withDocs "" doc 
               |> withAddAction "Fields used for sorting" ]
   |> makeObjectType    
 
 
-and aggregationMembers lookupNamed fields rest keys aggs = 
+and aggregationMembers ctx rest keys aggs = 
   let containsCountAll = aggs |> Seq.exists ((=) CountAll)
   let containsField fld = aggs |> Seq.exists (function 
     | CountDistinct f | ReturnUnique f | ConcatValues f | Sum f | Mean f -> f = fld | CountAll | GroupKey -> false)
   let makeAggMember name agg doc = 
-    makeProperty lookupNamed fields name (GroupBy(keys,agg::aggs)::rest) |> withDocs "" doc
+    makeProperty ctx name (GroupBy(keys,agg::aggs)::rest) |> withDocs "" doc
     |> withAddAction "Aggregation operations"
 
-  [ yield makeProperty lookupNamed fields "then" (Empty::GroupBy(keys, aggs)::rest) |> withDocs "" "Get data or perform another transformation"
+  [ yield makeProperty ctx "then" (Empty::GroupBy(keys, aggs)::rest) |> withDocs "" "Get data or perform another transformation"
     if not containsCountAll then 
       yield makeAggMember "count all" CountAll "Count the number of items in the group"
-    for fld in fields do
+    for fld in ctx.Fields do
       if not (containsField fld.Name) then
         yield makeAggMember ("count distinct " + fld.Name) (CountDistinct fld.Name) 
                 "Count the number of distinct values of the field"
@@ -295,70 +297,98 @@ and aggregationMembers lookupNamed fields rest keys aggs =
           yield makeAggMember ("sum " + fld.Name) (Sum fld.Name)
                   "Sum the values of the field in the group" ]
 
-and handleGroupAggRequest lookupNamed fields rest keys aggs =
-  aggregationMembers lookupNamed fields rest keys aggs  
+and handleGroupAggRequest ctx rest keys aggs =
+  aggregationMembers ctx rest keys aggs  
   |> makeObjectType  
   
-and handleGroupRequest lookupNamed fields rest keys = 
+and handleGroupRequest ctx rest keys = 
   let prefix = if List.isEmpty keys then "by " else "and "
-  [ for field in fields ->
-      makeProperty lookupNamed fields (prefix + field.Name) (GroupBy(field.Name::keys, [])::rest) 
+  [ for field in ctx.Fields ->
+      makeProperty ctx (prefix + field.Name) (GroupBy(field.Name::keys, [])::rest) 
       |> withDocs (sprintf "Group by %s" (field.Name.ToLower()))
           ( "Creates groups based on the value of " + field.Name + " and calculte summary " +
             "values for each group. You can specify a number of summary calculations in the " + 
             "following list:")
       |> withCreateAction "Aggregation operations" 
     if not (List.isEmpty keys) then
-      yield! aggregationMembers lookupNamed fields rest keys [GroupKey] ]
+      yield! aggregationMembers ctx rest keys [GroupKey] ]
   |> makeObjectType  
 
-and makePivotTypeImmediate lookupNamed (inputFields:seq<Field>) tfs = 
+and handleFilterEqNeqRequest ctx rest (fld, eq) conds = async {
+  let url = concatUrl (concatUrl ctx.Root "range") (FilterBy(conds)::rest |> List.rev |> Transform.toUrl)
+  let! options = Http.Request("GET", url + "?" + fld)
+  let options = jsonParse<string[]> options
+  return
+    [ for opt in options do
+        yield makeProperty ctx opt (FilterBy((fld, eq, opt)::conds)::rest) ] 
+    |> makeObjectType }
+
+and handleFilterRequest ctx rest conds = 
+  let prefix = if List.isEmpty conds then "" else "and "
+  [ for field in ctx.Fields do
+      yield makeProperty ctx (prefix + field.Name + " is") (FilterBy((field.Name, true, "!")::conds)::rest) 
+      yield makeProperty ctx (prefix + field.Name + " is not") (FilterBy((field.Name, false, "!")::conds)::rest) 
+      //|> withDocs (sprintf "Group by %s" (field.Name.ToLower()))
+      //    ( "Creates groups based on the value of " + field.Name + " and calculte summary " +
+      //      "values for each group. You can specify a number of summary calculations in the " + 
+      //      "following list:")
+      //|> withCreateAction "Aggregation operations" 
+    if not (List.isEmpty conds) then
+      yield makeProperty ctx "then" (Empty::FilterBy(conds)::rest) |> withDocs "" "Return the data" ]
+  |> makeObjectType  
+
+and makePivotTypeImmediate ctx tfs = async {
   let last, rest = match tfs with last::rest -> last, rest | _ -> Empty, []
-  let fields = Transform.transformFields inputFields (List.rev rest)
+  let ctx = { ctx with Fields = Transform.transformFields ctx.InputFields (List.rev rest) }
   match last with
   // Starting a new pivoting operation
   | Empty ->
-      [ makeProperty lookupNamed fields "group data" (GroupBy([], [])::rest) |> withDocs "" "Lets you perform pivot table aggregations."
-        makeProperty lookupNamed fields "sort data" (SortBy([])::rest) 
+    return
+      [ makeProperty ctx "group data" (GroupBy([], [])::rest) 
+          |> withDocs "" "Lets you perform pivot table aggregations."
+        makeProperty ctx "filter data" (FilterBy([])::rest) 
+          |> withDocs "" "Lets you filter data in the table."
+        makeProperty ctx "sort data" (SortBy([])::rest) 
           |> withDocs "Sort the data" ("Specify how the data is sorted. You can choose one or more attributes " +
               "to use for sorting in the following list. Choose 'descending' to sort the values from largest value " +
               "to smallest value.")
           |> withCreateAction "Fields used for sorting"
-        makeProperty lookupNamed fields "filter columns" (DropColumns([])::rest) 
+        makeProperty ctx "drop columns" (DropColumns([])::rest) 
           |> withDocs "Filter returned attributes" ("Specify which attributes of the data sets should be returned. " +
               "By default you'll get all available attributes, but you can drop uninteresting attributes by listing " +
               "them in the following list:")
-          |> withCreateAction "Dropped fields"
-        makeProperty lookupNamed fields "paging" (Paging([])::rest) |> withDocs "" "Take a number of rows or skip a number of rows." 
-        makeProperty lookupNamed fields "get series" (GetSeries("!","!")::rest) |> withDocs "" "Get a single key-value series from the data set." 
-        makeDataMember lookupNamed inputFields "get the data" rest |> withDocs "" "Returns the transformed data" ]
+          |> withCreateAction "Dropped ctx.Fields"
+        makeProperty ctx "paging" (Paging([])::rest) |> withDocs "" "Take a number of rows or skip a number of rows." 
+        makeProperty ctx "get series" (GetSeries("!","!")::rest) |> withDocs "" "Get a single key-value series from the data set." 
+        makeDataMember ctx "get the data" rest |> withDocs "" "Returns the transformed data" ]
       |> makeObjectType    
   // 
   | GetSeries(k, v) ->
-      handleGetSeriesRequest lookupNamed inputFields fields rest k v
+      return handleGetSeriesRequest ctx rest k v
   | Paging(ops) ->
       let pgid = rest |> Seq.sumBy (function Paging _ -> 1 | _ -> 0) |> sprintf "pgid-%d"  
-      handlePagingRequest lookupNamed fields rest pgid ops
+      return handlePagingRequest ctx rest pgid ops
   | SortBy(keys) ->
-      handleSortRequest lookupNamed fields rest keys
+      return handleSortRequest ctx rest keys
   | DropColumns(dropped) ->
-      handleDropRequest lookupNamed fields rest dropped
+      return handleDropRequest ctx rest dropped
+  | FilterBy((fld, eq, "!")::conds) ->
+      return! handleFilterEqNeqRequest ctx rest (fld, eq) conds
+  | FilterBy(conds) ->
+      return handleFilterRequest ctx rest conds
   | GroupBy(flds, []) ->
-      handleGroupRequest lookupNamed fields rest flds
+      return handleGroupRequest ctx rest flds
   | GroupBy(flds, aggs) ->
-      handleGroupAggRequest lookupNamed fields rest flds aggs
+      return handleGroupAggRequest ctx rest flds aggs }
 
-and makePivotType lookupNamed fields tfs = 
-  Type.Delayed("pivot", Async.AsFuture "pivot" <| async {
-    return makePivotTypeImmediate lookupNamed fields tfs })
+and makePivotType ctx tfs = 
+  let guid = Transform.toUrl tfs
+  Type.Delayed("pivot: " + guid, Async.AsFuture guid (makePivotTypeImmediate ctx tfs))
   
 let providePivotType root name lookupNamed fields =
+  let fields = [ for f, t in fields -> { Name = f; Type = t }]
+  let typ = makePivotType { Fields = fields; InputFields = fields; LookupNamed = lookupNamed; Root = root } []
   let ctx = ident("_restruntime")?PivotContext
-  let typ = makePivotType lookupNamed [ for f, t in fields -> { Name = f; Type = t }] [] 
-  ProvidedType.GlobalValue(name, NewExpression(ctx, [str root; ArrayExpression([], None)], None), typ)
-
-(*
-  Type.Object
-    { Members = 
-        [ Member.Property("CO2 emissions (kt)", seriesTy (), nada) ] }
-*)
+  ProvidedType.GlobalValue
+    ( name, 
+      NewExpression(ctx, [str (concatUrl root "data"); ArrayExpression([], None)], None), typ)
