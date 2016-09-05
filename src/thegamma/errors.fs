@@ -1,8 +1,12 @@
 ﻿module TheGamma.Errors
 
 module Tokenizer = 
+  let inputEndInsideString rng s =
+    { Number = 11; Range = rng; Message = sprintf "Missing \" at the end of the input. The string \"%s\" ends without closing double-quote." s }
   let missingClosingQuote rng q = 
     { Number = 12; Range = rng; Message = sprintf "Quoted identifier '%s' is missing closing quote." q }
+  let unexpectedCharacter rng (c:char) =
+    { Number = 13; Range = rng; Message = sprintf "Unexcpected character '%s' in the input." (string c) }
 
 module Parser = 
   let valueNotAfunction rng name =

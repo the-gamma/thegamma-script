@@ -125,7 +125,8 @@ type table<'k,'v> =
         console.log("Getting data for table failed: %O", e) }
     |> Async.StartImmediate
 
-type empty =
-  static member show(outputId) =
-    document.getElementById(outputId).innerHTML <- """<div class="loading"><p>No output produced.</p></div>"""
-    //invokeBlockCallback()
+type empty() =
+  static member create() = empty()
+  member x.show(outputId) =
+    h?div ["class" => "loading"] [ h?p [] [ text "No output produced." ] ]
+    |> renderTo (document.getElementById(outputId))

@@ -1,5 +1,5 @@
 {
-    "outDir": "../../out/js/thegamma",
+    "outDir": "../../out/src/thegamma",
     "sourceMaps": true,
     "projFile": "thegamma.fsproj",
     "refs": {

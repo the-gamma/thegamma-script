@@ -1,5 +1,5 @@
 {
-    "outDir": "../../out/js/main",
+    "outDir": "../../out/src/main",
     "sourceMaps": true,
     "projFile": "main.fsx",
     "refs": {

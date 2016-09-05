@@ -165,6 +165,7 @@ let knownTypes =
       [ "IEnumerable`1", "seq" // wishful thinking
         "FSharpAsync`1", "async" // dtto
         "table`2", "table"
+        "empty", "empty"
         "timeline`2", "timeline"
         "series`2", "series"; "value`1", "value"; "options", "options" ]
     for t in recordTypes do yield t.Name, t.Name 
@@ -177,6 +178,9 @@ let e =
         yield exportType ctx ct BindingFlags.Instance
       yield { exportType ctx (asm.GetType("TheGamma.GoogleCharts.chart")) BindingFlags.Static 
                 with instance = [| "_charts"; "chart" |] }
+      yield { exportType ctx (asm.GetType("TheGamma.empty")) BindingFlags.Static 
+                with instance = [| "_tables"; "empty" |] }
+      yield exportType ctx (asm.GetType("TheGamma.empty")) BindingFlags.Instance
       yield { exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Static 
                 with instance = [| "_tables"; "table" |] }
       yield exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Instance

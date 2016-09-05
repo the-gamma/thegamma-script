@@ -1,5 +1,5 @@
 {
-    "outDir": "../../out/js/libraries",
+    "outDir": "../../out/src/libraries",
     "sourceMaps": true,
     "projFile": "libraries.fsproj",
     "refs": {

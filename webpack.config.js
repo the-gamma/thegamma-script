@@ -3,7 +3,7 @@ var webpack = require("webpack");
 
 var cfg = {
   devtool: "source-map",
-  entry: "./out/js/main/main.js",
+  entry: "./out/src/main/main.js",
   output: {
     path: path.join(__dirname, "out"),
     filename: "thegamma-script.js"

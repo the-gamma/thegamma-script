@@ -326,19 +326,8 @@ let rec mapCmdRanges f cmd =
 
 let tokenize (input:string) = 
   let input = input.Replace("\r\n", "\n")
-  let (Parsec.Parser p) = Tokenizer.tokens
-  match p (0, List.ofSeq input) with
-  | Some((offs, rest), errors, tokens) ->
-      let errors = 
-        if List.isEmpty rest then errors
-        else 
-          let rest = System.String(Array.ofList rest)
-          { Number = 11; Range = { Start = offs; End = offs + rest.Length }
-            Message = sprintf "Tokenizer stopped: %s" rest }::errors 
-      errors, tokens
-  | None ->
-      [ { Number = 11; Range = { Start = 0; End = input.Length }
-          Message = sprintf "Tokenizer did not recognize input: %s" input } ], []
+  let tokens, errors = Tokenizer.tokenize input
+  List.ofArray errors, tokens
 
 let parse (input:string) = 
   let errs1, tokens = tokenize input

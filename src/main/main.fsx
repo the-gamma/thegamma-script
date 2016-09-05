@@ -276,13 +276,15 @@ let setupEditor (parent:HTMLElement) =
       if optionsVisible then editorService.UpdateSource(getText())
       box () )
 
-  showCodeBtn.onclick <- fun _ ->
+  let switchEditor () =
     editorVisible <- not editorVisible
     showOrHideActions()
     editorEl.style.display <- if editorVisible then "block" else "none"
     Log.event("gui", "editor", article, editorVisible)
     if editorVisible then ed.Force() |> ignore
-    box ()
+    
+  showCodeBtn.onclick <- fun _ -> switchEditor(); box()
+  if source.Contains("empty.create") then switchEditor()
 
   shareBtn.onclick <- fun e -> 
     let text = getText()

@@ -1,5 +1,5 @@
 {
-    "outDir": "../../out/js/gui",
+    "outDir": "../../out/src/gui",
     "sourceMaps": true,
     "projFile": "gui.fsproj",
     "refs": {

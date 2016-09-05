@@ -14,6 +14,16 @@ type Error<'Range> =
     Message : string
     Range : 'Range }
 
+type [<RequireQualifiedAccess>] Operator = 
+  | Plus
+  | Minus
+  | Multiply
+  | Divide
+  | GreaterThan
+  | LessThan
+  | GreaterThanOrEqual
+  | LessThanOrEqual
+
 type [<RequireQualifiedAccess>] TokenKind = 
   | LParen
   | RParen
@@ -27,7 +37,7 @@ type [<RequireQualifiedAccess>] TokenKind =
   | Arrow
   | To
   | By
-  | Operator of string
+  | Operator of Operator
   | Boolean of bool
   | Number of string * float
   | String of string
@@ -35,6 +45,7 @@ type [<RequireQualifiedAccess>] TokenKind =
   | QIdent of string
   | White of string
   | Newline
+  | Error of char
 
 type Token = 
   { Token : TokenKind 

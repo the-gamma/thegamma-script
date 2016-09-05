@@ -4,6 +4,8 @@
   "version": "0.0.1",
   "description": "The Gamma project",
   "scripts": {
+    "pretest": "fable tests/thegamma-tests",
+    "test": "mocha out/tests/thegamma-tests",
     "build": "fable src/gui & fable src/libraries & fable src/thegamma & fable src/main & webpack"
   },
   "author": "Tomas Petricek",
@@ -11,14 +13,16 @@
   "dependencies": {
     "babel-standalone": "^6.10.3",
     "core-js": "^2.4.1",
-    "fable-core": "^0.5.1",
+    "fable-core": "^0.5.5",
     "monaco-editor": "^0.5.1",
     "requirejs": "^2.2.0"
   },
   "main": "main.js",
   "devDependencies": {
-    "fable-compiler": "^0.5.1",
+    "fable-compiler": "^0.5.9",
+    "fable-plugins-nunit": "^0.5.1",
     "source-map-loader": "^0.1.5",
+    "mocha": "^3.0.2",
     "webpack": "^1.13.1"
   },
   "repository": {
