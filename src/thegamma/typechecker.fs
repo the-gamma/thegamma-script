@@ -331,6 +331,7 @@ let tokenize (input:string) =
 
 let parse (input:string) = 
   let errs1, tokens = tokenize input
+  let tokens = tokens |> List.ofSeq 
   let (Parsec.Parser p) = Parser.program
 
   let rangeLookup = tokens |> List.map (fun tok -> tok.Range) |> Array.ofSeq

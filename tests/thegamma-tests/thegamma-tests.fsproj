@@ -84,6 +84,7 @@
   </Choose>
   <ItemGroup>
     <Compile Include="tokenizer.fs" />
+    <Compile Include="parser.fs" />
     <None Include="fableconfig.json" />
     <None Include="paket.references" />
   </ItemGroup>

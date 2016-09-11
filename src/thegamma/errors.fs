@@ -1,4 +1,5 @@
 ﻿module TheGamma.Errors
+open TheGamma.AstOperations
 
 module Tokenizer = 
   let inputEndInsideString rng s =
@@ -30,6 +31,18 @@ module Parser =
 
   let incompleteRange rng =
     { Number = 27; Range = rng; Message = "Incomeplete range expression" }
+
+  // v2 errors
+
+  let unexpectedTokenAfterDot rng tok =
+    { Number = 21; Range = rng; Message = sprintf "Unexpected %s after '.' in method chain" (formatTokenInfo tok) }
+
+  let unexpectedScopeEndAfterDot rng chainRng tok =
+    { Number = 22; Range = rng; Message = sprintf "Unexpected end of scope after '.' in method chain before %s" (formatTokenInfo tok) }
+
+  let unindentedIdentifierAfterDot rng chainRng id =
+    { Number = 23; Range = rng; Message = sprintf "Unexpected end of scope after '.' and before '%s'. Indent the identifier?" id }
+
 
 module TypeChecker = 
   let private formatMembers members = 

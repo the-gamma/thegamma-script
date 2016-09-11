@@ -31,7 +31,7 @@ let number c = c >= '0' && c <= '9'
 /// Add newly parsed token to the context & continue tokenizing
 let rec addAndTokenize ctx tok i l =
   { Token = tok
-    Range = { Start = i; End = i + l } } |> ctx.Tokens.Add 
+    Range = { Start = i; End = i + l - 1 } } |> ctx.Tokens.Add 
   tokenizeInput ctx (i + l)
 
 
@@ -157,7 +157,7 @@ and tokenizeInput ctx i =
   else 
 
   // Otherwise report an error & skip one character
-  ctx.Errors.Add(Errors.Tokenizer.unexpectedCharacter { Start = i; End = i + 1 } c)
+  ctx.Errors.Add(Errors.Tokenizer.unexpectedCharacter { Start = i; End = i } c)
   addAndTokenize ctx (TokenKind.Error c) i 1
 
 
@@ -169,4 +169,5 @@ let tokenize input =
       Tokens = new ResizeArray<_>()
       Input = input }
   let ctx = tokenizeInput ctx 0
-  List.ofSeq ctx.Tokens, ctx.Errors.ToArray()
+  ctx.Tokens.Add { Token = TokenKind.EndOfFile; Range = { Start = input.Length; End = input.Length } }
+  ctx.Tokens.ToArray(), ctx.Errors.ToArray()

@@ -46,6 +46,7 @@ type [<RequireQualifiedAccess>] TokenKind =
   | White of string
   | Newline
   | Error of char
+  | EndOfFile
 
 type Token = 
   { Token : TokenKind 
@@ -89,6 +90,37 @@ type Program<'T> =
   { Body : Command<'T> list 
     Range : Range }
 
+
+module AST2 = 
+  type Node<'T> = 
+    { WhiteBefore : Token list
+      WhiteAfter : Token list
+      Range : Range 
+      Node : 'T }
+
+  type Name = 
+    { Name : string }
+
+  type Argument =
+    { Name : Node<Name> option
+      Value : Node<Expr> }
+
+  and Command = 
+    | Let of Node<Name> * Node<Expr>
+    | Expr of Node<Expr>
+
+  and [<RequireQualifiedAccess>] Expr = 
+    | Variable of Node<Name>
+    | Property of Node<Expr> * Node<Name>
+    | Call of Node<Expr> option * Node<Name> * Node<Argument list>
+    | Function of Node<Name> * Node<Expr>
+    | String of string
+    | Number of float
+    | Boolean of bool
+    | List of Node<Expr> list
+    | Empty
+    | Unit
+    | Null
 
 type Emitter = 
   { Emit : Babel.Expression * (string * Babel.Expression) list -> Babel.Expression }

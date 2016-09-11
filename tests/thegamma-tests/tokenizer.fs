@@ -1,10 +1,12 @@
 ﻿#if INTERACTIVE
 #r "../../src/thegamma/bin/Debug/thegamma.dll"
+#r "../../packages/NUnit/lib/net45/nunit.framework.dll"
 #else
 [<NUnit.Framework.TestFixture>]
 module TheGamma.Tests.Tokenizer
 #endif
 open TheGamma
+open TheGamma.AstOperations
 open TheGamma.Tokenizer
 open NUnit.Framework
 
@@ -15,45 +17,10 @@ open NUnit.Framework
 /// Global random number generator
 let rnd = System.Random()
 
-/// Format a single token
-let formatToken = function
-  | TokenKind.LParen -> "("
-  | TokenKind.RParen -> ")"
-  | TokenKind.Equals -> "="
-  | TokenKind.Dot -> "."
-  | TokenKind.Comma -> ","
-  | TokenKind.Let -> "let"
-  | TokenKind.LSquare -> "["
-  | TokenKind.RSquare -> "]"
-  | TokenKind.Fun -> "fun"
-  | TokenKind.Arrow -> "->"
-  | TokenKind.Operator Operator.Divide -> "/"
-  | TokenKind.Operator Operator.GreaterThan -> ">"
-  | TokenKind.Operator Operator.GreaterThanOrEqual -> ">="
-  | TokenKind.Operator Operator.LessThan -> "<"
-  | TokenKind.Operator Operator.LessThanOrEqual -> "<="
-  | TokenKind.Operator Operator.Minus -> "-"
-  | TokenKind.Operator Operator.Multiply -> "*"
-  | TokenKind.Operator Operator.Plus -> "+"
-  | TokenKind.Boolean true -> "true"
-  | TokenKind.Boolean false -> "false"
-  | TokenKind.Number(s, _) -> s
-  | TokenKind.String(s) -> "\"" + s.Replace("\\", "\\\\").Replace("\n", "\\n").Replace("\"", "\\\"") + "\""
-  | TokenKind.Ident(i) -> i
-  | TokenKind.QIdent(q) -> "'" + q + "'"
-  | TokenKind.White(w) -> w
-  | TokenKind.Newline -> "\n"
-  | TokenKind.Error(c) -> string c
-  | _ -> failwith "Unsupported token"
-
-/// Turns series of tokens into string, using their Token value
-let formatTokens (tokens:seq<Token>) = 
-  tokens |> Seq.map (fun t -> formatToken t.Token) |> String.concat ""
-
 /// Turn series of tokens into string, using their Range and original input
 let formatTokensUsingRange (source:string) (tokens:seq<Token>) = 
   tokens 
-  |> Seq.map (fun t -> source.Substring(t.Range.Start, t.Range.End - t.Range.Start))
+  |> Seq.map (fun t -> source.Substring(t.Range.Start, t.Range.End - t.Range.Start + 1))
   |> String.concat ""
 
 /// Generate short, potentially empty random string using characters from the given input string
@@ -118,7 +85,9 @@ let check g (f:_ -> unit) =
 
 /// Check that tokens are equal (ignoring ranges)
 let tokensEqual t1 t2 = 
-  let equal = [ for t in t1 -> t.Token ] = [ for t in t2 -> t.Token ]
+  let equal = 
+    List.zip (List.ofSeq t1) (List.ofSeq t2) 
+    |> List.forall (fun (t1, t2) -> t1.Token = t2.Token) 
   if not equal then
     printfn "      *** Assertion failed: Tokens do not match ***"
     printfn "      *** Tokens:"
@@ -127,7 +96,7 @@ let tokensEqual t1 t2 =
     |> Seq.skip (max 0 (n - 2))
     |> Seq.truncate 5
     |> Seq.iter (fun (t1, t2) ->
-        printfn "      *** - '%s' %s '%s' " (formatToken t1.Token) (if t1 = t2 then "=" else "<>") (formatToken t2.Token))
+        printfn "      *** - '%s' %s '%s' " (formatToken t1.Token) (if t1.Token = t2.Token then "=" else "<>") (formatToken t2.Token))
   Assert.AreEqual(true, equal)
 
 /// Shorter assertion
@@ -138,8 +107,9 @@ let equal (a:'T) (b:'T) =
     printfn "      *** Actual: %A" b
   Assert.AreEqual(true, (a = b))
 
+
 // --------------------------------------------------------------------------------------
-// Helpers for writing property tests for tokenizer
+// TESTS: Property tests for tokenizer
 // --------------------------------------------------------------------------------------
 
 [<Test>]
