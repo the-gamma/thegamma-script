@@ -15,10 +15,12 @@ type Error<'Range> =
     Range : 'Range }
 
 type [<RequireQualifiedAccess>] Operator = 
+  | Equals
   | Plus
   | Minus
   | Multiply
   | Divide
+  | Power
   | GreaterThan
   | LessThan
   | GreaterThanOrEqual
@@ -117,6 +119,7 @@ module AST2 =
     | String of string
     | Number of float
     | Boolean of bool
+    | Binary of Node<Expr> * Node<Operator> * Node<Expr>
     | List of Node<Expr> list
     | Empty
     | Unit

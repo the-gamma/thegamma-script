@@ -11,7 +11,8 @@ open TheGamma.AstOperations.AST2
 open NUnit.Framework
 
 // --------------------------------------------------------------------------------------
-// 
+// We keep track of nesting. nestedToken returns None if the nested block ended.
+// We generally skip all errors within a block, but terminte what we're parsing currently at block end
 // --------------------------------------------------------------------------------------
 
 
@@ -24,9 +25,23 @@ type Context =
   { Tokens : Token[]
     Whitespace : ResizeArray<Token>
     Errors : ResizeArray<Error<Range>>
+    mutable TopLevel : bool
+    mutable Silent : bool
     mutable IndentCurrent : int
     mutable IndentStack : (int * bool) list
     mutable Position : int }
+
+/// Lets us implement lookahead withot making the whole context immutable
+/// (this is only used in fairly limited scenarios - e.g. named arguments)
+let clone ctx = 
+  { Tokens = ctx.Tokens
+    Whitespace = ResizeArray(ctx.Whitespace)
+    Errors = ResizeArray(ctx.Errors)
+    TopLevel = ctx.TopLevel
+    Silent = ctx.Silent
+    IndentCurrent = ctx.IndentCurrent
+    IndentStack = ctx.IndentStack 
+    Position = ctx.Position }
 
 let next ctx = 
   ctx.Position <- ctx.Position + 1
@@ -46,24 +61,43 @@ let setLineIndent ctx l =
   | (oldl, false)::stack -> ctx.IndentStack <- (l, true)::stack
   | _ -> ()
 
-let endIndent ctx = 
-  match ctx.IndentStack with
-  | t::stack -> ctx.IndentStack <- stack
-  | _ -> failwith "error - endIndent when stack is empty"
+let addError ctx e = 
+  if not ctx.Silent then ctx.Errors.Add(e)
 
-let startIndent ctx =
-  match ctx.IndentStack with
-  | (prev, true)::_ when prev >= ctx.IndentCurrent -> false
-  | (prev, false)::_ when prev <> ctx.IndentCurrent -> failwith "TODO: startIndent - forgot to initialize line"
-  | _ ->
-      ctx.IndentStack <- (ctx.IndentCurrent, false)::ctx.IndentStack
-      true
+let usingIndent (tok:Token) ctx =
+  let started = 
+    match ctx.IndentStack with
+    | (prev, true)::_ when prev > ctx.IndentCurrent -> 
+        Errors.Parser.unindentedBlock tok.Range tok.Token |> addError ctx
+        false
+    | (prev, false)::_ when prev <> ctx.IndentCurrent -> 
+        failwith "TODO: startIndent - forgot to initialize line"
+    | _ ->
+        ctx.IndentStack <- (ctx.IndentCurrent, false)::ctx.IndentStack
+        true
 
-let addError ctx e = ctx.Errors.Add(e)
+  { new System.IDisposable with
+      member x.Dispose() =
+        match started, ctx.IndentStack with
+        | true, t::stack -> ctx.IndentStack <- stack
+        | false, _ -> ()
+        | _ -> failwith "error - endIndent when stack is empty" }
+
+let usingSilentMode ctx = 
+  let prev = ctx.Silent
+  ctx.Silent <- true
+  { new System.IDisposable with
+      member x.Dispose() = ctx.Silent <- prev }
+
+let usingNestedMode ctx = 
+  let prev = ctx.TopLevel
+  ctx.TopLevel <- false
+  { new System.IDisposable with
+      member x.Dispose() = ctx.TopLevel <- prev }
 
 let current ctx = ctx.Tokens.[ctx.Position]
 
-let rec token ctx = 
+let rec justToken ctx = 
   match current ctx with
   | { Token = TokenKind.Newline } as t ->
       addWhitespace ctx t
@@ -75,25 +109,31 @@ let rec token ctx =
           next ctx
       | _ -> 
           setLineIndent ctx 0
-      token ctx
+      justToken ctx
   | { Token = TokenKind.White _ } as t ->
       addWhitespace ctx t
       next ctx
-      token ctx
+      justToken ctx
   | t -> 
-      getWhitespace ctx, t
-      
+      t
+
+let token ctx = 
+  let t = justToken ctx
+  getWhitespace ctx, t
+        
 let nestedToken ctx = 
   let t = token ctx
   match ctx.IndentStack with
   | (indent, _)::_ when ctx.IndentCurrent >= indent -> Some t
-  | [] -> failwith "TODO: Should not check nestedToken with no indent stack"
+  | [] -> Some t // failwith "TODO: Should not check nestedToken with no indent stack"
   | _ -> None
 
 let node rng n = 
   { Node = n; Range = rng; WhiteBefore = []; WhiteAfter = [] }
 
 let whiteAfter w n = { n with WhiteAfter = w }
+let whiteBefore w n = { n with WhiteBefore = w }
+
 
 /// Return range of the last element of call chain
 let lastCallOrPropertyRange expr id =
@@ -108,15 +148,66 @@ let (|Identifier|_|) t =
       Some { WhiteBefore = white; WhiteAfter = []; Range = rng; Node = { Name.Name = id } }
   | _ -> None
 
+// --------------------------------------------------------------------------------------
+// Operator precedence handling
+// --------------------------------------------------------------------------------------
 
+// Parsing of function applications let operators
+type Associativity = Left | Right
+
+let precedence = function
+  | Operator.Equals -> 0, Left
+  | Operator.GreaterThan | Operator.GreaterThanOrEqual
+  | Operator.LessThan | Operator.LessThanOrEqual -> 1, Left
+  | Operator.Plus | Operator.Minus -> 2, Left
+  | Operator.Multiply | Operator.Divide -> 3, Left
+  | Operator.Power -> 4, Right
+  
+/// Represnts a sequence of expressions separated by binary operators
+/// (e.g. 'f x + 1 * 2 / g y' has 4 expressions separated by 3 operators)
+type OpExpr = OpExpr of Node<Expr> * option<Node<Operator> * OpExpr>
+
+/// Turn 'OpExpr' into a parsed 'Expr' using the "Precedence climbing method"
+/// (see https://en.wikipedia.org/wiki/Operator-precedence_parser)
+let rec precClimb minPrec (OpExpr(app, next)) =   
+  let rec loop result (next:(Node<Operator>*OpExpr) option) = 
+    match next with 
+    | Some(op, next) when fst (precedence op.Node) >= minPrec ->
+        let prec, assoc = precedence op.Node
+        let nextMinPrec = 
+          if assoc = Left then prec + 1 else prec
+        let rhs, next = precClimb nextMinPrec next
+        let result = node (unionRanges result.Range rhs.Range) (Expr.Binary(result, op, rhs))
+        loop result next
+    | _ -> result, next      
+  loop app next
+
+/// The terms are passed in reverse order as accumulated
+let buildExpression terms term =
+  terms 
+  |> List.fold (fun oe (t, op) -> OpExpr(t, Some(op, oe))) (OpExpr(term, None))
+  |> precClimb 0
+  |> fst
+
+// --------------------------------------------------------------------------------------
+// The parser
+// --------------------------------------------------------------------------------------
+
+let makeCallOrProp optInst prevId prevArgs =
+  // Reconstruct previous bit of the chain from optInst/prevId/prevArgs
+  match optInst, prevArgs with
+  | Some inst, { Node = [] } -> node (unionRanges inst.Range prevId.Range) (Expr.Property(inst, prevId))
+  | None, { Node = [] } -> node prevId.Range (Expr.Variable(prevId))
+  | _ -> 
+      let fullRng = 
+        match optInst with 
+        | Some i -> unionRanges i.Range prevArgs.Range 
+        | _ -> unionRanges prevId.Range prevArgs.Range
+      node fullRng (Expr.Call(optInst, prevId, prevArgs))
 
 /// Property access or method call after '.' in a nested block
-let rec parseChain silentErrors optInst previd ctx = 
-  let inst = 
-    match optInst with
-    | Some inst -> node (unionRanges inst.Range previd.Range) (Expr.Property(inst, previd))
-    | None -> node previd.Range (Expr.Variable(previd))
-  
+let rec parseChain optInst prevId prevArgs ctx = 
+  let inst = makeCallOrProp optInst prevId prevArgs
   match nestedToken ctx with
   | Some (Identifier id) ->
       next ctx
@@ -125,11 +216,12 @@ let rec parseChain silentErrors optInst previd ctx =
   | Some(_, t) ->      
       // Error: Expected identifier (after '.') but there was some other token
       // at the correct level of nesting, so skip it & try prsing next thing
-      if not silentErrors then Errors.Parser.unexpectedTokenAfterDot t.Range t.Token |> addError ctx 
+      Errors.Parser.unexpectedTokenAfterDot t.Range t.Token |> addError ctx 
       if t.Token = TokenKind.EndOfFile then inst
       else 
         next ctx
-        parseChain true optInst previd ctx
+        use _silent = usingSilentMode ctx
+        parseChain optInst prevId prevArgs ctx
       
   | None ->
   match token ctx with
@@ -137,7 +229,15 @@ let rec parseChain silentErrors optInst previd ctx =
       // Error: There is an identifier after '.' but it is not properly indented
       let rng = lastCallOrPropertyRange inst
       Errors.Parser.unindentedIdentifierAfterDot id.Range rng id.Node.Name |> addError ctx 
-      inst
+      // If we are at top-level, we stop (to avoid consuming next line). 
+      // If we are inside expression list and not all the way to the left, 
+      //  we continue - but for that, we unindent the current stack
+      match ctx.TopLevel, ctx.IndentStack with 
+      | false, (sl, si)::stack when ctx.IndentCurrent > 0 ->
+          next ctx
+          ctx.IndentStack <- (ctx.IndentCurrent, si)::stack
+          parseMember (Some inst) id ctx
+      | _ -> inst
 
   | _, t ->      
       // Error: Expected more after '.' but the nested scope ends here
@@ -146,23 +246,52 @@ let rec parseChain silentErrors optInst previd ctx =
       Errors.Parser.unexpectedScopeEndAfterDot t.Range rng t.Token |> addError ctx 
       inst
 
+
+/// Helper used by 'parseMember' - parse '.' or '(...)' after ident in a chain
+and parseDotOrLParen optInst id ctx whiteAndTok = 
+  match whiteAndTok with
+  | white, ({ Token = TokenKind.LParen } as startTok)->
+      next ctx
+      use _top = usingNestedMode ctx
+      let optInst = optInst |> Option.map (whiteAfter white)
+      let endRange, white, args = parseCallArgList false startTok.Range [] ctx
+      let args = node (unionRanges startTok.Range endRange) args |> whiteAfter white
+      
+      // Call can be followed by '.' or end of call chain
+      match nestedToken ctx with
+      | Some(white, { Token = TokenKind.Dot }) ->
+          next ctx
+          Some(parseChain optInst id args ctx)
+      | _ ->
+          Some(makeCallOrProp optInst id args)
+
+  | white, { Token = TokenKind.Dot } ->
+      next ctx
+      let optInst = optInst |> Option.map (whiteAfter white)
+      Some(parseChain optInst id (node { Start=0; End=0; } []) ctx)
+
+  | _ -> None
+
+
 /// Call chain after name - either '.' & more or '(...)' or end of call chain
 and parseMember (optInst:option<_>) (id:Node<Name>) ctx : Node<_> = 
-  match nestedToken ctx with
-  | Some(white, ({ Token = TokenKind.LParen } as startTok)) ->
-      next ctx
-      let optInst = optInst |> Option.map (whiteAfter white)
-      let endRange, white, args = parseExpressionList [] ctx
-      let args = node (unionRanges startTok.Range endRange) args
-      let erng = defaultArg (Option.map (fun n -> n.Range) optInst) id.Range
-      node (unionRanges erng args.Range) (Expr.Call(optInst, id, args))
-
-  | Some(white, { Token = TokenKind.Dot }) ->
-      next ctx
-      let optInst = optInst |> Option.map (whiteAfter white)
-      parseChain false optInst id ctx
-
-  | _ -> 
+  let parsed = 
+    // Token is correctly nested - parse '.' or '('
+    match nestedToken ctx with
+    | Some res -> parseDotOrLParen optInst id ctx res
+    | _ ->
+    // Token is not nested, but it is '.' or '(', so we accept it with erorr
+    let after = token ctx    
+    match (use _silent = usingSilentMode ctx in parseDotOrLParen optInst id ctx after) with
+    | Some res -> 
+        Errors.Parser.unindentedDotAfterIdentifier id.Range (snd after).Range |> addError ctx 
+        Some res 
+    // Otherwise, we end the call chain
+    | _ -> None
+  match parsed with
+  | Some res -> res
+  | None -> 
+      // If we did not parse anything, create chain with what we have
       match optInst with
       | Some inst -> node (unionRanges inst.Range id.Range) (Expr.Property(inst, id))
       | None -> node id.Range (Expr.Variable(id))
@@ -171,66 +300,179 @@ and parseMember (optInst:option<_>) (id:Node<Name>) ctx : Node<_> =
 /// A term is a single thing inside expression involving operators, i.e.
 ///   <expression> := <term> <op> <term> <op> .. <op> <term>
 and parseTerm ctx = 
-  match token ctx with
+  let tt = nestedToken ctx
+  match tt with
   // Variable or call chain
-  | Identifier id ->
+  | Some((Identifier id) & (_, tok)) ->
       next ctx
-      if not (startIndent ctx) then failwith "TODO: Cannot start indent"
+      use _indent = usingIndent tok ctx
       let varOrCall = parseMember None id ctx 
-      endIndent ctx
       Some varOrCall
 
   // String, numeric and Boolean literals
-  | white, { Token = TokenKind.Number(_, n); Range = r }  ->
+  | Some(white, { Token = TokenKind.Number(_, n); Range = r }) ->
       next ctx
       node r (Expr.Number n) |> whiteAfter white |> Some
-  | white, { Token = TokenKind.String(s); Range = r }  ->
+  | Some(white, { Token = TokenKind.String(s); Range = r }) ->
       next ctx
       node r (Expr.String s) |> whiteAfter white |> Some
-  | white, { Token = TokenKind.Boolean(b); Range = r }  ->
+  | Some(white, { Token = TokenKind.Boolean(b); Range = r }) ->
       next ctx
       node r (Expr.Boolean b) |> whiteAfter white |> Some
+
+  // Parse nested expressions starting with `(` or list starting with `[`
+  | Some(white, ({ Token = TokenKind.LParen } as t)) ->
+      next ctx
+      parseParenTermEnd (t::List.rev white) [] (parseExpression [] ctx) ctx
+  | Some(white, ({ Token = TokenKind.LSquare } as t)) ->
+      next ctx
+      use _neste = usingNestedMode ctx
+      parseListElements false t.Range white t.Range [] ctx
 
   // Not a term, but that's fine
   | _ -> None
 
-and parseExpression ctx = 
-  match parseTerm ctx with
-  | Some t -> Some t
-  | None -> None      
 
-and parseExpressionList acc ctx = 
+/// Parse list of elements and closing square bracket, after `[`
+and parseListElements expectMore lastRng whiteStart startRng acc ctx =
+  let parsed, acc =  
+    match parseExpression [] ctx with
+    | Some expr -> true, fun white -> (whiteAfter white expr)::acc
+    | _ -> false, fun _ -> acc
+
+  match nestedToken ctx with
+  | Some(white, { Token = TokenKind.RSquare; Range = endRng }) ->
+      next ctx
+      node (unionRanges startRng endRng) (Expr.List(List.rev (acc []))) |> whiteBefore white |> Some
+  | Some(white, { Token = TokenKind.Comma; Range = lastRng }) ->
+      next ctx
+      if not parsed && expectMore then
+        Errors.Parser.unexpectedTokenInList lastRng TokenKind.Comma |> addError ctx
+      parseListElements true lastRng whiteStart startRng (acc white) ctx
+  | Some(_, t) ->
+      // Skip over unexpected, but correctly nested tokens
+      next ctx
+      Errors.Parser.unexpectedTokenInList t.Range t.Token |> addError ctx
+      parseListElements expectMore t.Range whiteStart startRng (acc []) ctx
+  | None ->
+      // Unexpected end of nesting - end argument list now
+      Errors.Parser.unexpectedScopeEndInList lastRng |> addError ctx
+      node (unionRanges startRng lastRng) (Expr.List(List.rev (acc []))) |> Some
+
+
+/// Parse what follows after `(<expr>` - either `)` or some errors 
+and parseParenTermEnd wb wa bodyOpt ctx =  
+  // Create parenthesized expression body, or return empty expression if missing
+  let makeBody wa =
+    let body = 
+      match bodyOpt with
+      | Some body -> body
+      | None -> 
+          let rng = List.append [List.head wb] wa |> List.map (fun t -> t.Range) |> List.reduce unionRanges
+          Errors.Parser.missingParenthesizedExpr rng |> addError ctx
+          node rng Expr.Empty
+    Some(body |> whiteBefore (List.rev wb) |> whiteAfter (List.rev wa))
+
+  // Wait for ')', ignoring other nested tokens & ending on end of nesting
+  match nestedToken ctx with
+  | Some(white, ({ Token = TokenKind.RParen } as t)) -> 
+      next ctx
+      makeBody (t::(List.append (List.rev white) wa))
+  | Some(white, t) -> 
+      next ctx
+      Errors.Parser.unexpectedTokenInParenthesizedExpr t.Range t.Token |> addError ctx
+      parseParenTermEnd wb (t::(List.append (List.rev white) wa)) bodyOpt ctx
+  | None ->
+      let rng = match bodyOpt with Some b -> b.Range | _ -> (List.head wb).Range
+      Errors.Parser.unindentedTokenInParenthesizedExpr rng |> addError ctx
+      makeBody wa
+            
+
+/// Parse expression consisting of multiple terms & operators
+and parseExpression terms ctx = 
+  match terms, parseTerm ctx with
+  | terms, Some term -> 
+      match nestedToken ctx with
+      // Followed by operator and more expressions
+      | Some(white, ({ Token = TokenKind.Equals } as t)) ->
+          next ctx
+          parseExpression ((term, whiteBefore white (node t.Range Operator.Equals))::terms) ctx
+      | Some(white, ({ Token = TokenKind.Operator op } as t)) ->
+          next ctx
+          parseExpression ((term, whiteBefore white (node t.Range op))::terms) ctx
+      | _ -> 
+          Some(buildExpression terms term)  
+  // Not an expression, return None
+  | [], None -> None  
+  // Nothing after operator - ignore operator, but parse preceding terms
+  | (term, op)::terms, None -> 
+      let next = justToken ctx
+      Errors.Parser.unexpectedTokenAfterOperator next.Range (TokenKind.Operator op.Node) next.Token |> addError ctx
+      Some(buildExpression terms term)
+
+
+/// Try parsing input as '<id> = <expr>', if that does not work, treat it as <expr>
+and parseExpressionOrNamedParam ctx = 
+  let lookAheadCtx = clone ctx
+  match nestedToken lookAheadCtx with
+  | Some(Identifier id) ->
+      next lookAheadCtx
+      match nestedToken lookAheadCtx with
+      | Some(white, ({ Token = TokenKind.Equals } as t)) ->
+          // Replay what we did on lookahead context on the original context
+          ignore (nestedToken ctx); next ctx
+          ignore (nestedToken ctx); next ctx
+          match parseExpression [] ctx with
+          | Some expr -> Choice1Of2(whiteAfter white id, expr)
+          | None -> 
+              Errors.Parser.unexpectedTokenInArgList t.Range t.Token |> addError ctx
+              Choice2Of2(Some(node id.Range (Expr.Variable(id))))
+      | _ -> Choice2Of2(parseExpression [] ctx)
+  | _ -> 
+      Choice2Of2(parseExpression [] ctx)
+    
+
+/// Parse a comma separated list of expressions or named parameter assignments
+and parseCallArgList expectMore lastRng acc ctx = 
   let parsed, acc = 
-    // TODO: Named arguments
-    match parseExpression ctx with
-    | None -> false, acc
-    | Some e -> true, { Name = None; Value = e }::acc
-
-  match token ctx with
-  | white, ({ Token = TokenKind.RParen } as t) ->
+    match parseExpressionOrNamedParam ctx with
+    | Choice2Of2(None) -> false, acc
+    | Choice2Of2(Some e) -> true, { Name = None; Value = e }::acc
+    | Choice1Of2(id, e) -> true, { Name = Some id; Value = e }::acc
+  match nestedToken ctx with
+  | Some(white, ({ Token = TokenKind.RParen } as t)) ->
       next ctx
-      t.Range, white, acc
+      if expectMore && not parsed then        
+        Errors.Parser.unexpectedTokenInArgList lastRng TokenKind.RParen |> addError ctx
+      t.Range, white, List.rev acc
 
-  | white, { Token = TokenKind.Comma } when parsed ->
+  | Some(white, { Token = TokenKind.Comma; Range = lastRng }) when parsed ->
       next ctx
-      parseExpressionList acc ctx
+      parseCallArgList true lastRng acc ctx
 
-  | _, t ->
-      failwithf "Expected ) or , (if parsed=true) but got %A" t.Token
+  | Some(_, t) ->
+      // Skip over unexpected, but correctly nested tokens
+      next ctx
+      Errors.Parser.unexpectedTokenInArgList t.Range t.Token |> addError ctx
+      parseCallArgList expectMore t.Range acc ctx
+  | None ->
+      // Unexpected end of nesting - end argument list now
+      Errors.Parser.unexpectedScopeEndInArgList lastRng |> addError ctx
+      lastRng, [], List.rev acc
 
 
 let rec parseCommand ctx = 
   match token ctx with
-  | whiteBeforeLet, { Token = TokenKind.Let; Range = rngLet } ->
+  | whiteBeforeLet, ({ Token = TokenKind.Let; Range = rngLet } as tok) ->
       next ctx
-      if not (startIndent ctx) then failwith "TODO: Cannot start indent"
+      use _indent = usingIndent tok ctx
       match nestedToken ctx with
       | Some(Identifier id) ->
           next ctx
           match nestedToken ctx with
           | Some (whiteAfterId, { Token = TokenKind.Equals }) ->
               next ctx
-              match parseExpression ctx with
+              match parseExpression [] ctx with
               | Some body ->
                 { Node = Command.Let({ id with WhiteAfter = whiteAfterId }, body)
                   WhiteBefore = whiteBeforeLet; WhiteAfter = []
@@ -245,8 +487,9 @@ let rec parseCommand ctx =
           failwith "missing ident after let"
       | None ->
           failwith "unfinished let"
+
   | t ->
-      match parseExpression ctx with
+      match parseExpression [] ctx with
       | Some expr ->
           { WhiteBefore = []; WhiteAfter = []; Range = expr.Range
             Node = Command.Expr expr }
@@ -263,22 +506,21 @@ let rec parseCommands acc ctx =
       let cmd = parseCommand ctx
       parseCommands (cmd::acc) ctx
 
+
+// --------------------------------------------------------------------------------------
+// Helpers for writing tests for parser
+// --------------------------------------------------------------------------------------
+
+/// Tokenize & create default context
 let tokenize input = 
   { Tokens = Tokenizer.tokenize input |> fst
+    TopLevel = true
+    Silent = false
     Position = 0
     IndentCurrent = 0
     IndentStack = []
     Errors = ResizeArray<_>()
     Whitespace = ResizeArray<_>() }
-
-//let ctx = tokenize "\nlet a = foo.\n      'bar zoo'.\n  yadda"
-//parseCommand ctx
-
-
-
-// --------------------------------------------------------------------------------------
-// Helpers for writing tests for parser
-// --------------------------------------------------------------------------------------
 
 /// Type-safe assertion
 let equal (expected:'T) (actual:'T) = Assert.AreEqual(expected, actual)
@@ -291,18 +533,20 @@ let assertErrors expectErrors ((code:string), cmds, errs) =
     equal en an
     equal ec s
 
+/// Assert that expression contains given sub-expression
+let rec hasSubExpr f e =
+  if f e then true else
+    match e with 
+    | ExprNode(es, _) -> es |> List.exists (fun e -> hasSubExpr f e.Node)
+    | ExprLeaf _ -> false
+
 /// Assert that result contains given sub-expression
 let assertSubExpr f (code, (cmds:Node<Command> list), errs) = 
-  let rec loop e = 
-    if f e then true else
-      match e with 
-      | ExprNode(es, _) -> es |> List.exists (fun e -> loop e.Node)
-      | ExprLeaf _ -> false
   let matches = 
     cmds |> List.exists (fun cmd ->
       match cmd.Node with
-      | Command.Expr e -> loop e.Node
-      | Command.Let(_, e) -> loop e.Node )
+      | Command.Expr e -> hasSubExpr f e.Node
+      | Command.Let(_, e) -> hasSubExpr f e.Node )
   equal true matches
 
 /// Sub-expression contains property with given name
@@ -312,6 +556,15 @@ let isProperty name = function
 /// Sub-expression contains call with given name and arguments match function
 let isCall name ac = function 
   | Expr.Call(_, n, args) -> n.Node.Name = name && ac args | _ -> false
+
+/// Sub-expression is a list with elements matching specified functions
+let isList conds = function 
+  | Expr.List(elems) -> List.zip conds elems |> List.forall (fun (cond, el) -> cond el.Node) | _ -> false
+
+/// Expression is binary operator
+let isBinary op fl fr = function
+  | Expr.Binary(l, o, r) -> o.Node = op && fl l.Node && fr r.Node
+  | _ -> false
 
 /// Expression is specified value (string, int, float, bool)
 let isVal (v:obj) e = 
@@ -328,6 +581,11 @@ let any _ = true
 let hasArgValues conds { Node = args } = 
   List.zip conds args |> List.forall (fun (f, (arg:Argument)) -> f arg.Value.Node)
 
+/// Specify conditions on argument names
+let hasArgNames names { Node = args } = 
+  List.zip names args |> List.forall (fun (n, (arg:Argument)) -> 
+    n = defaultArg (arg.Name |> Option.map (fun i -> i.Node.Name)) "" )
+
 /// Sub-expression contains variable with given name
 let isVariable name = function 
   | Expr.Variable(n) -> n.Node.Name = name | _ -> false
@@ -338,6 +596,14 @@ let parse (code:string) =
   let ctx = tokenize code
   code, parseCommands [] ctx, [ for e in ctx.Errors -> e.Number, (e.Range.Start, e.Range.End) ]
 
+/// Format binary operaation for testing purposes
+let formatSimpleNumExpr e = 
+  let rec loop = function
+    | { Node = Expr.Number n } -> string (int n)
+    | { Node = Expr.Binary(l, op, r) } -> 
+        sprintf "(%s %s %s)" (loop l) (AstOperations.formatToken (TokenKind.Operator op.Node)) (loop r)
+    | _ -> "?"
+  loop (node { Start = 0; End = 0 } e)
 
 // --------------------------------------------------------------------------------------
 // TESTS: Call chains and nesting
@@ -369,7 +635,7 @@ let ``Error reported on identifier following an unfinished chain``() =
     bar"""
   actual |> assertSubExpr (isVariable "foo")
   actual |> assertSubExpr (isVariable "bar")
-  actual |> assertErrors [23, "bar"]
+  actual |> assertErrors [203, "bar"]
 
 [<Test>]
 let ``Correctly parse indented call chain with nesting``() =
@@ -384,11 +650,35 @@ let ``Correctly parse indented call chain with nesting``() =
   actual |> assertErrors []
 
 [<Test>]
+let ``Correctly parse named arguments of method call``() =
+  let actual = parse """
+    foo(a=bar(b=1, c=2, 3))"""
+  actual |> assertSubExpr (isCall "foo" (hasArgNames ["a"]))
+  actual |> assertSubExpr (isCall "bar" (hasArgNames ["b"; "c"; ""]))
+  actual |> assertErrors []
+
+[<Test>]
+let ``Error reported on incomplete named parameter specification``() =
+  let actual = parse """
+    foo(a=bar(b=, c=2, 3))"""
+  actual |> assertSubExpr (isCall "foo" (hasArgNames ["a"]))
+  actual |> assertSubExpr (isCall "bar" (hasArgNames [""; "c"; ""]))
+  actual |> assertSubExpr (isVariable "b")
+  actual |> assertErrors [207, "="]
+
+[<Test>]
+let ``Currectly parse nested chain as equality test``() =
+  let actual = parse "foo(bar.yadda=1)"
+  actual |> assertSubExpr (isCall "foo" (hasArgNames [""]))
+  actual |> assertSubExpr (isProperty "yadda")
+  actual |> assertErrors []
+
+[<Test>]
 let ``Error reported on keyword after a call chain``() =
   let actual = parse """
     let a = foo.let"""
   actual |> assertSubExpr (isVariable "foo")
-  actual |> assertErrors [21, "let"]
+  actual |> assertErrors [201, "let"]
 
 [<Test>]
 let ``Error reported on unfinished call chain``() =
@@ -398,7 +688,7 @@ let ``Error reported on unfinished call chain``() =
     let b = a"""
   actual |> assertSubExpr (isVariable "foo")
   actual |> assertSubExpr (isProperty "bar")
-  actual |> assertErrors [22, "let"]
+  actual |> assertErrors [202, "let"]
 
 [<Test>]
 let ``Error reported on unindented token in call chain``() =
@@ -408,14 +698,167 @@ let ``Error reported on unindented token in call chain``() =
     yadda"""
   actual |> assertSubExpr (isProperty "bar zoo")
   actual |> assertSubExpr (isVariable "yadda")
-  actual |> assertErrors [23, "yadda"]
+  actual |> assertErrors [203, "yadda"]
+
+// --------------------------------------------------------------------------------------
+// TESTS: Call chains with arguments
+// --------------------------------------------------------------------------------------
 
 [<Test>]
 let ``Correctly parse call with arguments``() =
   let actual = parse """
     let a = foo.
       'bar zoo'(1)"""
-  actual |> assertSubExpr (isCall "bar zoo" (hasArgValues [isVal 1]))
+  actual |> assertSubExpr (isCall "bar zoo" (hasArgValues [isVal 1.0]))
+
+[<Test>]
+let ``Correctly parse multiple nested chain calls`` () =
+  let actual = parse """
+    let a = foo1
+      .foo2(bar1
+        .bar2(goo1
+          .goo2))"""
+  actual |> assertSubExpr (isCall "bar2" (hasArgValues [hasSubExpr (isProperty "goo2") ]))
+  actual |> assertErrors []
+
+[<Test>]
+let ``Error reported on insufficiently indented nested chain`` () =
+  let actual = parse """
+    let a = foo1
+      .foo2(bar1
+      .bar2(goo1
+      .goo2.'bar zoo'(1)))"""
+  actual |> assertSubExpr (isCall "bar2" (hasArgValues [hasSubExpr (isProperty "goo2") ]))
+  actual |> assertSubExpr (isCall "bar zoo" (hasArgValues [isVal 1.0]))
+  actual |> assertErrors [204, "bar1"]
+
+[<Test>]
+let ``Correctly parse one inline chain and one indented chain`` () =
+  let actual = parse """
+    let a = foo1.foo2(bar1.bar2(
+      goo1.goo2))"""
+  actual |> assertSubExpr (isCall "bar2" (hasArgValues [hasSubExpr (isProperty "goo2") ]))
+  actual |> assertErrors []
+
+
+[<Test>]
+let ``Report error and stop parsing in unindented argument list`` () =
+  let actual = parse """
+    let a = foo(
+        1,
+    bar(2)"""
+  actual |> assertErrors [208,","]
+  actual |> assertSubExpr (isCall "foo" (hasArgValues [isVal 1.0]))
+  actual |> assertSubExpr (isCall "bar" (hasArgValues [isVal 2.0]))
+
+[<Test>]
+let ``Report error and continue parsing indented method chain`` () =
+  let actual = parse """
+    let a = foo(
+        1,).yadda
+    bar(2)"""
+  actual |> assertErrors [207,","]
+  actual |> assertSubExpr (isCall "foo" (hasArgValues [isVal 1.0]))
+  actual |> assertSubExpr (isProperty "yadda")
+
+[<Test>]
+let ``Correctly parse chain with calls and properties`` () = 
+  let actual = parse """
+    let a = goo.foo("yo").'some bar'
+    yadda(2)"""
+  actual |> assertSubExpr (isCall "foo" (hasArgValues [isVal "yo"]))
+  actual |> assertSubExpr (isProperty "some bar")
+  actual |> assertErrors []
+
+// --------------------------------------------------------------------------------------
+// TESTS: List expressions
+// --------------------------------------------------------------------------------------
+
+[<Test>]
+let ``Correctly parse list of inline elements`` () =
+  let actual = parse """
+    let a = [1, 2, 3]"""
+  actual |> assertSubExpr (isList [isVal 1.0; isVal 2.0; isVal 3.0])
+  actual |> assertErrors []
+
+[<Test>]
+let ``Correctly parse list of elements with line breaks`` () =
+  let actual = parse """
+    let a = [1, 
+      2, 
+      3]"""
+  actual |> assertSubExpr (isList [isVal 1.0; isVal 2.0; isVal 3.0])
+  actual |> assertErrors []
+
+[<Test>]
+let ``Report error and stop parsing unindented list`` () =
+  let actual = parse """
+    let a = [1, 
+    foo.bar"""
+  actual |> assertSubExpr (isProperty "bar")
+  actual |> assertErrors [213, ","]
+
+[<Test>]
+let ``Report error and skip over unexpected tokens in list`` () =
+  let actual = parse """
+    let a = [1,
+      2,
+      +] 
+    foo.bar"""
+  actual |> assertSubExpr (isList [isVal 1.0; isVal 2.0])
+  actual |> assertErrors [212, "+"]
+
+// --------------------------------------------------------------------------------------
+// TESTS: Binary operator precedence & parenthesis
+// --------------------------------------------------------------------------------------
+
+[<Test>]
+let ``Correctly parses precedence of numerical operators`` () =
+  let actual = parse "foo(1 + 2 ^ 3 * 4)"
+  actual |> assertSubExpr (isCall "foo" (hasArgValues [ fun e -> 
+    equal "(1 + ((2 ^ 3) * 4))" (formatSimpleNumExpr e)
+    true ]))
+  actual |> assertErrors []
+
+[<Test>]
+let ``Correctly parses precedence of Boolean and numerical operators`` () =
+  let actual = parse "foo(2 ^ 3 * 4 > 1 + 2 = 1 > 8)"
+  actual |> assertSubExpr (isCall "foo" (hasArgValues [ fun e -> 
+    equal "((((2 ^ 3) * 4) > (1 + 2)) = (1 > 8))" (formatSimpleNumExpr e) 
+    true ]))
+  actual |> assertErrors []
+
+[<Test>]
+let ``Correctly parses precedence of operators with nested chain`` () =
+  let actual = parse """
+    let a = 
+      foo(1 + 2 ^ bar.
+      yadda * 4)"""
+  actual |> assertSubExpr (isCall "foo" (hasArgValues [ fun e -> 
+    equal "(1 + ((2 ^ ?) * 4))" (formatSimpleNumExpr e) 
+    true ]))
+  actual |> assertErrors [203, "yadda"]
+
+[<Test>]
+let ``Correctly parses parenthesized expression`` () =
+  let actual = parse "foo(1 + (2 + 3) + 4)"
+  actual |> assertSubExpr (isCall "foo" (hasArgValues [ fun e -> 
+    equal "((1 + (2 + 3)) + 4)" (formatSimpleNumExpr e) 
+    true ]))
+
+[<Test>]
+let ``Report erroneous token inside parenthesized expression`` () =
+  let actual = parse "foo(1 + (2 let) + 4)"
+  actual |> assertErrors [209, "let"]
+
+[<Test>]
+let ``Report erroneous end of nesting and continue parsing`` () =
+  let actual = parse """
+    foo(1 + (2
+    bar.yadda"""
+  actual |> assertErrors [210, "2"; 208, "("]
+  actual |> assertSubExpr (isProperty "yadda")
+  actual |> assertSubExpr (isVariable "bar")
 
 (*
 

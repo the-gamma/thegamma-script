@@ -35,14 +35,43 @@ module Parser =
   // v2 errors
 
   let unexpectedTokenAfterDot rng tok =
-    { Number = 21; Range = rng; Message = sprintf "Unexpected %s after '.' in method chain" (formatTokenInfo tok) }
+    { Number = 201; Range = rng; Message = sprintf "Unexpected %s after '.' in method chain" (formatTokenInfo tok) }
 
   let unexpectedScopeEndAfterDot rng chainRng tok =
-    { Number = 22; Range = rng; Message = sprintf "Unexpected end of scope after '.' in method chain before %s" (formatTokenInfo tok) }
+    { Number = 202; Range = rng; Message = sprintf "Unexpected end of scope after '.' in method chain before %s" (formatTokenInfo tok) }
 
   let unindentedIdentifierAfterDot rng chainRng id =
-    { Number = 23; Range = rng; Message = sprintf "Unexpected end of scope after '.' and before '%s'. Indent the identifier?" id }
+    { Number = 203; Range = rng; Message = sprintf "Unexpected end of scope after '.' and before '%s'. Indent the identifier?" id }
 
+  let unindentedDotAfterIdentifier rng dotRng =
+    { Number = 204; Range = rng; Message = "Dot after this identifier is not correctly nested" }
+
+  let unindentedBlock rng tok =
+    { Number = 205; Range = rng; Message = sprintf "Token following %s needs to be indented further" (formatTokenInfo tok) }
+
+  let unexpectedTokenAfterOperator rng op tok =
+    { Number = 206; Range = rng; Message = sprintf "Unexpected token '%s' after operator '%s'" (formatTokenInfo tok) (formatTokenInfo op) }
+
+  let unexpectedTokenInArgList rng tok =
+    { Number = 207; Range = rng; Message = sprintf "Unexpected token '%s' in list of call arguments" (formatTokenInfo tok) }
+
+  let unexpectedScopeEndInArgList rng =
+    { Number = 208; Range = rng; Message = "Unexpected end of scope in argument list" }
+
+  let unexpectedTokenInParenthesizedExpr rng tok =
+    { Number = 209; Range = rng; Message = sprintf "Unexpected token '%s' in parenthesized expression. Are you missing ')'?" (formatTokenInfo tok) }
+
+  let unindentedTokenInParenthesizedExpr rng =
+    { Number = 210; Range = rng; Message = "Unexpected end of nested expression in `(`" }
+
+  let missingParenthesizedExpr rng =
+    { Number = 211; Range = rng; Message = "The parenthesized expression (...) is missing body!" }
+
+  let unexpectedTokenInList rng tok =
+    { Number = 212; Range = rng; Message = sprintf "Unexpected token '%s' in list expression" (formatTokenInfo tok) }
+
+  let unexpectedScopeEndInList rng =
+    { Number = 213; Range = rng; Message = "Unexpected end of scope in list expression" }
 
 module TypeChecker = 
   let private formatMembers members = 

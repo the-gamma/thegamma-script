@@ -144,6 +144,7 @@ and tokenizeInput ctx i =
   | '-' -> addAndTokenize ctx (TokenKind.Operator(Operator.Minus)) i 1
   | '*' -> addAndTokenize ctx (TokenKind.Operator(Operator.Multiply)) i 1
   | '/' -> addAndTokenize ctx (TokenKind.Operator(Operator.Divide)) i 1
+  | '^' -> addAndTokenize ctx (TokenKind.Operator(Operator.Power)) i 1
   
   // Symbols that start something (string, whitespace, quoted ident)
   | '"' -> tokenizeString ctx [] i 1

@@ -20,6 +20,8 @@ let formatToken = function
   | TokenKind.Operator Operator.Minus -> "-"
   | TokenKind.Operator Operator.Multiply -> "*"
   | TokenKind.Operator Operator.Plus -> "+"
+  | TokenKind.Operator Operator.Power -> "^"
+  | TokenKind.Operator Operator.Equals -> "="
   | TokenKind.Boolean true -> "true"
   | TokenKind.Boolean false -> "false"
   | TokenKind.Number(s, _) -> s
@@ -44,6 +46,7 @@ let formatTokenInfo = function
   | TokenKind.RSquare -> "right square bracket `]`"
   | TokenKind.Fun -> "`fun` keyword"
   | TokenKind.Arrow -> "arrow sign `->`"
+  | TokenKind.Operator Operator.Equals -> "equals operator `=`"
   | TokenKind.Operator Operator.Divide -> "division sign `/`"
   | TokenKind.Operator Operator.GreaterThan -> "greater than sign `>`"
   | TokenKind.Operator Operator.GreaterThanOrEqual -> "greater than or equals sign `>=`"
@@ -52,6 +55,7 @@ let formatTokenInfo = function
   | TokenKind.Operator Operator.Minus -> "minus sign `-`"
   | TokenKind.Operator Operator.Multiply -> "multiplication sign `*`"
   | TokenKind.Operator Operator.Plus -> "plus sign `+`"
+  | TokenKind.Operator Operator.Power -> "exponentiation sign `^`"
   | TokenKind.Boolean true -> "logical `true` value"
   | TokenKind.Boolean false -> "logical `false` value"
   | TokenKind.Number(s, _) -> sprintf "numerical value `%s`" s
@@ -123,6 +127,7 @@ module AST2 =
     | Expr.Variable(n) -> ExprNode([], [n])
     | Expr.List(els) -> ExprNode(els, [])
     | Expr.Function(n, b) -> ExprNode([b], [n])
+    | Expr.Binary(l, op, r) -> ExprNode([l; r], [])
     | Expr.Number _
     | Expr.Boolean _
     | Expr.String _
