@@ -27,6 +27,7 @@ type Context =
     Errors : ResizeArray<Error<Range>>
     mutable TopLevel : bool
     mutable Silent : bool
+    mutable StrictlyNested : bool
     mutable IndentCurrent : int
     mutable IndentStack : (int * bool) list
     mutable Position : int }
@@ -39,6 +40,7 @@ let clone ctx =
     Errors = ResizeArray(ctx.Errors)
     TopLevel = ctx.TopLevel
     Silent = ctx.Silent
+    StrictlyNested = ctx.StrictlyNested
     IndentCurrent = ctx.IndentCurrent
     IndentStack = ctx.IndentStack 
     Position = ctx.Position }
@@ -64,7 +66,7 @@ let setLineIndent ctx l =
 let addError ctx e = 
   if not ctx.Silent then ctx.Errors.Add(e)
 
-let usingIndent (tok:Token) ctx =
+let usingIndent current (tok:Token) ctx =
   let started = 
     match ctx.IndentStack with
     | (prev, true)::_ when prev > ctx.IndentCurrent -> 
@@ -73,7 +75,7 @@ let usingIndent (tok:Token) ctx =
     | (prev, false)::_ when prev <> ctx.IndentCurrent -> 
         failwith "TODO: startIndent - forgot to initialize line"
     | _ ->
-        ctx.IndentStack <- (ctx.IndentCurrent, false)::ctx.IndentStack
+        ctx.IndentStack <- (ctx.IndentCurrent, current)::ctx.IndentStack
         true
 
   { new System.IDisposable with
@@ -82,6 +84,15 @@ let usingIndent (tok:Token) ctx =
         | true, t::stack -> ctx.IndentStack <- stack
         | false, _ -> ()
         | _ -> failwith "error - endIndent when stack is empty" }
+
+let usingStrictNesting ctx = 
+  let prev = ctx.StrictlyNested
+  ctx.StrictlyNested <- true
+  match ctx.IndentStack with
+  | x::xs -> ctx.IndentStack <- (0, true)::xs
+  | _ -> ()
+  { new System.IDisposable with
+      member x.Dispose() = ctx.StrictlyNested <- prev }
 
 let usingSilentMode ctx = 
   let prev = ctx.Silent
@@ -120,19 +131,23 @@ let rec justToken ctx =
 let token ctx = 
   let t = justToken ctx
   getWhitespace ctx, t
-        
+
 let nestedToken ctx = 
   let t = token ctx
-  match ctx.IndentStack with
-  | (indent, _)::_ when ctx.IndentCurrent >= indent -> Some t
-  | [] -> Some t // failwith "TODO: Should not check nestedToken with no indent stack"
-  | _ -> None
+  let res =
+    match ctx.IndentStack with
+    | (indent, _)::_ when ctx.IndentCurrent > indent || (not ctx.StrictlyNested && ctx.IndentCurrent = indent) -> Some t
+    | [] -> Some t // failwith "TODO: Should not check nestedToken with no indent stack"
+    | _ -> None
+  if ctx.StrictlyNested then
+    () //printfn "%d (%A) -- %A\n   returning: %A" ctx.IndentCurrent ctx.IndentStack t  res
+  res
 
 let node rng n = 
   { Node = n; Range = rng; WhiteBefore = []; WhiteAfter = [] }
 
-let whiteAfter w n = { n with WhiteAfter = w }
-let whiteBefore w n = { n with WhiteBefore = w }
+let whiteAfter w n = { n with WhiteAfter = n.WhiteAfter @ w  }
+let whiteBefore w n = { n with WhiteBefore = w @ n.WhiteBefore }
 
 
 /// Return range of the last element of call chain
@@ -305,7 +320,7 @@ and parseTerm ctx =
   // Variable or call chain
   | Some((Identifier id) & (_, tok)) ->
       next ctx
-      use _indent = usingIndent tok ctx
+      use _indent = usingIndent false tok ctx
       let varOrCall = parseMember None id ctx 
       Some varOrCall
 
@@ -326,7 +341,7 @@ and parseTerm ctx =
       parseParenTermEnd (t::List.rev white) [] (parseExpression [] ctx) ctx
   | Some(white, ({ Token = TokenKind.LSquare } as t)) ->
       next ctx
-      use _neste = usingNestedMode ctx
+      use _nest = usingNestedMode ctx
       parseListElements false t.Range white t.Range [] ctx
 
   // Not a term, but that's fine
@@ -461,51 +476,117 @@ and parseCallArgList expectMore lastRng acc ctx =
       lastRng, [], List.rev acc
 
 
-let rec parseCommand ctx = 
-  match token ctx with
+/// Parse a top-level expression, 
+let rec parseNestedExpressions wacc acc ctx = 
+  match parseExpression [] ctx with
+  | Some expr ->  
+      if not (List.isEmpty acc) then 
+        Errors.Parser.nestedExpressionInCommand expr.Range |> addError ctx
+        parseNestedExpressions [] ((whiteBefore (List.rev wacc) expr)::acc) ctx
+      else
+        use _strict = usingStrictNesting ctx
+        parseNestedExpressions [] ((whiteBefore (List.rev wacc) expr)::acc) ctx
+  | _ ->
+  match nestedToken ctx with
+  | Some(_, { Token = TokenKind.EndOfFile })
+  | None ->
+      match acc with
+      | x::xs -> (whiteAfter (List.rev wacc) x)::xs
+      | [] -> []
+  | Some(white, tok) ->
+      next ctx
+      parseNestedExpressions (tok::(List.rev white) @ wacc) acc ctx
+
+
+/// Parse the rest of the let binding after `let`, handling all sorts of errors
+/// This returns parsed command together with all nested expressions after the command
+/// (those should not be nested, but we accept them anyway & report error)
+let parseLetBinding whiteBeforeLet rngLet ctx = 
+  match nestedToken ctx with
+  | Some(Identifier id) ->
+      next ctx
+      match nestedToken ctx with
+      | Some (whiteAfterId, { Token = TokenKind.Equals; Range = rngEq }) ->
+          next ctx
+          match List.rev (parseNestedExpressions [] [] ctx) with
+          | body::rest ->
+              rest, 
+              Command.Let(whiteAfter whiteAfterId id, body)
+              |> node (unionRanges rngLet body.Range) 
+              |> whiteBefore whiteBeforeLet
+              
+          | [] ->
+              // Missing body - return let binding with empty expression
+              Errors.Parser.missingBodyInLetBinding (unionRanges rngLet rngEq) |> addError ctx
+              [],
+              Command.Let(whiteAfter whiteAfterId id, node { Start = rngEq.End; End = rngEq.End } Expr.Empty)
+              |> node (unionRanges rngLet rngEq) 
+              |> whiteBefore whiteBeforeLet
+              
+      | Some (whiteAfterId, t) ->
+          // Unexpected token after ident - try to parse nested body as expression nevertheless
+          Errors.Parser.unexpectedTokenInLetBinding t.Range t.Token |> addError ctx
+          let body, rest = 
+            match List.rev (parseNestedExpressions [] [] ctx) with
+            | body::rest -> body, rest
+            | [] -> node { Start = id.Range.End; End = id.Range.End } Expr.Empty, []
+          rest,
+          Command.Let(whiteAfter whiteAfterId id, body)
+          |> node (unionRanges rngLet id.Range) 
+          |> whiteBefore whiteBeforeLet
+          
+      | None ->
+          // End of block after ident - return binding with empty expression
+          Errors.Parser.missingBodyInLetBinding id.Range |> addError ctx
+          let body = node { Start = id.Range.End; End = id.Range.End } Expr.Empty
+          [], node (unionRanges rngLet id.Range) (Command.Let(id, body)) |> whiteBefore whiteBeforeLet
+          
+  | Some(whiteAfterLet, t) ->
+      // Unexpected token after let - try to parse nested body as expression & assume emtpy identifier
+      //printfn "Unexpected token after let: %A" t
+      Errors.Parser.unexpectedTokenInLetBinding t.Range t.Token |> addError ctx
+      let letEndRng = { Start = rngLet.End; End = rngLet.End }
+      let body, rest = 
+        match List.rev (parseNestedExpressions [] [] ctx) with
+        | body::rest -> body, rest
+        | [] -> node letEndRng Expr.Empty, []
+      rest,
+      Command.Let(whiteBefore whiteAfterLet (node letEndRng { Name = "" } ), body)
+      |> node (unionRanges rngLet body.Range) 
+      |> whiteBefore whiteBeforeLet
+      
+  | None ->
+      // Missing body - return let binding with empty expression and empty identifier
+      Errors.Parser.missingBodyInLetBinding rngLet |> addError ctx
+      let rng = { Start = rngLet.End; End = rngLet.End }
+      [], node rng (Command.Let(node rng { Name = "" }, node rng Expr.Empty)) |> whiteBefore whiteBeforeLet
+
+      
+/// A command is either top-level expression or let binding
+let rec parseCommands acc ctx = 
+  let c = token ctx
+  match c with
   | whiteBeforeLet, ({ Token = TokenKind.Let; Range = rngLet } as tok) ->
       next ctx
-      use _indent = usingIndent tok ctx
-      match nestedToken ctx with
-      | Some(Identifier id) ->
-          next ctx
-          match nestedToken ctx with
-          | Some (whiteAfterId, { Token = TokenKind.Equals }) ->
-              next ctx
-              match parseExpression [] ctx with
-              | Some body ->
-                { Node = Command.Let({ id with WhiteAfter = whiteAfterId }, body)
-                  WhiteBefore = whiteBeforeLet; WhiteAfter = []
-                  Range = unionRanges rngLet body.Range }
-              | None ->
-                  failwith "not expression"
-          | Some t ->
-              failwith "missing equals after let ident"
-          | None ->
-              failwith "unfinished let (missing body)"
-      | Some _ ->
-          failwith "missing ident after let"
-      | None ->
-          failwith "unfinished let"
+      let rest, parsed = 
+        use _indent = usingIndent false tok ctx
+        parseLetBinding whiteBeforeLet rngLet ctx
+      let rest = rest |> List.map (fun e -> node e.Range (Command.Expr e))
+      parseCommands (rest @ (parsed::acc)) ctx
 
-  | t ->
-      match parseExpression [] ctx with
-      | Some expr ->
-          { WhiteBefore = []; WhiteAfter = []; Range = expr.Range
-            Node = Command.Expr expr }
-      | None ->
-          failwith (sprintf "Not expression: %A" t)
-
-let rec parseCommands acc ctx = 
-  match token ctx with
   | white, { Token = TokenKind.EndOfFile } ->
+      // Return commands & store the whitespace
       match acc with 
       | x::xs -> List.rev ({ x with WhiteAfter = white }::xs)
       | [] -> []
-  | _ ->
-      let cmd = parseCommand ctx
-      parseCommands (cmd::acc) ctx
-
+    
+  | white, tok -> 
+      // Treat command as top-level expression
+      let cmds = 
+        use _indent = usingIndent true tok ctx
+        parseNestedExpressions (List.rev white) [] ctx |> List.map (fun expr ->
+          node expr.Range (Command.Expr expr))
+      parseCommands (cmds @ acc) ctx
 
 // --------------------------------------------------------------------------------------
 // Helpers for writing tests for parser
@@ -516,6 +597,7 @@ let tokenize input =
   { Tokens = Tokenizer.tokenize input |> fst
     TopLevel = true
     Silent = false
+    StrictlyNested = false
     Position = 0
     IndentCurrent = 0
     IndentStack = []
@@ -547,6 +629,24 @@ let assertSubExpr f (code, (cmds:Node<Command> list), errs) =
       match cmd.Node with
       | Command.Expr e -> hasSubExpr f e.Node
       | Command.Let(_, e) -> hasSubExpr f e.Node )
+  equal true matches
+
+/// Assert that result contains binding command with body
+let assertLet n f (code, (cmds:Node<Command> list), errs) = 
+  let matches = cmds |> List.exists (fun cmd ->
+    match cmd.Node with
+    | Command.Let(id, e) when id.Node.Name = n -> f e.Node
+    | _ -> false)
+  equal true matches
+
+/// Assert that result consists of the specified commands
+let assertCmds ns fs (code, (cmds:Node<Command> list), errs) = 
+  equal (List.length ns) (List.length cmds) 
+  let matches = List.zip3 ns fs cmds |> List.forall (fun (n, f, c) -> 
+    match c.Node with
+    | Command.Let(id, e) when id.Node.Name = n -> f e.Node
+    | Command.Expr(e) when n = "" -> f e.Node
+    | _ -> false )
   equal true matches
 
 /// Sub-expression contains property with given name
@@ -807,6 +907,74 @@ let ``Report error and skip over unexpected tokens in list`` () =
     foo.bar"""
   actual |> assertSubExpr (isList [isVal 1.0; isVal 2.0])
   actual |> assertErrors [212, "+"]
+
+// --------------------------------------------------------------------------------------
+// TESTS: Commands
+// --------------------------------------------------------------------------------------
+
+[<Test>]
+let ``Report error on unifinished let and continue parsing`` () =
+  let actual = parse """
+    let 
+    let b = 1"""
+  actual |> assertErrors [215, "let"]
+  actual |> assertLet "b" (hasSubExpr (isVal 1.0))
+
+[<Test>]
+let ``Report error and treat missing identifier as empty string`` () =
+  let actual = parse """
+    let 1 + 2
+    let b = 1"""
+  actual |> assertLet "" (fun e -> equal "(1 + 2)" (formatSimpleNumExpr e); true)
+  actual |> assertLet "b" (hasSubExpr (isVal 1.0))
+  actual |> assertErrors [214, "1"]
+
+[<Test>]
+let ``Report error on let without name or body`` () =
+  let actual = parse """
+    let +
+    let b = 1"""
+  actual |> assertLet "b" (hasSubExpr (isVal 1.0))
+  actual |> assertErrors [214, "+"]
+
+[<Test>]
+let ``Report error on let with name and no equals, but parse it anyway`` () =
+  let actual = parse """
+    let a foo.bar
+    let b = 1"""
+  actual |> assertErrors [214, "foo"]
+  actual |> assertLet "a" (hasSubExpr (isProperty "bar"))
+  actual |> assertLet "b" (hasSubExpr (isVal 1.0))
+
+[<Test>]
+let ``Report error on nested expression and parse it as command`` () =
+  let actual = parse """
+    1 
+      3
+        4 + 1
+    let b = 1"""
+  actual |> assertCmds [""; ""; ""; "b"] [any; any; any; any]
+  actual |> assertErrors [216, "3"; 216, "4 + 1"]
+  actual |> assertSubExpr (isVal 1.0)
+  actual |> assertSubExpr (isVal 4.0)
+
+[<Test>]
+let ``Report error on nested expression after let and parse it as command`` () =
+  let actual = parse """
+    let a = 1 
+      2
+    let b = 3"""
+  actual |> assertCmds ["a"; ""; "b"] [hasSubExpr (isVal 1.0); hasSubExpr (isVal 2.0); hasSubExpr (isVal 3.0)]
+  actual |> assertErrors [216, "2"]
+
+[<Test>]
+let ``Correctly parse mix of let bindings and expression commands`` () =
+  let actual = parse """
+    let a = 1 + 2 
+    3
+    let b = 1"""
+  actual |> assertCmds ["a";"";"b"] [ any; hasSubExpr (isVal 3.0); any ]
+  actual |> assertErrors []
 
 // --------------------------------------------------------------------------------------
 // TESTS: Binary operator precedence & parenthesis

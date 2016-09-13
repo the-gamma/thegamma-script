@@ -73,6 +73,15 @@ module Parser =
   let unexpectedScopeEndInList rng =
     { Number = 213; Range = rng; Message = "Unexpected end of scope in list expression" }
 
+  let unexpectedTokenInLetBinding rng tok =
+    { Number = 214; Range = rng; Message = sprintf "Unexpected token '%s' in let declaration (should be let name = expr)" (formatTokenInfo tok) }
+
+  let missingBodyInLetBinding rng =
+    { Number = 215; Range = rng; Message = "This let binding is missing body after equals" }
+
+  let nestedExpressionInCommand rng =
+    { Number = 216; Range = rng; Message = "Unexpected expression" }
+
 module TypeChecker = 
   let private formatMembers members = 
     [ for Member.Method(name=n) | Member.Property(name=n) in members -> n ] 
