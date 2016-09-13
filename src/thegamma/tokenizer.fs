@@ -1,11 +1,8 @@
 ﻿// ------------------------------------------------------------------------------------------------
-// Tokenizer for The Gamma script language
+// Tokenizer for TheGamma script language - turns string into Token[]
 // ------------------------------------------------------------------------------------------------
-
 module TheGamma.Tokenizer
-
 open TheGamma
-open TheGamma.Parsec
 
 /// Tokenization context for storing input, errors & parsed tokens
 type Context = 

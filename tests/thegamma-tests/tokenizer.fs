@@ -6,7 +6,7 @@
 module TheGamma.Tests.Tokenizer
 #endif
 open TheGamma
-open TheGamma.AstOperations
+open TheGamma.Ast
 open TheGamma.Tokenizer
 open NUnit.Framework
 

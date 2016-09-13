@@ -1,15 +1,16 @@
 ﻿module TheGamma.Editors
 
-open TheGamma
-open TheGamma.AstOperations
-open TheGamma.TypeChecker
 open Fable.Import
-open Fable.Extensions
+
+open TheGamma
+open TheGamma.Ast
+open TheGamma.TypeChecker
+open TheGamma.Common
 
 // ------------------------------------------------------------------------------------------------
 // Finding editor components in code
 // ------------------------------------------------------------------------------------------------
-
+(*
 type Property = 
   | Property of string * Schema option * Type
 
@@ -288,3 +289,4 @@ let renderEditor typeCheck (setValue:string -> string -> string -> unit) origTex
                   h?option sel [ text name ] ]
           ]
         ]
+        *)

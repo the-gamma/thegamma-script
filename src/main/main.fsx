@@ -6,12 +6,12 @@
 open Fable.Core.Extensions
 open Fable.Import
 open Fable.Import.Browser
-open Fable.Extensions
 module FsOption = Microsoft.FSharp.Core.Option
 
 open TheGamma
 open TheGamma.Html
 open TheGamma.Babel
+open TheGamma.Common
 open TheGamma.TypeChecker
 open Fable.Core
  
@@ -37,7 +37,7 @@ let types = async {
         if List.length tya <> List.length tyargs then 
           Log.error("Named type '%s' has mismatching length of type arguments", n)
           failwith (sprintf "Named type '%s' has mismatching length of type arguments" n)
-        TypeChecker.applyTypes (Map.ofList (List.zip tya tyargs)) r
+        r // TODO: TypeChecker.applyTypes (Map.ofList (List.zip tya tyargs)) r
     | None -> 
         Log.error("Could not find named type '%s'", n)
         failwith (sprintf "Could not find named type '%s'" n)
@@ -139,9 +139,9 @@ let shareSnippet (snippet:string) (compiled:string) = failwith "JS"
 let cannotShareSnippet () = failwith "JS"
 
 let callShowMethod outId cmd = async {
-  match cmd.Command with
-  | CommandKind.Expr(e) ->
-      let! m = getObjectMembers e.Type
+  match cmd.Node with
+  | Command.Expr(e) ->
+      (*let! m = getObjectMembers e.Type
       match m with 
       | ObjectMembers.Members(members) ->
           let hasShow = members |> Array.exists (function 
@@ -155,7 +155,7 @@ let callShowMethod outId cmd = async {
             return { cmd with Command = CommandKind.Expr(newE) }
           else 
             return cmd
-      | _ -> return cmd
+      | _ -> *)return cmd
   | _ -> return cmd }
 
 let renderErrors article el (source, errors) = 
@@ -202,8 +202,8 @@ let setupEditor (parent:HTMLElement) =
       | Some compiled when text = source -> return compiled
       | _ ->
         let! _, prog = checkingService.TypeCheck(text)
-        let! newBody = prog.Body |> Async.map (callShowMethod outputId)
-        let prog = { prog with Body = newBody }
+        let! newBody = prog.Body.Node |> Async.map (callShowMethod outputId)
+        let prog = { prog with Body = { prog.Body with Node = newBody } }
         return! CodeGenerator.compileAndRun globalExprs text prog }
 
     // Get fable to reference everything
@@ -262,9 +262,9 @@ let setupEditor (parent:HTMLElement) =
 
   showOptionsBtn |> FsOption.iter (fun btn -> 
     editorService.EditorsUpdated.Add (fun eds ->
-      eds
-      |> List.sortBy (fun ed -> ed.Range.Start)
-      |> List.map (Editors.renderEditor checkingService.IsWellTyped setText (getText())) 
+      [] //eds
+      //|> List.sortBy (fun ed -> ed.Range.Start)
+      //|> List.map (Editors.renderEditor checkingService.IsWellTyped setText (getText())) 
       |> h?div ["class" => "ia-editor-panel"]
       |> renderTo optionsEl )
   
@@ -291,8 +291,8 @@ let setupEditor (parent:HTMLElement) =
     Log.event("gui", "share", article, text)
     async { 
       let! ok, prog = checkingService.TypeCheck(text)
-      let! newBody = prog.Body |> Async.map (callShowMethod "output-id-placeholder")
-      let prog = { prog with Body = newBody }
+      let! newBody = prog.Body.Node |> Async.map (callShowMethod "output-id-placeholder")
+      let prog = { prog with Body = { prog.Body with Node = newBody } }
       let! compiled = CodeGenerator.compileAndRun globalExprs text prog         
       if not ok then cannotShareSnippet()
       else shareSnippet text compiled } |> Async.StartImmediate

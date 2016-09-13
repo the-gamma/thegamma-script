@@ -3,8 +3,9 @@
 open Fable.Core
 open Fable.Import.monaco
 open Fable.Import.Browser
+
+open TheGamma.Common
 open TheGamma.TypeChecker
-open Fable.Extensions
 
 [<Emit("_monaco = monaco;")>]
 let hack : unit = ()
@@ -31,7 +32,7 @@ let tokensProvider =
         tokens.endState <- noState
         tokens.tokens <- ResizeArray()
 
-        let _, tokenized = tokenize line
+        let tokenized, _ = Tokenizer.tokenize line
         for t in tokenized do
           let tok = JsInterop.createEmpty<languages.IToken>
           tok.startIndex <- float t.Range.Start
@@ -46,11 +47,12 @@ let createCompletionProvider globals =
       member this.triggerCharacters = Some(ResizeArray [ "." ])
       member this.provideCompletionItems(model, position, token) =           
         async {          
-          try
+          //try
             let input = model.getValue(editor.EndOfLinePreference.LF, false)
             Log.event("editor", "completions", "", JsInterop.createObj ["source", box input; "position", box position])
             let lines = input.Split('\n')
             let! globals = Async.AwaitFuture globals
+            (*
             let! errs, ty = typeCheck globals input
             let! info = TypeChecker.collectProgramInfo { Completions = []; Source = input } ty
             
@@ -119,8 +121,8 @@ let createCompletionProvider globals =
                 Log.trace("completions", "returning %O", Array.ofSeq completion)
                 return ResizeArray(completion)
             with e ->
-              Log.exn("completions", "type checking failed %O", e)
-              return ResizeArray [] } |> Async.StartAsPromise |> Fable.Core.U4.Case2
+              Log.exn("completions", "type checking failed %O", e) *)
+            return ResizeArray [] } |> Async.StartAsPromise |> Fable.Core.U4.Case2
 
       member this.resolveCompletionItem(item, token) = Fable.Core.U2.Case1 item }
 

@@ -1,5 +1,5 @@
 ﻿module TheGamma.Errors
-open TheGamma.AstOperations
+open TheGamma.Ast
 
 module Tokenizer = 
   let inputEndInsideString rng s =
@@ -10,30 +10,6 @@ module Tokenizer =
     { Number = 13; Range = rng; Message = sprintf "Unexcpected character '%s' in the input." (string c) }
 
 module Parser = 
-  let valueNotAfunction rng name =
-    { Number = 21; Range = rng 
-      Message = sprintf "Global value '%s' is not a function. Ignoring arguments." name }
-
-  let emptyIdentifier rng =
-    { Number = 22; Range = rng; Message = "Empty identifier" }
-
-  let missingClosingParen rng =
-    { Number = 23; Range = rng; Message = "Missing closing )" }
-
-  let nothingAfterDot rng =
-    { Number = 24; Range = rng; Message = "Call chain should not end with ." }
-
-  let nothingAfterComma rng =
-    { Number = 25; Range = rng; Message = "List should not end with ," }
-
-  let missingClosingSquare rng =
-    { Number = 26; Range = rng; Message = "Missing closing ]" }
-
-  let incompleteRange rng =
-    { Number = 27; Range = rng; Message = "Incomeplete range expression" }
-
-  // v2 errors
-
   let unexpectedTokenAfterDot rng tok =
     { Number = 201; Range = rng; Message = sprintf "Unexpected %s after '.' in method chain" (formatTokenInfo tok) }
 
@@ -81,6 +57,10 @@ module Parser =
 
   let nestedExpressionInCommand rng =
     { Number = 216; Range = rng; Message = "Unexpected expression" }
+
+  let exceptionWhileParsing rng msg = 
+    { Number = 299; Range = rng; Message = "Unexpected exception while parsing: " + msg }
+
 
 module TypeChecker = 
   let private formatMembers members = 

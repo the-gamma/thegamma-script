@@ -1,8 +1,8 @@
 ﻿module TheGamma.TypeChecker
 
 open TheGamma
-open Fable.Extensions
-
+open TheGamma.Common
+(*
 // ------------------------------------------------------------------------------------------------
 // Type checking
 // ------------------------------------------------------------------------------------------------
@@ -299,8 +299,7 @@ let typeCheckProgram ctx res prog = async {
 // ------------------------------------------------------------------------------------------------
 // User friendly entry point
 // ------------------------------------------------------------------------------------------------
-
-open TheGamma.AstOperations
+          
 
 let needsEscaping (s:string) = 
   (s.[0] >= '0' && s.[0] <= '9') ||
@@ -309,60 +308,6 @@ let needsEscaping (s:string) =
 let escapeIdent s = 
   if needsEscaping s then "'" + s + "'" else s
 
-let mapNameRanges f (n:Name) = 
-  { n  with Range = f n.Range }
-
-let rec mapExprRanges f expr = 
-  match expr.Expr with  
-  | ExprLeaf -> { expr with Range = f expr.Range }
-  | ExprNode(es, ns) -> 
-      { Expr = rebuildExprNode expr.Expr (List.map (mapExprRanges f) es) (List.map (mapNameRanges f) ns)
-        Range = f expr.Range; Type = expr.Type }
-
-let rec mapCmdRanges f cmd = 
-  match cmd.Command with
-  | CommandKind.Expr e -> { Command = CommandKind.Expr (mapExprRanges f e); Range = cmd.Range }
-  | CommandKind.Let(n, e) -> { Command = CommandKind.Let(mapNameRanges f n, mapExprRanges f e); Range = cmd.Range }
-
-let tokenize (input:string) = 
-  let input = input.Replace("\r\n", "\n")
-  let tokens, errors = Tokenizer.tokenize input
-  List.ofArray errors, tokens
-
-let parse (input:string) = 
-  let errs1, tokens = tokenize input
-  let tokens = tokens |> List.ofSeq 
-  let (Parsec.Parser p) = Parser.program
-
-  let rangeLookup = tokens |> List.map (fun tok -> tok.Range) |> Array.ofSeq
-
-  let tokToChar rng =
-    let safe start n = 
-      if n >= rangeLookup.Length then rangeLookup.[rangeLookup.Length-1].End
-      elif n < 0 then 0
-      elif start then rangeLookup.[n].Start
-      else rangeLookup.[n].End
-    let rng = 
-      { Start = safe true rng.Start
-        End = safe false (rng.End-1) }
-    if rng.End < rng.Start then { rng with End = rng.Start }
-    else rng
-
-  match p (0, tokens) with
-  | Some((offs, rest), errs2, prog) ->
-      let errs2 = errs2 |> List.map (fun e -> { e with Range = tokToChar e.Range })
-      let errors = 
-        if List.isEmpty rest then errs1 @ errs2
-        else
-          { Number = 21; Range = tokToChar { Start = offs; End = offs + List.length rest }
-            Message = sprintf "Parser stopped: %A" rest } :: errs1 @ errs2
-      errors, { Range = prog.Range; Body = prog.Body |> List.map (mapCmdRanges tokToChar) }
-  | _ ->
-    { Number = 21; Range = tokToChar { Start = 0; End = List.length tokens }
-      Message = sprintf "Parser stopped: %A" tokens } :: errs1,
-    { Range = tokToChar { Start = 0; End = List.length tokens }
-      Body = [] }
-          
 let typeCheck globals input = async {
   let errs1, untyped = parse input
   let! checkd, ctx = typeCheckProgram { Variables = globals } { Errors = [] } untyped
@@ -419,3 +364,4 @@ let rec collectCmdInfo ctx cmds = async {
 
 let collectProgramInfo ctx prog = 
   collectCmdInfo ctx prog.Body
+*)

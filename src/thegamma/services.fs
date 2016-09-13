@@ -1,9 +1,10 @@
 ﻿module TheGamma.Services
 
 open Fable.Import
-open Fable.Extensions
+
 open TheGamma.Html
 open TheGamma.Editors
+open TheGamma.Common
 
 // ------------------------------------------------------------------------------------------------
 // Editors
@@ -14,19 +15,20 @@ type EditorWorkerMessage =
   | UpdateNow of string
   | Refersh of string
 
-type EditorService(article, checker, delay) = 
+type EditorService(article, checker:string -> Async<bool * Program>, delay) = 
   let renderEditors = Control.Event<_>()
   let update text = async {
     Log.event("options", "update", article, text)
     let! (_:bool), prg = checker text 
         
     Log.trace("service", "Collecting editors")
-    let! eds = Async.collect collectCmdEditors prg.Body 
+    //let! eds = Async.collect collectCmdEditors prg.Body 
+    let eds = []
     let eds = eds |> List.mapi (fun i v -> i, v)
     let filteredEds = 
       eds 
       |> List.filter (fun (i, ed1) ->
-          eds |> List.exists (fun (j, ed2) -> j <> i && Ranges.strictSubRange ed1.Range ed2.Range) |> not)
+          eds |> List.exists (fun (j, ed2) -> j <> i && Ast.strictSubRange ed1.Range ed2.Range) |> not)
       |> List.map snd
 
     Log.trace("service", "Rendering %s out of %s", filteredEds.Length, eds.Length)
@@ -68,7 +70,7 @@ type EditorService(article, checker, delay) =
 // ------------------------------------------------------------------------------------------------
 
 type CheckingMessage = 
-  | TypeCheck of code:string * AsyncReplyChannel<bool * Program<Type>>
+  | TypeCheck of code:string * AsyncReplyChannel<bool * Program>
   | IsWellTyped of code:string * AsyncReplyChannel<bool>
 
 type Position = { Line:int; Column:int }
@@ -84,9 +86,9 @@ let rangeToLoc lengths (rng:Range) =
   { Start = offsetToLocation 1 rng.Start lengths
     End = offsetToLocation 1 rng.Start lengths }
 
-type CheckingService(article, globals) =
+type CheckingService(article, globals:Future<Map<string, Type>>) =
   let errorsReported = Control.Event<_>()
-  let emptyProg = { Body = []; Range = { Start = 0; End = 0 } }
+  let emptyProg = { Body = Ast.node { Start = 0; End = 0 } [] }
   let agent = MailboxProcessor.Start(fun inbox ->
     let rec loop lastCode lastResult = async {
       let! msg = inbox.Receive()
@@ -94,8 +96,9 @@ type CheckingService(article, globals) =
       | IsWellTyped(code, repl) ->
           let! globals = Async.AwaitFuture globals
           try
-            let! errors, result = TypeChecker.typeCheck globals code
-            repl.Reply(errors.IsEmpty)
+            //let! errors, result = TypeChecker.typeCheck globals code
+            //repl.Reply(errors.IsEmpty)
+            repl.Reply(true)
           with e ->
             Log.exn("service", "Type checking failed: %O", e)
             repl.Reply(false)
@@ -111,15 +114,16 @@ type CheckingService(article, globals) =
           let! globals = Async.AwaitFuture globals
           try
             Log.event("compiler", "check-source", article, code)
-            let! errors, result = TypeChecker.typeCheck globals code
+            let result, errors = Parser.parseProgram code
+            //let! errors, result = TypeChecker.typeCheck globals code
             Log.trace("service", "Type checking completed")
 
             let lengths = code.Split('\n') |> Array.toList |> List.map (fun l -> l.Length)
-            let errors = errors |> List.map (fun e -> 
+            let errors = errors |> Array.map (fun e -> 
               { Number = e.Number; Message = e.Message; Range = rangeToLoc lengths e.Range })
 
             errorsReported.Trigger(code, errors)
-            let result = (List.isEmpty errors, result)
+            let result = (errors.Length = 0, result)
             repl.Reply(result) 
             return! loop code result
           with e ->

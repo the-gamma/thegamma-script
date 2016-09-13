@@ -1,10 +1,11 @@
 ﻿module TheGamma.TypeProviders.Pivot
 
+open Fable.Core
+open Fable.Import
+
 open TheGamma
 open TheGamma.Babel
-open Fable.Import
-open Fable.Core
-open Fable.Extensions
+open TheGamma.Common
 open TheGamma.TypePoviders
 
 // ----------------------------------------------------------------------------

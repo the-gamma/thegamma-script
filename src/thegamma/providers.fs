@@ -2,8 +2,8 @@
 
 open TheGamma
 open TheGamma.Babel
+open TheGamma.Common
 open Fable.Import
-open Fable.Extensions
 
 type ProvidedType = 
   | NamedType of name:string * typars:string list * typ:Type

@@ -1,6 +1,22 @@
-﻿module TheGamma.AstOperations
+﻿module TheGamma.Ast
 
-/// Format a single token
+/// Create a node with given range and value
+let node rng node =
+  { WhiteBefore = []
+    WhiteAfter = [] 
+    Node = node
+    Range = rng }
+
+/// Union ranges, assuming Start <= End for each of them
+let unionRanges r1 r2 =
+  { Start = min r1.Start r2.Start; End = max r1.End r2.End }
+
+/// Is the first range a strict sub-range of the second range
+let strictSubRange first second = 
+  (first.Start > second.Start && first.End <= second.End) ||
+  (first.Start >= second.Start && first.End < second.End)
+
+/// Format a single token (as it looks in the soruce code)
 let formatToken = function
   | TokenKind.LParen -> "("
   | TokenKind.RParen -> ")"
@@ -74,63 +90,51 @@ let formatTokens (tokens:seq<Token>) =
   tokens |> Seq.map (fun t -> formatToken t.Token) |> String.concat ""
 
 
-let (|ExprLeaf|ExprNode|) e = 
-  match e with
-  | ExprKind.Property(e, n) -> ExprNode([e], [n])
-  | ExprKind.Call(e, n, args) -> ExprNode(e::[for a in args -> a.Value ], n::(args |> List.choose (fun a -> a.Name)))
-  | ExprKind.Variable(n) -> ExprNode([], [n])
-  | ExprKind.List(els) -> ExprNode(els, [])
-  | ExprKind.Function(n, b) -> ExprNode([b], [n])
-  | ExprKind.Number _
-  | ExprKind.Boolean _
-  | ExprKind.String _
-  | ExprKind.Unit
-  | ExprKind.Null
-  | ExprKind.Empty -> ExprLeaf()
-
+/// When pattern matching using `ExprNode`, this function lets you rebuild
+/// the original node from the original expression, new expressions & names
 let rebuildExprNode e es ns =
   match e, es, ns with
-  | ExprKind.List(_), els, [] -> ExprKind.List(els)
-  | ExprKind.Function(_), [e], [n] -> ExprKind.Function(n, e)
-  | ExprKind.Property(_, _), [e], [n] -> ExprKind.Property(e, n)
-  | ExprKind.Call(_, _, args), e::es, n::ns ->
+  | Expr.List(_), els, [] -> Expr.List(els)
+  | Expr.Function(_), [e], [n] -> Expr.Function(n, e)
+  | Expr.Property(_, _), [e], [n] -> Expr.Property(e, n)
+  | Expr.Binary(_, op, _), [e1; e2], [] -> Expr.Binary(e1, op, e2)
+  | Expr.Call(inst, _, args), e::es, n::ns ->
+      let e, es = if inst.IsSome then Some e, es else None, e::es
       let rec rebuildArgs args es ns =
         match args, es, ns with
         | { Argument.Name = None }::args, e::es, ns -> { Value = e; Name = None }::(rebuildArgs args es ns)
         | { Argument.Name = Some _ }::args, e::es, n::ns -> { Value = e; Name = Some n }::(rebuildArgs args es ns)
         | [], [], [] -> []
         | _ -> failwith "rebuildExprNode: Wrong call length"
-      ExprKind.Call(e, n, rebuildArgs args es ns)
-  | ExprKind.Variable _, [], [n] -> ExprKind.Variable(n)
-  | ExprKind.Variable _, _, _ -> failwith "rebuildExprNode: Wrong variable length"
-  | ExprKind.Property _, _, _ -> failwith "rebuildExprNode: Wrong property length"
-  | ExprKind.Call _, _, _ -> failwith "rebuildExprNode: Wrong call length"
-  | ExprKind.List _, _, _ -> failwith "rebuildExprNode: Wrong list length"
-  | ExprKind.Function _, _, _ -> failwith "rebuildExprNode: Wrong function length"
-  | ExprKind.Number _, _, _
-  | ExprKind.Boolean _, _, _
-  | ExprKind.String _, _, _
-  | ExprKind.Empty, _, _ 
-  | ExprKind.Null, _, _ 
-  | ExprKind.Unit, _, _ -> failwith "rebuildExprNode: Not a node"
+      Expr.Call(e, n, { args with Node = rebuildArgs args.Node es ns })
+  | Expr.Variable _, [], [n] -> Expr.Variable(n)
+  | Expr.Variable _, _, _ -> failwith "rebuildExprNode: Wrong variable length"
+  | Expr.Property _, _, _ -> failwith "rebuildExprNode: Wrong property length"
+  | Expr.Call _, _, _ -> failwith "rebuildExprNode: Wrong call length"
+  | Expr.List _, _, _ -> failwith "rebuildExprNode: Wrong list length"
+  | Expr.Function _, _, _ -> failwith "rebuildExprNode: Wrong function length"
+  | Expr.Binary _, _, _ -> failwith "rebuildExprNode: Wrong binary operator argument length"
+  | Expr.Number _, _, _
+  | Expr.Boolean _, _, _
+  | Expr.String _, _, _
+  | Expr.Empty, _, _ 
+  | Expr.Null, _, _ 
+  | Expr.Unit, _, _ -> failwith "rebuildExprNode: Not a node"
 
-
-
-module AST2 = 
-  open AST2
-
-  let (|ExprLeaf|ExprNode|) e = 
-    match e with
-    | Expr.Property(e, n) -> ExprNode([e], [n])
-    | Expr.Call(Some e, n, args) -> ExprNode(e::[for a in args.Node -> a.Value ], n::(args.Node |> List.choose (fun a -> a.Name)))
-    | Expr.Call(None, n, args) -> ExprNode([for a in args.Node -> a.Value ], n::(args.Node |> List.choose (fun a -> a.Name)))
-    | Expr.Variable(n) -> ExprNode([], [n])
-    | Expr.List(els) -> ExprNode(els, [])
-    | Expr.Function(n, b) -> ExprNode([b], [n])
-    | Expr.Binary(l, op, r) -> ExprNode([l; r], [])
-    | Expr.Number _
-    | Expr.Boolean _
-    | Expr.String _
-    | Expr.Unit
-    | Expr.Null
-    | Expr.Empty -> ExprLeaf()
+/// ExprNode matches when an expression contains nested expressions or names,
+/// ExprLeaf matches when an expression is a primitive (number, bool, etc..)
+let (|ExprLeaf|ExprNode|) e = 
+  match e with
+  | Expr.Property(e, n) -> ExprNode([e], [n])
+  | Expr.Call(Some e, n, args) -> ExprNode(e::[for a in args.Node -> a.Value ], n::(args.Node |> List.choose (fun a -> a.Name)))
+  | Expr.Call(None, n, args) -> ExprNode([for a in args.Node -> a.Value ], n::(args.Node |> List.choose (fun a -> a.Name)))
+  | Expr.Variable(n) -> ExprNode([], [n])
+  | Expr.List(els) -> ExprNode(els, [])
+  | Expr.Function(n, b) -> ExprNode([b], [n])
+  | Expr.Binary(l, op, r) -> ExprNode([l; r], [])
+  | Expr.Number _
+  | Expr.Boolean _
+  | Expr.String _
+  | Expr.Unit
+  | Expr.Null
+  | Expr.Empty -> ExprLeaf()

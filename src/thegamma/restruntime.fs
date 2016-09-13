@@ -1,6 +1,6 @@
 ﻿module TheGamma.TypePovidersRuntime
 open System
-open Fable.Extensions
+open TheGamma.Common
 
 let convertTupleSequence f g data = async {
   let! values = data

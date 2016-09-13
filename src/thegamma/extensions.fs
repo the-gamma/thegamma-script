@@ -1,4 +1,4 @@
-﻿module Fable.Extensions
+﻿module TheGamma.Common
 
 open Fable.Core
 open Fable.Import.JS
@@ -16,13 +16,17 @@ let consoleLog (args:obj[]) : unit = failwith "JS only"
 [<Emit("logEvent($0, $1, $2, $3)")>]
 let logEvent (category:string) (evt:string) (article:string) (data:obj) : unit = failwith "JS only"
 
+[<Emit("typeof window == 'undefined'")>]
+let windowUndefined () : bool = failwith "JS only"
+
 let isLocalHost() = 
+  windowUndefined () ||
   window.location.hostname = "localhost" || 
   window.location.hostname = "127.0.0.1"
 
 let enabledCategories = 
   if not (isLocalHost ()) then set []
-  else set [ "SYSTEM"; "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "SERVICE"; "CODEGEN"; "RUNTIME" ]
+  else set [ "SYSTEM"; "PARSING"; "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "SERVICE"; "CODEGEN"; "RUNTIME" ]
 
 type Log =
   static member event(category:string, evt:string, article:string, data:obj) = 

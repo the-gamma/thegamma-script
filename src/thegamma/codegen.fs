@@ -2,7 +2,7 @@
 
 open TheGamma
 open TheGamma.Babel
-open Fable.Extensions
+open TheGamma.Common
 
 // ------------------------------------------------------------------------------------------------
 // Compiling code to Babel AST
@@ -32,59 +32,67 @@ let rec getEmitter name typ = async {
       return! getEmitter name typ 
   | _ -> return failwith "getEmitter: Not an object" }
 
-let rec compileExpression ctx (expr:Expr<Type>) = async {
-  match expr.Expr with 
-  | ExprKind.Call(inst, n, args) ->
+let rec compileExpression ctx (expr:Node<Expr>) = async {
+  match expr.Node with 
+  | Expr.Binary _ ->
+      return failwith "compileExpression: Binary"
+  | Expr.Call(inst, n, args) ->
+      return failwith "compileExpression: Call"
+      (*
       let! emitter = getEmitter n.Name inst.Type
       let! inst = compileExpression ctx inst
-      let! args = args |> Async.map (fun a -> async {
+      let! args = args.Node |> Array.ofList |> Async.map (fun a -> async {
         let! r = compileExpression ctx a.Value
         return (match a.Name with Some n -> n.Name | _ -> ""), r })          // TODO: Names ...???
       return emitter.Emit(inst, args)
-  | ExprKind.Property(inst, n) ->
+      *)
+  | Expr.Property(inst, n) ->
+      return failwith "compileExpression: Property"
+      (*
       let! emitter = getEmitter n.Name inst.Type
       let! inst = compileExpression ctx inst
       return emitter.Emit(inst, [])
-  | ExprKind.Null ->
+      *)
+  | Expr.Null ->
       return NullLiteral(rangeToLoc ctx expr.Range)
-  | ExprKind.Number(n) ->
+  | Expr.Number(n) ->
       return NumericLiteral(n, rangeToLoc ctx expr.Range)
-  | ExprKind.String(s) ->
+  | Expr.String(s) ->
       return StringLiteral(s, rangeToLoc ctx expr.Range)
-  | ExprKind.Boolean(b) ->
+  | Expr.Boolean(b) ->
       return BooleanLiteral(b, rangeToLoc ctx expr.Range)
-  | ExprKind.Variable(n) when ctx.Globals.ContainsKey(n.Name) ->
-      return ctx.Globals.[n.Name]
-  | ExprKind.Variable(n) ->
-      return IdentifierExpression(n.Name, rangeToLoc ctx n.Range) 
-  | ExprKind.List(es) ->
+  | Expr.Variable(n) when ctx.Globals.ContainsKey(n.Node.Name) ->
+      return ctx.Globals.[n.Node.Name]
+  | Expr.Variable(n) ->
+      return IdentifierExpression(n.Node.Name, rangeToLoc ctx n.Range) 
+  | Expr.List(es) ->
       let! es = Async.map (compileExpression ctx) es
       return ArrayExpression(es, rangeToLoc ctx expr.Range)
-  | ExprKind.Function(n, e) ->
-      let var = IdentifierExpression(n.Name, rangeToLoc ctx n.Range)
-      let! ce = compileExpression { ctx with Globals = Map.add n.Name var ctx.Globals } e
+  | Expr.Function(n, e) ->
+      let var = IdentifierExpression(n.Node.Name, rangeToLoc ctx n.Range)
+      let! ce = compileExpression { ctx with Globals = Map.add n.Node.Name var ctx.Globals } e
       let body = BlockStatement([ReturnStatement(ce, rangeToLoc ctx e.Range)], rangeToLoc ctx e.Range)
-      return FunctionExpression(None, [IdentifierPattern(n.Name, rangeToLoc ctx n.Range)], body, false, false, rangeToLoc ctx expr.Range)
-  | ExprKind.Unit
-  | ExprKind.Empty ->      
-      Fable.Import.Browser.console.log("compileExpression: %O", expr.Expr) 
+      return FunctionExpression(None, [IdentifierPattern(n.Node.Name, rangeToLoc ctx n.Range)], body, false, false, rangeToLoc ctx expr.Range)
+  | Expr.Unit
+  | Expr.Empty ->      
+      Fable.Import.Browser.console.log("compileExpression: %O", expr.Node) 
       return failwith "!" }
     
 
-let compileCommand ctx (cmd:Command<Type>) = async {
-  match cmd.Command with
-  | CommandKind.Let(n, e) ->
+let compileCommand ctx (cmd:Node<Command>) = async {
+  match cmd.Node with
+  | Command.Let(n, e) ->
       let! e = compileExpression ctx e
-      let name = IdentifierPattern(n.Name, rangeToLoc ctx n.Range)
+      let name = IdentifierPattern(n.Node.Name, rangeToLoc ctx n.Range)
       let decl = VariableDeclarator(name, Some e, rangeToLoc ctx cmd.Range)
       return VariableDeclaration(Var, [decl], rangeToLoc ctx cmd.Range)
-  | CommandKind.Expr(e) ->
+  | Command.Expr(e) ->
       let! e = compileExpression ctx e
       return ExpressionStatement(e, rangeToLoc ctx cmd.Range) }
 
-let compileProgram ctx (prog:Program<Type>) = async {
-  let! body = Async.map (compileCommand ctx) prog.Body
-  return { location = rangeToLoc ctx prog.Range; body = body } }
+let compileProgram ctx (prog:TheGamma.Program) = async {
+  let! body = Async.map (compileCommand ctx) prog.Body.Node
+  return { location = rangeToLoc ctx prog.Body.Range; body = body } }
 
 // ------------------------------------------------------------------------------------------------
 // Running compiled ASTs
