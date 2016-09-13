@@ -6,7 +6,11 @@
   "scripts": {
     "pretest": "fable tests/thegamma-tests",
     "test": "mocha out/tests/thegamma-tests",
-    "build": "fable src/gui & fable src/libraries & fable src/thegamma & fable src/main & webpack"
+    "build": "concurrently \"fable src/thegamma\" \"fable src/libraries\" \"fable src/gui\" \"fable src/main\"",
+    "postbuild": "webpack",
+    "prewatch": "concurrently \"fable src/thegamma\" \"fable src/libraries\" \"fable src/gui\" \"fable src/main\"",
+    "watch": "concurrently \"fable -w src/thegamma\" \"fable -w src/libraries\" \"fable -w src/gui\" \"fable -w src/main\" \"webpack --watch\"",
+    "justwatch": "concurrently \"fable -w src/thegamma\" \"fable -w src/libraries\" \"fable -w src/gui\" \"fable -w src/main\" \"webpack --watch\""
   },
   "author": "Tomas Petricek",
   "license": "Apache-2.0",
@@ -19,6 +23,7 @@
   },
   "main": "main.js",
   "devDependencies": {
+    "concurrently": "^2.2.0",
     "fable-compiler": "^0.5.9",
     "fable-plugins-nunit": "^0.5.1",
     "source-map-loader": "^0.1.5",

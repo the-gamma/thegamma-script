@@ -124,7 +124,7 @@ type CheckingService(article, globals:Future<Map<string, Type>>) =
 
             errorsReported.Trigger(code, errors)
             let result = (errors.Length = 0, result)
-            repl.Reply(result) 
+            repl.Reply(result)
             return! loop code result
           with e ->
             Log.exn("service", "Type checking failed: %O", e)

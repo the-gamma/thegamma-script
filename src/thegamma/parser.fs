@@ -119,7 +119,7 @@ let rec justToken ctx =
       | _ -> 
           setLineIndent ctx 0
       justToken ctx
-  | { Token = TokenKind.White _ } as t ->
+  | { Token = TokenKind.Error _ | TokenKind.White _ } as t ->
       ctx.Whitespace.Add t
       next ctx
       justToken ctx
