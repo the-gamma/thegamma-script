@@ -8,9 +8,10 @@
     "test": "mocha out/tests/thegamma-tests",
     "build": "concurrently \"fable src/thegamma\" \"fable src/libraries\" \"fable src/gui\" \"fable src/main\"",
     "postbuild": "webpack",
-    "watchfable": "concurrently \"fable -w src/thegamma\" \"fable -w src/libraries\" \"fable -w src/gui\" \"fable -w src/main\" \"webpack --watch\"",
-    "watchwebpack": "sleep 60 & webpack --watch",
-    "watch": "npm-run-parallel watchfable watchwebpack"
+    "watchfable": "concurrently \"fable -w src/thegamma\" \"fable -w src/libraries\" \"fable -w src/gui\" \"fable -w src/main\"",
+    "prewatchwebpack": "sleep 60",
+    "watchwebpack": "webpack --watch",
+    "watch": "concurrently \"npm run watchfable\" \"npm run watchwebpack\""
   },
   "author": "Tomas Petricek",
   "license": "Apache-2.0",
@@ -27,7 +28,6 @@
     "fable-compiler": "^0.5.9",
     "fable-plugins-nunit": "^0.5.1",
     "source-map-loader": "^0.1.5",
-    "npm-run-parallel": "^0.5.0",
     "mocha": "^3.0.2",
     "webpack": "^1.13.1"
   },
