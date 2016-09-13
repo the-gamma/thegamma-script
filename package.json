@@ -11,7 +11,7 @@
     "prewatch": "concurrently \"fable src/thegamma\" \"fable src/libraries\" \"fable src/gui\" \"fable src/main\"",
     "watchfable": "concurrently \"fable -w src/thegamma\" \"fable -w src/libraries\" \"fable -w src/gui\" \"fable -w src/main\" \"webpack --watch\"",
     "watchwebpack": "sleep 60 & webpack --watch",
-    "zz": "npm-run-parallel watchfable watchwebpack"
+    "watch": "npm-run-parallel watchfable watchwebpack"
   },
   "author": "Tomas Petricek",
   "license": "Apache-2.0",
