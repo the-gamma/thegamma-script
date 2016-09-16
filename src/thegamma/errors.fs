@@ -61,19 +61,32 @@ module Parser =
   let exceptionWhileParsing rng msg = 
     { Number = 299; Range = rng; Message = "Unexpected exception while parsing: " + msg }
 
-
+    
 module TypeChecker = 
+  let numericOperatorExpectsNumbers op idx typ rng =
+    { Number = 301; Range = rng 
+      Message = 
+        sprintf "Both operands of binary operator '%s' should be numbers but the %s operand was %s instead." 
+          (formatToken (TokenKind.Operator op)) (if idx = 0 then "left" else "right") (formatTypeInfo typ) }
+
+  let variableNotInScope name rng =
+    { Number = 302; Range = rng 
+      Message = sprintf "Variable '%s' is not in scope." name }
+
   let private formatMembers members = 
     [ for Member.Method(name=n) | Member.Property(name=n) in members -> n ] 
     |> String.concat ", " 
 
-  let variableNotInScope rng name =
-    { Number = 31; Range = rng 
-      Message = sprintf "Variable '%s' is not in scope." name }
-  
-  let propertyMissing rng name members = 
-    { Number = 32; Range = rng 
+  let propertyMissing name members rng = 
+    { Number = 303; Range = rng 
       Message = sprintf "Could not find property '%s' in the list '%s'." name (formatMembers members) }
+
+  let notAnObject name typ rng = 
+    { Number = 304; Range = rng 
+      Message = sprintf "Type is not an object but %s and it does not have member `%s`" (formatTypeInfo typ) name }
+(*
+
+  
   
   let methodMissing rng name members = 
     { Number = 33; Range = rng 
@@ -83,9 +96,6 @@ module TypeChecker =
     { Number = 33; Range = rng 
       Message = "The types of list elements do not match." }
 
-  let notAnObject rng typ = 
-    { Number = 34; Range = rng 
-      Message = "Type is not an object." }
     
   let cannotUnityTypes rng = 
     { Number = 35; Range = rng 
@@ -94,3 +104,4 @@ module TypeChecker =
   let nameBasedParamMustBeLast rng = 
     { Number = 36; Range = rng 
       Message = "All named parameters must be at the end of parameter list." }
+      *)

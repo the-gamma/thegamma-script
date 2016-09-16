@@ -3,6 +3,7 @@
 open Fable.Core
 open Fable.Import.JS
 open Fable.Import.Browser
+open System.Collections.Generic
 
 [<Emit("JSON.stringify($0)")>]
 let jsonStringify json : string = failwith "JS Only"
@@ -11,24 +12,44 @@ let jsonStringify json : string = failwith "JS Only"
 let jsonParse<'R> (str:string) : 'R = failwith "JS Only"
 
 [<Emit("console.log.apply(console, $0)")>]
-let consoleLog (args:obj[]) : unit = failwith "JS only"
+let consoleLog (args:obj[]) : unit = 
+  let format = args.[0] :?> string
+  let mutable argIndex = 1
+  let mutable charIndex = 0
+  let mutable res = ""
+  while charIndex < format.Length do
+    if format.[charIndex] = '%' then
+      res <- res +
+        match format.[charIndex+1] with
+        | 'c' -> ""
+        | 's' -> args.[argIndex].ToString()
+        | 'O' -> sprintf "%A" (args.[argIndex])
+        | _ -> failwith "consoleLog: Unsupported formatter"
+      argIndex <- argIndex + 1
+      charIndex <- charIndex + 2
+    else 
+      res <- res + format.[charIndex].ToString()
+      charIndex <- charIndex + 1
+  printfn "%s" res
 
 [<Emit("logEvent($0, $1, $2, $3)")>]
 let logEvent (category:string) (evt:string) (article:string) (data:obj) : unit = failwith "JS only"
 
 [<Emit("typeof window == 'undefined'")>]
-let windowUndefined () : bool = failwith "JS only"
+let windowUndefined () : bool = true
 
 let isLocalHost() = 
   windowUndefined () ||
   window.location.hostname = "localhost" || 
   window.location.hostname = "127.0.0.1"
 
-let enabledCategories = 
+let mutable enabledCategories = 
   if not (isLocalHost ()) then set []
-  else set [ "SYSTEM"; "PARSING"; "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "SERVICE"; "CODEGEN"; "RUNTIME" ]
+  else set [ "SYSTEM"; "PARSING"; "BINDER"; "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "SERVICE"; "CODEGEN"; "RUNTIME" ]
 
 type Log =
+  static member setEnabled(cats) = enabledCategories <- cats
+
   static member event(category:string, evt:string, article:string, data:obj) = 
     logEvent category evt article data
 
@@ -173,3 +194,40 @@ module Async =
         return! fold f st xs 
     | [] -> return st }
 
+/// Symbol is a unique immutable identiifer (we use JavaScript symbols)
+type Symbol = interface end
+
+[<Emit("Symbol()")>]
+let createSymbol () = { new Symbol }
+
+type ListDictionaryNode<'K, 'T> = 
+  { mutable Result : 'T option
+    Nested : Dictionary<'K, ListDictionaryNode<'K, 'T>> }
+
+type ListDictionary<'K, 'V> = Dictionary<'K, ListDictionaryNode<'K, 'V>>
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module ListDictionary = 
+  let tryFind ks dict = 
+    let rec loop ks node =
+      match ks, node with
+      | [], { Result = Some r } -> Some r
+      | k::ks, { Nested = d } when d.ContainsKey k -> loop ks (d.[k])
+      | _ -> None
+    loop ks { Nested = dict; Result = None }
+
+  let set ks v dict =
+    let rec loop ks (dict:ListDictionary<_, _>) = 
+      match ks with
+      | [] -> failwith "Empty key not supported"
+      | k::ks ->
+          if not (dict.ContainsKey k) then dict.[k] <- { Nested = Dictionary<_, _>(); Result = None }
+          if List.isEmpty ks then dict.[k].Result <- Some v
+          else loop ks (dict.[k].Nested)
+    loop ks dict
+
+  let count (dict:ListDictionary<_, _>) = 
+    let rec loop node = 
+      let nest = node.Nested |> Seq.sumBy (fun kv -> loop kv.Value)
+      if node.Result.IsSome then 1 + nest else nest
+    dict |> Seq.sumBy (fun kv -> loop kv.Value)

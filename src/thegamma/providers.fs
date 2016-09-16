@@ -71,10 +71,12 @@ module FSharpProvider =
     let rec mapType (t:AnyType) = 
       match t.kind with
       | "primitive" -> 
-          let name = (unbox<PrimitiveType> t).name
-          if name = "object" then Type.Any 
-          elif name = "int" || name = "float" then Type.Primitive "num"
-          else Type.Primitive name
+          match (unbox<PrimitiveType> t).name with
+          | "object" -> Type.Any 
+          | "int" | "float" -> Type.Primitive PrimitiveType.Number
+          | "string" -> Type.Primitive PrimitiveType.String
+          | "bool" -> Type.Primitive PrimitiveType.Bool
+          | t -> failwith ("provideFSharpType: Unsupported type: " + t)
       | "function"->
           let t = unbox<FunctionType> t
           Type.Function(List.ofSeq (Array.map mapType t.arguments),mapType t.returns)
@@ -103,10 +105,18 @@ module FSharpProvider =
               CallExpression
                 ( MemberExpression(inst, IdentifierExpression(m.name, None), false, None), 
                   List.map snd args, None) }
-            Some(Member.Method(m.name, getTypeParameters m.typepars, args, mapType m.returns, Documentation.Text "", emitter))
+            
+            let typ = 
+              match getTypeParameters m.typepars with
+              | [] -> mapType m.returns
+              | pars -> Type.Forall(pars, mapType m.returns)
+
+            Some(Member.Method(m.name, args, typ, Documentation.Text "", emitter))
           else None)
 
-      return Type.Object { Typeargs = List.map Type.Parameter (getTypeParameters exp.typepars); Members = mems } } |> Async.AsFuture exp.name
+      match getTypeParameters exp.typepars with
+      | [] -> return Type.Object { Members = mems }
+      | typars -> return Type.Forall(typars, Type.Object { Members = mems }) } |> Async.AsFuture exp.name
             
     async {
       let! json = Http.Request("GET", url)
@@ -232,10 +242,10 @@ module RestProvider =
   // I guess we should keep a flag whether the input is still async (or something)
   let rec getTypeAndEmitter (lookupNamed:string -> TheGamma.Type list -> TheGamma.Type) ty = 
     match ty with
-    | Primitive("string") -> Type.Primitive("string"), id
+    | Primitive("string") -> Type.Primitive(PrimitiveType.String), id
     | Primitive("int") 
     | Primitive("float") -> 
-        Type.Primitive("num"), 
+        Type.Primitive(PrimitiveType.Number), 
         fun e -> CallExpression(IdentifierExpression("Number", None), [e], None)
     | Generic("seq", [|Generic("tuple", [|t1; t2|])|]) -> 
         let t1, e1 = getTypeAndEmitter lookupNamed t1
@@ -248,7 +258,7 @@ module RestProvider =
               str "key"; str "value"; str "" ] // TODO: We don't have any info - that sucks
     | Generic("seq", [|ty|]) ->
         let elTy, emitter = getTypeAndEmitter lookupNamed ty
-        let serTy = lookupNamed "series" [Type.Primitive "num"; elTy]
+        let serTy = lookupNamed "series" [Type.Primitive PrimitiveType.Number; elTy]
         serTy, 
         // This is over async, but the child `emitter` is not over async
         fun d -> 
@@ -261,7 +271,7 @@ module RestProvider =
             let memTy, memConv = getTypeAndEmitter lookupNamed ty
             let emitter = { Emit = fun (inst, _) -> memConv <| inst?(name) }
             Member.Property(name, memTy, None, Documentation.Text "", emitter))
-        let obj = TheGamma.Type.Object { Members = membs; Typeargs = [] }
+        let obj = TheGamma.Type.Object { Members = membs }
         obj, id
     | _ -> 
         Browser.console.log("getTypeAndEmitter: Cannot handle %O", ty)
@@ -271,7 +281,7 @@ module RestProvider =
   let getProperty<'T> (obj:obj) (name:string) : 'T = failwith "never"
 
   let mapParamType = function
-    | "int" | "float" -> "num"
+    | "int" | "float" -> PrimitiveType.Number
     | _ -> failwith "mapParamType: Unsupported parameter type"
 
   let restTypeCache = System.Collections.Generic.Dictionary<_, _>()
@@ -285,8 +295,7 @@ module RestProvider =
         let! members = load (concatUrl root url) cookies 
         return 
           Type.Object
-            { Typeargs = []
-              Members = 
+            { Members = 
                 members |> Array.map (fun m ->
                   let schema = m.schema |> Option.map (fun s -> { Type = getProperty s "@type"; JSON = s })
                   match m.returns.kind with
@@ -297,7 +306,7 @@ module RestProvider =
                       | Some parameters ->
                           let args = [ for p in parameters -> p.name, false, Type.Primitive (mapParamType p.``type``)] // TODO: Check this is OK type
                           let argNames = [ for p in parameters -> p.name ]
-                          Member.Method(m.name, [], args, retTyp, parseDoc m.documentation, methCall m.trace)
+                          Member.Method(m.name, args, retTyp, parseDoc m.documentation, methCall m.trace)
                       | None -> 
                           Member.Property(m.name, retTyp, schema, parseDoc m.documentation, propAccess m.trace) 
                   | "primitive" ->  

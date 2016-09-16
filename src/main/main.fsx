@@ -57,15 +57,15 @@ let types = async {
         "world" (services + "worldbank") ""
       
       TypeProviders.Pivot.providePivotType (services + "pdata/olympics") "olympics2" lookupNamed
-        [ "Games", "string"; "Year", "num";  "Sport", "string"; "Discipline", "string" 
-          "Athlete", "string"; "Team", "string"; "Gender", "string"; "Event", "string" 
-          "Medal", "string"; "Gold", "num"; "Silver", "num"; "Bronze", "num" ]
+        [ "Games", PrimitiveType.String; "Year", PrimitiveType.Number;  "Sport", PrimitiveType.String; "Discipline", PrimitiveType.String 
+          "Athlete", PrimitiveType.String; "Team", PrimitiveType.String; "Gender", PrimitiveType.String; "Event", PrimitiveType.String 
+          "Medal", PrimitiveType.String; "Gold", PrimitiveType.Number; "Silver", PrimitiveType.Number; "Bronze", PrimitiveType.Number ]
       
       TypeProviders.Pivot.providePivotType (services + "pdata/smlouvy") "smlouvy" lookupNamed
-        [ "Uzavřeno", "string"; "Publikováno", "string"; "Hodnota", "num"
-          "Chybí hodnota", "string"; "Subjekt", "string"; "Útvar", "string"
-          "Schválil", "string"; "Předmět", "string"; "Odkaz", "string"
-          "Platnost", "string"; "Příjemci", "string"; "Příjemci (IČO)", "string" ]            
+        [ "Uzavřeno", PrimitiveType.String; "Publikováno", PrimitiveType.String; "Hodnota", PrimitiveType.Number
+          "Chybí hodnota", PrimitiveType.String; "Subjekt", PrimitiveType.String; "Útvar", PrimitiveType.String
+          "Schválil", PrimitiveType.String; "Předmět", PrimitiveType.String; "Odkaz", PrimitiveType.String
+          "Platnost", PrimitiveType.String; "Příjemci", PrimitiveType.String; "Příjemci (IČO)", PrimitiveType.String ]            
 
       // TODO: some more types 
       TypePoviders.NamedType("value", ["a"], Type.Any)

@@ -147,7 +147,7 @@ let nestedToken ctx =
 
 /// Creates a node with a range and no whitespace
 let node rng n = 
-  { Node = n; Range = rng; WhiteBefore = []; WhiteAfter = [] }
+  { Node = n; Range = rng; WhiteBefore = []; WhiteAfter = []; Entity = None }
 
 /// Appends whitespace after node
 let whiteAfter w n = { n with WhiteAfter = n.WhiteAfter @ w  }
@@ -165,7 +165,7 @@ let lastCallOrPropertyRange expr id =
 let (|Identifier|_|) t = 
   match t with
   | white, { Range = rng; Token = (TokenKind.Ident id | TokenKind.QIdent id) } ->
-      Some { WhiteBefore = white; WhiteAfter = []; Range = rng; Node = { Name.Name = id } }
+      node rng { Name.Name = id } |> whiteAfter white |> Some
   | _ -> None
 
 // ------------------------------------------------------------------------------------------------

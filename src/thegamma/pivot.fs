@@ -40,7 +40,7 @@ type Transformation =
 
 type Field = 
   { Name : string 
-    Type : string }
+    Type : PrimitiveType }
 
 module Transform = 
 
@@ -87,8 +87,8 @@ module Transform =
            | ConcatValues fld
            | Sum fld -> [ oldFields.[fld] ]
            | Mean fld -> [ oldFields.[fld] ]
-           | CountAll -> [ { Name = "count"; Type = "num" } ]
-           | CountDistinct fld -> [ { Name = oldFields.[fld].Name; Type = "num" } ])
+           | CountAll -> [ { Name = "count"; Type = PrimitiveType.Number } ]
+           | CountDistinct fld -> [ { Name = oldFields.[fld].Name; Type = PrimitiveType.Number } ])
       
   let transformFields fields tfs = 
     tfs |> List.fold singleTransformFields (List.ofSeq fields)
@@ -105,8 +105,8 @@ let concatUrl (a:string) (b:string) =
 
 let withDocs title details membr = 
   match membr with
-  | Member.Method(n, tya, args, typ, _, emitter) ->
-      Member.Method(n, tya, args, typ, Documentation.Details(title, details), emitter)
+  | Member.Method(n, args, typ, _, emitter) ->
+      Member.Method(n, args, typ, Documentation.Details(title, details), emitter)
   | Member.Property(n, typ, schema, _, emitter) ->
       Member.Property(n, typ, schema, Documentation.Details(title, details), emitter)
 
@@ -131,11 +131,10 @@ let withThingSchema name annotation membr =
   membr
 
 let makeObjectType members = 
-  { Members = Array.ofSeq members
-    Typeargs = [] } |> Type.Object
+  { Members = Array.ofSeq members } |> Type.Object
 
-let isNumeric fld = fld = "num"
-let isConcatenable fld = fld = "string"
+let isNumeric fld = fld = PrimitiveType.Number
+let isConcatenable fld = fld = PrimitiveType.String
 
 // From providers.fs
 let ident s = IdentifierExpression(s, None)
@@ -151,9 +150,9 @@ let func v f =
   FunctionExpression(None, [IdentifierPattern(v, None)], body, false, false, None)
 
 let getTypeAndEmitter = function 
-  | "string" -> Type.Primitive("string"), id
-  | "num" -> Type.Primitive("num"), fun e -> ident "Number" /@/ [e]
-  | _ -> failwith "getTypeAndEmitter: Unknown primitive type"
+  | PrimitiveType.String -> Type.Primitive(PrimitiveType.String), id
+  | PrimitiveType.Number -> Type.Primitive(PrimitiveType.Number), fun e -> ident "Number" /@/ [e]
+  | PrimitiveType.Bool -> Type.Primitive(PrimitiveType.Number), fun e -> ident "Boolean" /@/ [e]
 
 let propertyEmitter = 
   { Emit = fun (this, _) -> this }
@@ -191,7 +190,7 @@ let rec makeProperty ctx name tfs =
   
 and makeMethod ctx name tfs callid args = 
   Member.Method
-    ( name, [], [ for n, t in args -> n, false, Type.Primitive t ], makePivotType ctx tfs, 
+    ( name, [ for n, t in args -> n, false, Type.Primitive t ], makePivotType ctx tfs, 
       Documentation.None, makeMethodEmitter callid args )
 
 and makeDataMember ctx name tfs =
@@ -209,8 +208,8 @@ and makeDataMember ctx name tfs =
             let memTy, memConv = getTypeAndEmitter fld.Type
             let emitter = { Emit = fun (inst, _) -> memConv <| (inst /?/ str fld.Name) }
             Member.Property(fld.Name, memTy, None, Documentation.Text "", emitter))
-        let recTyp = Type.Object { Members = membs; Typeargs = [] }
-        ctx.LookupNamed "series" [Type.Primitive "num"; recTyp ], false
+        let recTyp = Type.Object { Members = membs }
+        ctx.LookupNamed "series" [Type.Primitive PrimitiveType.Number; recTyp ], false
   Member.Property(name, dataTyp, None, Documentation.None, makeDataEmitter isSeries tfs)
 
 and handleGetSeriesRequest ctx rest k v = 
@@ -232,10 +231,10 @@ and handleGetSeriesRequest ctx rest k v =
   
 and handlePagingRequest ctx rest pgid ops =
   let takeMemb = 
-    makeMethod ctx "take" (Empty::Paging(List.rev (Take(pgid + "-take")::ops))::rest) (pgid + "-take") ["count", "num"] 
+    makeMethod ctx "take" (Empty::Paging(List.rev (Take(pgid + "-take")::ops))::rest) (pgid + "-take") ["count", PrimitiveType.Number] 
     |> withDocs "" "Take the specified number of rows and drop the rest"
   let skipMemb = 
-    makeMethod ctx "skip" (Paging(Skip(pgid + "-skip")::ops)::rest) (pgid + "-skip") ["count", "num"] 
+    makeMethod ctx "skip" (Paging(Skip(pgid + "-skip")::ops)::rest) (pgid + "-skip") ["count", PrimitiveType.Number] 
     |> withDocs "" "Skip the specified number of rows and keep the rest"
   let thenMemb = 
     makeProperty ctx "then" (Empty::Paging(List.rev ops)::rest)

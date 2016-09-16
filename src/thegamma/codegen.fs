@@ -53,8 +53,8 @@ let rec compileExpression ctx (expr:Node<Expr>) = async {
       let! inst = compileExpression ctx inst
       return emitter.Emit(inst, [])
       *)
-  | Expr.Null ->
-      return NullLiteral(rangeToLoc ctx expr.Range)
+  //| Expr.Null ->
+    //  return NullLiteral(rangeToLoc ctx expr.Range)
   | Expr.Number(n) ->
       return NumericLiteral(n, rangeToLoc ctx expr.Range)
   | Expr.String(s) ->
@@ -73,7 +73,7 @@ let rec compileExpression ctx (expr:Node<Expr>) = async {
       let! ce = compileExpression { ctx with Globals = Map.add n.Node.Name var ctx.Globals } e
       let body = BlockStatement([ReturnStatement(ce, rangeToLoc ctx e.Range)], rangeToLoc ctx e.Range)
       return FunctionExpression(None, [IdentifierPattern(n.Node.Name, rangeToLoc ctx n.Range)], body, false, false, rangeToLoc ctx expr.Range)
-  | Expr.Unit
+  //| Expr.Unit
   | Expr.Empty ->      
       Fable.Import.Browser.console.log("compileExpression: %O", expr.Node) 
       return failwith "!" }

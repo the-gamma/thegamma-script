@@ -2,7 +2,8 @@
 
 /// Create a node with given range and value
 let node rng node =
-  { WhiteBefore = []
+  { Entity = None
+    WhiteBefore = []
     WhiteAfter = [] 
     Node = node
     Range = rng }
@@ -89,6 +90,39 @@ let formatTokenInfo = function
 let formatTokens (tokens:seq<Token>) = 
   tokens |> Seq.map (fun t -> formatToken t.Token) |> String.concat ""
 
+/// Format entity kind into something readable
+let formatEntityKind = function
+  | EntityKind.GlobalValue -> "global value"
+  | EntityKind.Variable -> "variable"
+  | EntityKind.Binding -> "binding"
+  | EntityKind.Operator(op) -> (formatToken (TokenKind.Operator op)) + " operator"
+  | EntityKind.List -> "list"
+  | EntityKind.Constant(Constant.Empty) -> "empty value"
+  | EntityKind.Constant(Constant.Number n) -> sprintf "number `%f`" n 
+  | EntityKind.Constant(Constant.String n) -> sprintf "string `%s`" n 
+  | EntityKind.Constant(Constant.Boolean true) -> "`true` value" 
+  | EntityKind.Constant(Constant.Boolean false) -> "`false` value" 
+  | EntityKind.Function -> "function"
+  | EntityKind.Command -> "command"
+  | EntityKind.Root -> "root"
+  | EntityKind.Scope -> "scope"
+  | EntityKind.CallSite -> "call site"
+  | EntityKind.NamedParam -> "named param"
+  | EntityKind.ChainElement _ -> "chain element"
+
+/// Return readable name of the top-level node in the type
+let formatTypeInfo = function
+  | Type.Forall _ -> "generic type"
+  | Type.Parameter _ -> "unresolved type parameter"
+  | Type.App _ -> "unresolved type application"
+  | Type.Delayed _ -> "delayed type"
+  | Type.Primitive PrimitiveType.Bool -> "boolean"
+  | Type.Primitive PrimitiveType.Number -> "number"
+  | Type.Primitive PrimitiveType.String -> "string"
+  | Type.Object _ -> "object type"
+  | Type.Function _ -> "function type"
+  | Type.List _ -> "list type"
+  | Type.Any _ -> "unknown"
 
 /// When pattern matching using `ExprNode`, this function lets you rebuild
 /// the original node from the original expression, new expressions & names
@@ -117,9 +151,7 @@ let rebuildExprNode e es ns =
   | Expr.Number _, _, _
   | Expr.Boolean _, _, _
   | Expr.String _, _, _
-  | Expr.Empty, _, _ 
-  | Expr.Null, _, _ 
-  | Expr.Unit, _, _ -> failwith "rebuildExprNode: Not a node"
+  | Expr.Empty, _, _ -> failwith "rebuildExprNode: Not a node"
 
 /// ExprNode matches when an expression contains nested expressions or names,
 /// ExprLeaf matches when an expression is a primitive (number, bool, etc..)
@@ -135,6 +167,4 @@ let (|ExprLeaf|ExprNode|) e =
   | Expr.Number _
   | Expr.Boolean _
   | Expr.String _
-  | Expr.Unit
-  | Expr.Null
   | Expr.Empty -> ExprLeaf()
