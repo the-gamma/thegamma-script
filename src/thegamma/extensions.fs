@@ -56,7 +56,7 @@ type Log =
   static member message(level:string, category:string, msg:string, [<System.ParamArray>] args) = 
     let args = if args = null then [| |] else args
     let category = category.ToUpper()
-    if level = "EXCEPTION" then
+    if not (isLocalHost ()) && level = "EXCEPTION" then
       logEvent "system" "exception" "" (JsInterop.createObj ["category", box category; "msg", box msg; "args", box args ])
 
     if level = "EXCEPTION" || level = "ERROR" || enabledCategories.Contains category then

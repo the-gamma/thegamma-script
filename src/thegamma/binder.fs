@@ -61,21 +61,22 @@ let rec bindExpression callSite ctx node =
   | Expr.Call(instExpr, name, argsNode) ->
       // Bind instance & create call site that depends on it
       let inst = defaultArg (Option.map (bindExpression ctx) instExpr) ctx.Root
-      let site = bindEntity ctx EntityKind.CallSite [inst] name.Node
+      let site arg = bindEntity ctx (EntityKind.CallSite arg) [inst] name.Node
       // Bind arguments - which depend on the call site
-      let args = argsNode.Node |> List.map (fun arg -> 
+      let args = argsNode.Node |> List.mapi (fun idx arg -> 
+        let site = site (match arg.Name with Some n -> Choice1Of2 n.Node.Name | _ -> Choice2Of2 idx)
         let expr = bindCallArgExpression site ctx arg.Value
         match arg.Name with 
         | Some n -> bindEntity ctx EntityKind.NamedParam [expr] n.Node |> setEntity ctx n
         | None -> expr)
       let args = bindEntity ctx EntityKind.ArgumentList (ctx.Root::args) anonymous |> setEntity ctx argsNode
-      bindEntity ctx (EntityKind.ChainElement(instExpr.IsSome, false)) [inst; args] name.Node 
-        |> setEntity ctx node |> setEntity ctx name
+      let named = bindEntity ctx EntityKind.NamedMember [ctx.Root] name.Node |> setEntity ctx name
+      bindEntity ctx (EntityKind.ChainElement(instExpr.IsSome, false)) [named; inst; args] name.Node |> setEntity ctx node 
 
   | Expr.Property(expr, name) ->
       let ante = bindExpression ctx expr
-      bindEntity ctx (EntityKind.ChainElement(true, true)) [ante] name.Node 
-        |> setEntity ctx node |> setEntity ctx name
+      let named = bindEntity ctx EntityKind.NamedMember [ctx.Root] name.Node |> setEntity ctx name      
+      bindEntity ctx (EntityKind.ChainElement(true, true)) [named; ante] name.Node |> setEntity ctx node 
 
   | Expr.Binary(l, op, r) ->
       let lentity = bindExpression ctx l
@@ -88,7 +89,7 @@ let rec bindExpression callSite ctx node =
 
   | Expr.Function(v, e) ->
       let scope = bindEntity ctx EntityKind.Scope [ctx.Scope] anonymous
-      let varParent = match callSite with None -> [scope] | Some s -> [scope; s]
+      let varParent = match callSite with None -> [scope] | Some s -> [s]
       let var = bindEntity ctx EntityKind.Binding varParent v.Node |> setEntity ctx v
       let body = bindExpression { ctx with Variables = Map.add v.Node var ctx.Variables } e
       bindEntity ctx EntityKind.Function [var; body] anonymous |> setEntity ctx node

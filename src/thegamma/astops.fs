@@ -106,10 +106,27 @@ let formatEntityKind = function
   | EntityKind.Command -> "command"
   | EntityKind.Root -> "root"
   | EntityKind.Scope -> "scope"
-  | EntityKind.CallSite -> "call site"
+  | EntityKind.CallSite _ -> "call site"
   | EntityKind.NamedParam -> "named param"
   | EntityKind.ChainElement _ -> "chain element"
   | EntityKind.ArgumentList -> "argument list"
+  | EntityKind.NamedMember -> "property or method"
+
+/// Return full name of the type
+let rec formatType = function
+  | Type.App(t, tya) -> formatType t + "<" + String.concat ", " (List.map formatType tya) + ">"
+  | Type.Forall(_, t) -> formatType t
+  | Type.Parameter(v) -> v
+  | Type.Delayed(g, _) -> "@" + g
+  | Type.Primitive PrimitiveType.Bool -> "bool"
+  | Type.Primitive PrimitiveType.Number -> "number"
+  | Type.Primitive PrimitiveType.String -> "string"
+  | Type.Object { Members = mem } ->  
+      let mems = mem |> Seq.truncate 5 |> Seq.map (fun m -> m.Name) |> String.concat ", "
+      "{ " + if mem.Length > 5 then mems + ", ..." else mems + " }"
+  | Type.Function(tin, tout) -> "(" + String.concat ", " (List.map formatType tin) + ") -> " + formatType tout
+  | Type.List t -> "list<" + formatType t + ">"
+  | Type.Any -> "any"
 
 /// Return readable name of the top-level node in the type
 let formatTypeInfo = function

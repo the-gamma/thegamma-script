@@ -58,6 +58,10 @@ let assertCmds ns fs (code, (cmds:Node<Command> list), errs) =
     | _ -> false )
   equal true matches
 
+/// Sub-expression contains a function with a given name and body
+let isFun name bf = function 
+  | Expr.Function(n, b) -> n.Node.Name = name && bf b.Node | _ -> false
+
 /// Sub-expression contains property with given name
 let isProperty name = function 
   | Expr.Property(_, n) -> n.Node.Name = name | _ -> false
@@ -103,6 +107,7 @@ let isVariable name = function
 let parse (code:string) = 
   let code = code.Replace("\r", "").Replace("\n    ","\n")
   let res, errs = Parser.parseProgram code
+  for e in errs do if e.Number = 299 then failwith e.Message
   code, res.Body.Node, [ for e in errs -> e.Number, (e.Range.Start, e.Range.End) ]
 
 /// Format binary operaation for testing purposes
@@ -219,6 +224,14 @@ let ``Correctly parse call with arguments``() =
     let a = foo.
       'bar zoo'(1)"""
   actual |> assertSubExpr (isCall "bar zoo" (hasArgValues [isVal 1.0]))
+
+[<Test>]
+let ``Error reported when argument list is not closed``() =
+  let actual = parse """
+    let a = foo.
+      'bar zoo'("""
+  actual |> assertSubExpr (isCall "bar zoo" (hasArgValues []))
+  // TODO: Check errors
 
 [<Test>]
 let ``Correctly parse multiple nested chain calls`` () =
@@ -444,3 +457,13 @@ let ``Report erroneous end of nesting and continue parsing`` () =
   actual |> assertErrors [210, "2"; 208, "("]
   actual |> assertSubExpr (isProperty "yadda")
   actual |> assertSubExpr (isVariable "bar")
+
+// --------------------------------------------------------------------------------------
+// TESTS: Explicit functions
+// --------------------------------------------------------------------------------------
+
+[<Test>]
+let zzz () =
+  let actual = parse """
+    foo(fun x -> 10)"""
+  actual |> assertSubExpr (isFun "x" (isVal 10.0))

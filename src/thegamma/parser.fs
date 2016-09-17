@@ -316,11 +316,23 @@ and parseMember (optInst:option<_>) (id:Node<Name>) ctx : Node<_> =
       | None -> node id.Range (Expr.Variable(id))
 
 
+/// We already parsed `fun`, parse the rest of the function, i.e. `<id> -> <expr>`
+and parseFunction ctx funRng = 
+  match nestedToken ctx with
+  | Some(Identifier id) ->
+      next ctx
+      match nestedToken ctx with
+      | Some (whiteAfterId, { Token = TokenKind.Arrow; Range = rngEq }) ->
+          next ctx
+          match parseExpression [] ctx with
+          | Some body ->
+              let rng = unionRanges funRng body.Range
+              node rng (Expr.Function(whiteAfter whiteAfterId id, body)) |> Some
+  
 /// A term is a single thing inside expression involving operators, i.e.
 ///   <expression> := <term> <op> <term> <op> .. <op> <term>
 and parseTerm ctx = 
-  let tt = nestedToken ctx
-  match tt with
+  match nestedToken ctx with
   // Variable or call chain
   | Some((Identifier id) & (_, tok)) ->
       next ctx
@@ -348,8 +360,12 @@ and parseTerm ctx =
       use _nest = usingNonTopLevel ctx
       parseListElements false t.Range white t.Range [] ctx
 
+  | Some(white, ({ Token = TokenKind.Fun } as t)) ->
+      next ctx
+      parseFunction ctx t.Range
+
   // Not a term, but that's fine
-  | _ -> None
+  | _ -> None 
 
 
 /// Parse list of elements and closing square bracket, after `[`

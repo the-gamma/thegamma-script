@@ -64,10 +64,17 @@ and typesEqualAux ctx t1 t2 =
 /// Returns true when closed types have equivalent structure up to renaming of local type variables
 let typesEqual = typesEqualAux { EquivalentVars = [] }
 
+let (|BoundTypeVariables|) t = 
+  match t with 
+  | Type.Forall(vars, _) -> vars, t
+  | _ -> [], t
 
 let rec substituteMembers assigns members = 
   members |> Array.map (function
-    | Member.Method(n,ars,t,d,e) -> 
+    | Member.Method(n,ars,BoundTypeVariables (vars, t),d,e) -> 
+        // Generic methods are encoded as methods with forall return type
+        // but we need to avoid substituting in parameters too!
+        let assigns = vars |> List.fold (fun assigns var -> Map.remove var assigns) assigns
         let ars = ars |> List.map (fun (n,o,t) -> n, o, substituteTypes assigns t)
         Member.Method(n,ars,substituteTypes assigns t,d,e)
     | Member.Property(n,t,s,d,e) -> Member.Property(n,substituteTypes assigns t,s,d,e))      
@@ -155,6 +162,14 @@ let inferListType typs =
   |> List.maxBy snd
   |> fst
 
+let resolveParameterType instTy methName parSpec = 
+  match instTy with
+  | Type.Object(FindMethod methName (args, _)) ->
+      match parSpec with
+      | Choice1Of2 name -> args |> Seq.pick (fun (n, _, t) -> if n = name then Some t else None) // TODO: Can crash
+      | Choice2Of2 idx -> let _, _, t = args.[idx] in t // TODO: Can crash
+  | _ -> failwith "resolveParameterType: Instance is not an object"
+
 let rec checkMethodCall ctx memTy pars argList args = 
 
   // Split arguments into position & name based and report 
@@ -165,10 +180,10 @@ let rec checkMethodCall ctx memTy pars argList args =
     pb |> Array.ofList,
     nb |> List.choose (fun arg -> 
       match arg.Kind with
-      | EntityKind.NamedParam ->
+      | EntityKind.NamedParam -> Some(arg.Name.Name, arg.Antecedents.[0])
+      | _ ->
           Errors.TypeChecker.nameBasedParamMustBeLast |> addError ctx arg
-          None
-      | _ -> Some(arg.Name.Name, arg.Antecedents.[0])) |> Map.ofList
+          None ) |> Map.ofList
 
   // Match actual arguments with the parameters and report
   // error if non-optional parameter is missing an assignment
@@ -204,7 +219,7 @@ let rec checkMethodCall ctx memTy pars argList args =
   
   // Substitute in the return type
   let res = substituteTypes (Map.ofList assigns) resTy
-  printfn "Result of call: %A" res
+  //printfn "Result of call: %A" res
   res
   
 
@@ -230,34 +245,34 @@ and typeCheckEntity ctx (e:Entity) =
       getType ctx inst      
 
   | EntityKind.ChainElement(isProperty = true) ->
-      let inst = match e.Antecedents with [a] -> a | _ -> failwith "typeCheckEntity: Property should have one antecedent"
+      let name, inst = match e.Antecedents with [name; a] -> name, a | _ -> failwith "typeCheckEntity: Property should have two antecedents"
       let typ = getType ctx inst
-      printfn "Type of instance of %s: %A" e.Name.Name typ
       match typ with 
       | Type.Any -> Type.Any
       | Type.Object(FindProperty e.Name resTyp) -> resTyp
       | Type.Object { Members = members } ->
-          Errors.TypeChecker.propertyMissing e.Name.Name members |> addError ctx e 
+          Errors.TypeChecker.propertyMissing e.Name.Name members |> addError ctx name
           Type.Any
       | typ ->
-          Errors.TypeChecker.notAnObject e.Name.Name typ |> addError ctx e 
+          Errors.TypeChecker.notAnObject e.Name.Name typ |> addError ctx inst
           Type.Any
 
   | EntityKind.ChainElement(isProperty = false; hasInstance = hasInstance) ->
       if not hasInstance then failwith "typeCheckEntity: Method calls without instance are not supported"
-      let inst, arglist, ents = 
+      let name, inst, arglist, ents = 
         match e.Antecedents with 
-        | [inst; arg] -> inst, arg, List.tail arg.Antecedents // arg is ArgumentList entity
-        | _ -> failwith "typeCheckEntity: Method call is missing instance antecedent"
-      printfn "Type of instance of %s(...): %A" e.Name.Name (getType ctx inst)
+        | [name; inst; arg] -> name, inst, arg, List.tail arg.Antecedents // arg is ArgumentList entity
+        | _ -> failwith "typeCheckEntity: Method call is missing required antecedent"
+      printfn "Calling %s with arguments %A" name.Name.Name (ents |> List.map (fun e -> e.Name, e.Kind))
+      //printfn "Type of instance of %s(...): %A" e.Name.Name (getType ctx inst)
       match getType ctx inst with 
       | Type.Any -> Type.Any
       | Type.Object(FindMethod e.Name (args, resTyp)) -> checkMethodCall ctx resTyp args arglist ents
       | Type.Object { Members = members } ->
-          Errors.TypeChecker.methodMissing e.Name.Name members |> addError ctx e 
+          Errors.TypeChecker.methodMissing e.Name.Name members |> addError ctx name
           Type.Any
       | typ ->
-          Errors.TypeChecker.notAnObject e.Name.Name typ |> addError ctx e 
+          Errors.TypeChecker.notAnObject e.Name.Name typ |> addError ctx inst
           Type.Any
 
   | EntityKind.Operator operator ->      
@@ -276,6 +291,19 @@ and typeCheckEntity ctx (e:Entity) =
           Errors.TypeChecker.listElementTypeDoesNotMatch typ elty |> addError ctx a
       Type.List typ
 
+  | EntityKind.Binding ->
+      let inst, methName, parSpec = 
+        match e.Antecedents with 
+        | [ { Kind=EntityKind.CallSite p; Name = name } as v ] -> List.head v.Antecedents, name, p
+        | _ -> failwith "typeCheckEntity: Property should have two antecedents"
+      match resolveParameterType (getType ctx inst) methName parSpec with
+      | Type.Function([tin], _) -> tin
+      | _ -> failwith "typeCheckEntity: Expected parameter of function type"
+
+  | EntityKind.Function ->
+      let var, body = match e.Antecedents with [v; b] -> v, b | _ -> failwith "typeCheckEntity: Property should have two antecedents"
+      Type.Function([getType ctx var], getType ctx body)
+
   // Entities with primitive types
   | EntityKind.Constant(Constant.Number _) -> Type.Primitive(PrimitiveType.Number)
   | EntityKind.Constant(Constant.String _) -> Type.Primitive(PrimitiveType.String)
@@ -286,14 +314,10 @@ and typeCheckEntity ctx (e:Entity) =
   | EntityKind.Root -> Type.Any
   | EntityKind.Command -> Type.Any
   | EntityKind.ArgumentList -> Type.Any
-
-  | EntityKind.Function _ //  uh oh
-  | EntityKind.CallSite // ???
-  | EntityKind.Binding // ???
-  | EntityKind.NamedParam // ???
-  | EntityKind.Scope // ???
-  | EntityKind.ChainElement _ // call 
-      -> failwithf "TOo hard! %A" e
+  | EntityKind.NamedParam -> Type.Any
+  | EntityKind.NamedMember -> Type.Any
+  | EntityKind.CallSite _ -> Type.Any
+  | EntityKind.Scope -> Type.Any
 
 let rec reduceType t = async {
   match t with
@@ -333,11 +357,11 @@ let forall n t = Type.Forall([n], t)
 let apply t f = Type.App(f, [t])
 let par n = Type.Parameter(n)
 let list t = Type.List(t)
-
+let func t1 t2 = Type.Function([t1], t2)
 
 let parse (code:string) = 
   let ctx = Binder.createContext("script")
-  let code = code.Replace("\n  ", "\n")
+  let code = code.Replace("\n    ", "\n")
   let prog = code |> Parser.parseProgram |> fst
   code, Binder.bindProgram ctx prog 
 
@@ -346,23 +370,30 @@ let findEntity name kind (entities:(Range * Entity)[]) =
 
 let check code ename ekind vars = 
   let code, ents = parse code
-  let rangeLookup = 
-    ents 
-    |> Seq.groupBy (fun (_, e) -> e.Symbol)
-    |> Seq.map (fun (s, g) ->
-        s, { Start = g |> Seq.map (fun (r, _) -> r.Start) |> Seq.max
-             End = g |> Seq.map (fun (r, _) -> r.End) |> Seq.min } )
-    |> dict
+  let rangeLookup = dict [ for r, e in ents -> e.Symbol, r ]
   let ctx = { Globals = vars; Errors = ResizeArray<_>(); Ranges = rangeLookup }
   let ent = ents |> findEntity ename ekind |> snd
   Async.RunSynchronously (typeCheckEntityAsync ctx ent),
-  ents, [ for e in ctx.Errors -> e.Number, code.Substring(e.Range.Start, e.Range.End - e.Range.Start + 1) ]
+  [ for e in ctx.Errors -> e.Number, code.Substring(e.Range.Start, e.Range.End - e.Range.Start + 1) ]
 
 
 // ------------------------------------------------------------------------------------------------
 // 
 // ------------------------------------------------------------------------------------------------
 
+/// Type-safe assertion
+let equal (expected:'T) (actual:'T) = Assert.AreEqual(expected, actual)
+
+/// Assert that two types are equal
+let assertType t1 (t2, _) = 
+  equal (Ast.formatType t1) (Ast.formatType t2)
+
+/// Assert that result contains given errors
+let assertErrors expectErrors (_, errs) = 
+  equal (List.length expectErrors) (List.length errs)
+  for (en, ec), (an, ac) in List.zip expectErrors errs do
+    equal en an
+    equal ec ac
 
 let rec fieldsObj t = delay "fieldsObj" (fun () ->
   obj [
@@ -379,57 +410,130 @@ let rec testObj () = delay "testObj" (fun () ->
     prop "get the data" num
   ])
 
-let testvar = dict [ "test", testObj () ]
-
-let test1 = """
-  let res = test.
-    'group data'.one.two.three.then.
-    'sort data'.three.two.one.then.
-    'get the data'
-  res"""
-
-let ``1`` () =
-  let ty, _, errs = check test1 "res" EntityKind.Variable testvar
-  ()
-
-let test2 = """
-  let res = [ 
-    test.'group data'.one.then.'get the data',
-    42,
-    test.'group data'.two.then.'get the data',
-    test.'group data'.three.then,
-    "evil" ]
-  """
-
-let ``2`` () =
-  let ty, _, errs = check test2 "res" EntityKind.Variable testvar
-  ()
-
-
+  
 let rec seriesObj () = 
   obj [
     meth "make" (forall "b" (series (par "b"))) [
-      "vals", false, list (par "b")
-    ]
+      "vals", false, list (par "b") ]
+    meth "makeTwo" (forall "b" (series (par "b"))) [
+      "val1", false, par "b"
+      "val2", false, par "b" ]
     meth "range" (series num) [
-      "count", false, num
-    ]
+      "count", false, num ]
     meth "add" (series (par "a")) [
-      "val", false, par "a"
-    ]
+      "val", false, par "a" ]
+    meth "map" (forall "b" (series (par "b"))) [
+      "f", false, (func (par "a") (par "b")) ]
     meth "sort" (series (par "a")) [
-      "reverse", true, bool
-    ]
+      "fast", true, bool
+      "reverse", true, bool ]
     prop "head" (par "a")
   ]
 
 and series t = apply t (forall "a" (delay "series" (fun () ->
   seriesObj () )))
 
-let test3 = """
-  let res = series.make([1,2,3])
-    .add(4).sort().head
-"""
+let vars = 
+  [ "series", substituteTypes (Map.ofSeq ["a", Type.Any]) (seriesObj ()) 
+    "numbers", substituteTypes (Map.ofSeq ["a", Type.Primitive PrimitiveType.Number]) (seriesObj ()) 
+    "test", testObj () ] |> dict
 
-let seriesvar = dict [ "series", substituteTypes (Map.ofSeq ["a", Type.Any]) (seriesObj ()) ]
-let ty, _, errs = check test3 "res" EntityKind.Variable seriesvar
+[<Test>]
+let ``Type check chain consisting of property accesses`` () =
+  let code = """
+    let res = test.
+      'group data'
+        .one.two.three.then.
+      'sort data'
+        .three.two.one.then.
+      'get the data'
+    res"""
+  let actual = check code "res" EntityKind.Variable vars
+  actual |> assertType (Type.Primitive PrimitiveType.Number)
+  actual |> assertErrors []
+
+[<Test>]
+let ``Report errors for list with elements of mismatching types`` () =
+  let code = """
+    let res = [ 
+      test.'group data'.one.then.'get the data',
+      42,
+      test.'group data'.two.then.'get the data',
+      test.'group data'.three.then,
+      "evil" ]
+    """
+  let actual = check code "res" EntityKind.Variable vars
+  actual |> assertType (Type.List (Type.Primitive PrimitiveType.Number))
+  actual |> assertErrors [306, "test.'group data'.three.then"; 306, "\"evil\"" ]
+
+[<Test>]
+let ``Type check method call and infer result type from argument`` () =
+  let code = """
+    let res = series.make([1,2,3])
+      .add(4).sort(reverse=true).head
+  """
+  let actual = check code "res" EntityKind.Variable vars
+  actual |> assertType (Type.Primitive PrimitiveType.Number)
+  actual |> assertErrors []
+
+[<Test>]
+let ``Type check method call with function as an argument`` () =
+  let code = """
+    let res = series.make([1,2,3]).map(fun x -> true).head
+  """
+  let actual = check code "res" EntityKind.Variable vars
+  actual |> assertType (Type.Primitive PrimitiveType.Bool)
+  actual |> assertErrors []
+
+[<Test>]
+let ``Report error when property not found`` () = 
+  let code = "let res = test.yadda"
+  let actual = check code "res" EntityKind.Variable vars
+  actual |> assertErrors [303, "yadda"]
+
+[<Test>]
+let ``Report error when method not found`` () = 
+  let code = "let res = test.yadda()"
+  let actual = check code "res" EntityKind.Variable vars
+  actual |> assertErrors [304, "yadda"]
+
+[<Test>]
+let ``Report error when instance is not an object`` () = 
+  let code = """let res = test.'get the data'.bar"""
+  let actual = check code "res" EntityKind.Variable vars
+  actual |> assertErrors [305, "test.'get the data'"]
+
+[<Test>]
+let ``Report error when name based param is not last`` () =
+  let code = """
+    let res = numbers.sort(fast=true, false).head
+  """
+  let actual = check code "res" EntityKind.Variable vars
+  actual |> assertType (Type.Primitive PrimitiveType.Number)
+  actual |> assertErrors [307,"false"]
+
+[<Test>]
+let ``Report error when required parameter is missing value`` () =
+  let code = """
+    let res = numbers.add().head
+  """
+  let actual = check code "res" EntityKind.Variable vars
+  actual |> assertType (Type.Primitive PrimitiveType.Number)
+  actual |> assertErrors [308,"()"]
+
+[<Test>]
+let ``Report error when method parameter is given a wrong value`` () =
+  let code = """
+    let res = numbers.add("yo").head
+  """
+  let actual = check code "res" EntityKind.Variable vars
+  actual |> assertType (Type.Primitive PrimitiveType.Number)
+  actual |> assertErrors [309,"\"yo\""]
+
+[<Test>]
+let ``Report error when generic method type cannot be inferred`` () =
+  let code = """
+    let res = series.makeTwo(1, true).head
+  """
+  let actual = check code "res" EntityKind.Variable vars
+  actual |> assertErrors [310,"(1, true)"]

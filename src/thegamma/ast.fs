@@ -155,15 +155,18 @@ type [<RequireQualifiedAccess>] EntityKind =
   | Scope
 
   /// Represents all arguments passed to method; Antecedants are individual arguments
+  /// (a mix of named parameter & ordinary expression entities)
   | ArgumentList
   /// Call site; Antecedant is the instance on which we're making a call
-  /// (either root entity or the entity of instance expression)
-  | CallSite
+  /// (the parameter is the name or the index of the ra)
+  | CallSite of Choice<string, int>
   /// Named param in a call site; Antecedant is the expression assigned to it
   | NamedParam
-  /// Call or property access; Antecedents are scope (for global calls) or 
-  /// instance expression entity (for instance calls), followed by a 
-  /// list of mix of named parameter & ordinary expression entities
+  /// Named member (property or call); Antecedent is the root
+  | NamedMember
+  /// Call or property access; Antecedents are `NamedMember`, followed by a scope 
+  /// (for global calls) or instance expression entity (for instance calls), and
+  /// an `ArgumentList` to keep the arguments
   | ChainElement of hasInstance:bool * isProperty:bool
 
   
