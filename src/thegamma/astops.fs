@@ -109,6 +109,7 @@ let formatEntityKind = function
   | EntityKind.CallSite -> "call site"
   | EntityKind.NamedParam -> "named param"
   | EntityKind.ChainElement _ -> "chain element"
+  | EntityKind.ArgumentList -> "argument list"
 
 /// Return readable name of the top-level node in the type
 let formatTypeInfo = function

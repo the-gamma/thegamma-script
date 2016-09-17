@@ -154,6 +154,8 @@ type [<RequireQualifiedAccess>] EntityKind =
   /// Variable scope; Antecedant is the parent scope or root
   | Scope
 
+  /// Represents all arguments passed to method; Antecedants are individual arguments
+  | ArgumentList
   /// Call site; Antecedant is the instance on which we're making a call
   /// (either root entity or the entity of instance expression)
   | CallSite

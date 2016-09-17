@@ -215,9 +215,9 @@ let buildExpression terms term =
 let makeCallOrProp optInst prevId prevArgs =
   // Reconstruct previous bit of the chain from optInst/prevId/prevArgs
   match optInst, prevArgs with
-  | Some inst, { Node = [] } -> node (unionRanges inst.Range prevId.Range) (Expr.Property(inst, prevId))
-  | None, { Node = [] } -> node prevId.Range (Expr.Variable(prevId))
-  | _ -> 
+  | Some inst, None -> node (unionRanges inst.Range prevId.Range) (Expr.Property(inst, prevId))
+  | None, None -> node prevId.Range (Expr.Variable(prevId))
+  | _, Some prevArgs -> 
       let fullRng = 
         match optInst with 
         | Some i -> unionRanges i.Range prevArgs.Range 
@@ -280,14 +280,14 @@ and parseDotOrLParen optInst id ctx whiteAndTok =
       match nestedToken ctx with
       | Some(white, { Token = TokenKind.Dot }) ->
           next ctx
-          Some(parseChain optInst id args ctx)
+          Some(parseChain optInst id (Some args) ctx)
       | _ ->
-          Some(makeCallOrProp optInst id args)
+          Some(makeCallOrProp optInst id (Some args))
 
   | white, { Token = TokenKind.Dot } ->
       next ctx
       let optInst = optInst |> Option.map (whiteAfter white)
-      Some(parseChain optInst id (node { Start=0; End=0; } []) ctx)
+      Some(parseChain optInst id None ctx)
 
   | _ -> None
 

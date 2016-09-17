@@ -231,3 +231,18 @@ module ListDictionary =
       let nest = node.Nested |> Seq.sumBy (fun kv -> loop kv.Value)
       if node.Result.IsSome then 1 + nest else nest
     dict |> Seq.sumBy (fun kv -> loop kv.Value)
+
+module List = 
+  let groupWith f list = 
+    let groups = ResizeArray<_ * ResizeArray<_>>()
+    for e in list do
+      let mutable added = false 
+      let mutable i = 0
+      while not added && i < groups.Count do
+        if f e (fst groups.[i]) then 
+          (snd groups.[i]).Add(e)
+          added <- true
+        i <- i + 1
+      if not added then 
+        groups.Add(e, ResizeArray<_>([e]))
+    groups |> Seq.map (snd >> List.ofSeq) |> List.ofSeq

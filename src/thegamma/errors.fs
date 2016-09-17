@@ -81,27 +81,34 @@ module TypeChecker =
     { Number = 303; Range = rng 
       Message = sprintf "Could not find property '%s' in the list '%s'." name (formatMembers members) }
 
-  let notAnObject name typ rng = 
+  let methodMissing name members rng = 
     { Number = 304; Range = rng 
-      Message = sprintf "Type is not an object but %s and it does not have member `%s`" (formatTypeInfo typ) name }
-(*
-
-  
-  
-  let methodMissing rng name members = 
-    { Number = 33; Range = rng 
       Message = sprintf "Could not find method '%s' in the list '%s'." name (formatMembers members) }
 
-  let mismatchingListTypes rng = 
-    { Number = 33; Range = rng 
-      Message = "The types of list elements do not match." }
+  let notAnObject name typ rng = 
+    { Number = 305; Range = rng 
+      Message = sprintf "Type is not an object but %s and it does not have member `%s`" (formatTypeInfo typ) name }
 
-    
-  let cannotUnityTypes rng = 
-    { Number = 35; Range = rng 
-      Message = "Cannot unify types." }
+  let listElementTypeDoesNotMatch listty elty rng = 
+    { Number = 306; Range = rng 
+      Message = sprintf "The type of this list element is %s but it should be %s" (formatTypeInfo elty) (formatTypeInfo listty) }
 
   let nameBasedParamMustBeLast rng = 
-    { Number = 36; Range = rng 
+    { Number = 307; Range = rng 
       Message = "All named parameters must be at the end of parameter list." }
-      *)
+
+  let parameterMissingValue par rng = 
+    { Number = 308; Range = rng 
+      Message = "Required parameter `%s` is not given a value." }
+
+  let incorrectParameterType parName parType actualType err1 err2 rng = 
+    { Number = 309; Range = rng 
+      Message = 
+        sprintf "The value of parameter `%s` has wrong type. Expected %s but got %s. The type %s does not match the type %s."
+          parName (formatTypeInfo parType) (formatTypeInfo actualType) (formatTypeInfo err1) (formatTypeInfo err2) }
+
+  let inferenceConflict var t1 t2 rng = 
+    { Number = 310; Range = rng 
+      Message = 
+        sprintf "The arguments of the call have conflicting types. The type %s assigned to a variable %s does not match the type %s."
+          (formatTypeInfo t1) var (formatTypeInfo t2) }
