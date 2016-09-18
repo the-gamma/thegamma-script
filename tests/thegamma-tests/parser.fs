@@ -66,6 +66,10 @@ let isFun name bf = function
 let isProperty name = function 
   | Expr.Property(_, n) -> n.Node.Name = name | _ -> false
 
+/// Sub-expression contains empty expression
+let isEmpty = function 
+  | Expr.Empty -> true | _ -> false
+
 /// Sub-expression contains call with given name and arguments match function
 let isCall name ac = function 
   | Expr.Call(_, n, args) -> n.Node.Name = name && ac args | _ -> false
@@ -463,7 +467,32 @@ let ``Report erroneous end of nesting and continue parsing`` () =
 // --------------------------------------------------------------------------------------
 
 [<Test>]
-let zzz () =
+let ``Correctly parse function with multi-line body``() =
   let actual = parse """
-    foo(fun x -> 10)"""
-  actual |> assertSubExpr (isFun "x" (isVal 10.0))
+    foo(fun x -> 
+      some
+        .nested
+        .chain)"""
+  actual |> assertErrors []
+  actual |> assertSubExpr (isFun "x" (hasSubExpr (isProperty "chain")))
+
+[<Test>]
+let ``Report error when function is missing variable and body``() =
+  let actual = parse """
+    foo(fun)"""
+  actual |> assertErrors [217, ")"]
+  actual |> assertSubExpr (isFun "" isEmpty)
+
+[<Test>]
+let ``Report error when function is missing arrow and body``() =
+  let actual = parse """
+    foo(fun x)"""
+  actual |> assertErrors [218, ")"]
+  actual |> assertSubExpr (isFun "x" isEmpty)
+
+[<Test>]
+let ``Report error when function is missing arrow``() =
+  let actual = parse """
+    foo(fun x 1 + 2)"""
+  actual |> assertErrors [218, "1"]
+  actual |> assertSubExpr (isFun "x" (hasSubExpr (isVal 2.0)))

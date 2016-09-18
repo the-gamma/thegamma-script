@@ -58,6 +58,18 @@ module Parser =
   let nestedExpressionInCommand rng =
     { Number = 216; Range = rng; Message = "Unexpected expression" }
 
+  let unexpectedTokenAfterFun rng tok =
+    { Number = 217; Range = rng; Message = sprintf "Unexpected token '%s' after `fun`. Expected variable name." (formatTokenInfo tok) }
+
+  let missingArrowInFunc rng =
+    { Number = 218; Range = rng; Message = "Missing arrow after variable in function definition" }
+
+  let unexpectedScopeEndInFunc rng =
+    { Number = 219; Range = rng; Message = "Unexpected end of scope in function declaration" }
+
+  let missingBodyOfFunc rng =
+    { Number = 220; Range = rng; Message = "The function is missing body. If it is on the next line, you need to indent it further." }
+
   let exceptionWhileParsing rng msg = 
     { Number = 299; Range = rng; Message = "Unexpected exception while parsing: " + msg }
 

@@ -168,6 +168,9 @@ let (|Identifier|_|) t =
       node rng { Name.Name = id } |> whiteAfter white |> Some
   | _ -> None
 
+/// Pattern matching helper
+let (|Let|) a b = a, b
+
 // ------------------------------------------------------------------------------------------------
 // Operator precedence handling
 // ------------------------------------------------------------------------------------------------
@@ -322,13 +325,40 @@ and parseFunction ctx funRng =
   | Some(Identifier id) ->
       next ctx
       match nestedToken ctx with
-      | Some (whiteAfterId, { Token = TokenKind.Arrow; Range = rngEq }) ->
+      | Some(whiteAfterId, { Token = TokenKind.Arrow; Range = rngEq }) ->
           next ctx
-          match parseExpression [] ctx with
-          | Some body ->
-              let rng = unionRanges funRng body.Range
-              node rng (Expr.Function(whiteAfter whiteAfterId id, body)) |> Some
+          let body = 
+            match parseExpression [] ctx with
+            | Some body -> body
+            | _ -> 
+                Errors.Parser.missingBodyOfFunc (unionRanges funRng rngEq) |> addError ctx
+                node { Start = rngEq.End; End = rngEq.End } Expr.Empty
+          let rng = unionRanges funRng body.Range
+          node rng (Expr.Function(whiteAfter whiteAfterId id, body)) |> Some
+      | nt ->
+          // Missing arrow - try parsing the body anyway
+          let errRng, whiteAfterId = 
+            match nt with
+            | None -> unionRanges funRng id.Range, []
+            | Some(whiteAfterId, t) -> t.Range, whiteAfterId
+          Errors.Parser.missingArrowInFunc errRng |> addError ctx
+          let body = 
+            match parseExpression [] ctx with 
+            | Some e -> e 
+            | _ -> node {Start=id.Range.End; End=id.Range.End} Expr.Empty
+          node (unionRanges funRng body.Range) (Expr.Function(id, whiteBefore whiteAfterId body)) |> Some            
+
+  // Unexpected token or end of scope - return empty function
+  | Some(white, t) ->
+      Errors.Parser.unexpectedTokenAfterFun t.Range t.Token |> addError ctx
+      let rng = { Start = funRng.End; End = funRng.End }
+      node rng (Expr.Function(node rng {Name=""}, node rng Expr.Empty)) |> whiteBefore white |> Some
+  | None ->
+      Errors.Parser.unexpectedScopeEndInFunc funRng |> addError ctx
+      let rng = { Start = funRng.End; End = funRng.End }
+      node rng (Expr.Function(node rng {Name=""}, node rng Expr.Empty)) |> Some
   
+    
 /// A term is a single thing inside expression involving operators, i.e.
 ///   <expression> := <term> <op> <term> <op> .. <op> <term>
 and parseTerm ctx = 
