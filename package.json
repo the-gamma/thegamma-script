@@ -16,17 +16,17 @@
   "author": "Tomas Petricek",
   "license": "Apache-2.0",
   "dependencies": {
-    "babel-standalone": "^6.10.3",
+    "babel-standalone": "^6.15.0",
     "core-js": "^2.4.1",
-    "fable-core": "^0.5.5",
-    "monaco-editor": "^0.5.1",
+    "fable-core": "^0.6.3",
+    "monaco-editor": "^0.6.1",
     "requirejs": "^2.2.0"
   },
   "main": "main.js",
   "devDependencies": {
     "concurrently": "^2.2.0",
-    "fable-compiler": "^0.5.9",
-    "fable-plugins-nunit": "^0.5.1",
+    "fable-compiler": "^0.6.5",
+    "fable-plugins-nunit": "^0.6.0",
     "source-map-loader": "^0.1.5",
     "mocha": "^3.0.2",
     "webpack": "^1.13.1"
