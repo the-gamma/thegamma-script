@@ -384,12 +384,12 @@ and parseListElements expectMore lastRng whiteStart startRng acc ctx =
       if not parsed && expectMore then
         Errors.Parser.unexpectedTokenInList lastRng TokenKind.Comma |> addError ctx
       parseListElements true lastRng whiteStart startRng (acc white) ctx
-  | Some(_, t) ->
+  | Some(_, t) when t.Token <> TokenKind.EndOfFile ->
       // Skip over unexpected, but correctly nested tokens
       next ctx
       Errors.Parser.unexpectedTokenInList t.Range t.Token |> addError ctx
       parseListElements expectMore t.Range whiteStart startRng (acc []) ctx
-  | None ->
+  | _ ->
       // Unexpected end of nesting - end argument list now
       Errors.Parser.unexpectedScopeEndInList lastRng |> addError ctx
       node (unionRanges startRng lastRng) (Expr.List(List.rev (acc []))) |> Some
@@ -485,12 +485,12 @@ and parseCallArgList expectMore lastRng acc ctx =
       next ctx
       parseCallArgList true lastRng acc ctx
 
-  | Some(_, t) ->
+  | Some(_, t) when t.Token <> TokenKind.EndOfFile ->
       // Skip over unexpected, but correctly nested tokens
       next ctx
       Errors.Parser.unexpectedTokenInArgList t.Range t.Token |> addError ctx
       parseCallArgList expectMore t.Range acc ctx
-  | None ->
+  | _ ->
       // Unexpected end of nesting - end argument list now
       Errors.Parser.unexpectedScopeEndInArgList lastRng |> addError ctx
       lastRng, [], List.rev acc

@@ -227,7 +227,7 @@ and getType ctx (e:Entity) =
   if e.Type.IsNone then 
     let errorCount = ctx.Errors.Count
     e.Type <- Some (typeCheckEntity ctx e)
-    e.Errors <- ctx.Errors.GetRange(errorCount, ctx.Errors.Count - errorCount) |> List.ofSeq
+    e.Errors <- [ for i in errorCount .. ctx.Errors.Count - 1 -> ctx.Errors.[i] ]
   e.Type.Value
 
 and typeCheckEntity ctx (e:Entity) = 
@@ -263,7 +263,7 @@ and typeCheckEntity ctx (e:Entity) =
         match e.Antecedents with 
         | [name; inst; arg] -> name, inst, arg, List.tail arg.Antecedents // arg is ArgumentList entity
         | _ -> failwith "typeCheckEntity: Method call is missing required antecedent"
-      printfn "Calling %s with arguments %A" name.Name.Name (ents |> List.map (fun e -> e.Name, e.Kind))
+      //printfn "Calling %s with arguments %A" name.Name.Name (ents |> List.map (fun e -> e.Name, e.Kind))
       //printfn "Type of instance of %s(...): %A" e.Name.Name (getType ctx inst)
       match getType ctx inst with 
       | Type.Any -> Type.Any
@@ -373,7 +373,11 @@ let check code ename ekind vars =
   let rangeLookup = dict [ for r, e in ents -> e.Symbol, r ]
   let ctx = { Globals = vars; Errors = ResizeArray<_>(); Ranges = rangeLookup }
   let ent = ents |> findEntity ename ekind |> snd
-  Async.RunSynchronously (typeCheckEntityAsync ctx ent),
+  let mutable result = None
+  async { let! res = typeCheckEntityAsync ctx ent
+          result <- Some res } |> Async.Start
+  if result.IsNone then failwith "Asynchronosu operation did not complete"
+  result.Value,
   [ for e in ctx.Errors -> e.Number, code.Substring(e.Range.Start, e.Range.End - e.Range.Start + 1) ]
 
 

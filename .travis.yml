@@ -1,0 +1,12 @@
+language: csharp
+
+sudo: false
+
+before_script:
+  - nvm install 4.4
+  - nvm use 4.4
+  - mono .paket/paket.bootstrapper.exe
+  - mono .paket/paket.exe restore
+
+script:
+  - npm test
