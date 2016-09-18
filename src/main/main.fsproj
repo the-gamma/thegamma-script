@@ -63,7 +63,7 @@
   </Target>
   -->
   <ItemGroup>
-    <None Include="main.fsx" />
+    <Compile Include="main.fsx" />
     <None Include="fableconfig.json" />
   </ItemGroup>
   <ItemGroup>
