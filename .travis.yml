@@ -7,6 +7,7 @@ before_script:
   - nvm use 4.4
   - mono .paket/paket.bootstrapper.exe
   - mono .paket/paket.exe restore
+  - npm install
 
 script:
   - npm test
