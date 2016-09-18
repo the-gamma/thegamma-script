@@ -108,18 +108,22 @@ let bindCommand ctx node =
       let body = bindExpression None ctx e 
       let scope = bindEntity ctx EntityKind.Scope [ctx.Scope] anonymous
       let var = bindEntity ctx EntityKind.Variable [body] v.Node |> setEntity ctx v
-      bindEntity ctx EntityKind.Command [var; body] anonymous |> setEntity ctx node |> ignore
-      { ctx with Variables = Map.add v.Node var ctx.Variables }
+      let node = bindEntity ctx EntityKind.Command [var; body] anonymous |> setEntity ctx node
+      { ctx with Variables = Map.add v.Node var ctx.Variables }, node
 
   | Command.Expr(e) ->
       let body = bindExpression None ctx e 
-      bindEntity ctx EntityKind.Command [body] anonymous|> setEntity ctx node |> ignore
-      ctx
+      let node = bindEntity ctx EntityKind.Command [body] anonymous|> setEntity ctx node
+      ctx, node
 
 /// Bind entities to all nodes in the program
 let bindProgram ctx (program:Program) =
   ctx.Bound.Clear()
-  program.Body.Node |> List.fold bindCommand ctx |> ignore
+  let _, ents = 
+    program.Body.Node |> List.fold (fun (ctx, nodes) cmd -> 
+      let ctx, node = bindCommand ctx cmd
+      ctx, node::nodes) (ctx, [])  
+  bindEntity ctx EntityKind.Program ents anonymous,
   ctx.Bound.ToArray()
   
 /// Create a new binding context - this stores cached entities

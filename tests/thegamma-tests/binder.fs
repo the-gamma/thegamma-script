@@ -71,7 +71,7 @@ let ``Binder reuses some entities when one member is changed`` () =
 let ``Binder binds all names in a sample program`` () =
   let ctx = Binder.createContext("script1")
   let code, p1 = parse (olympicSample true)
-  let e1 = Binder.bindProgram ctx p1
+  let _, e1 = Binder.bindProgram ctx p1
   let bound = [ for rng, e in e1 -> code.Substring(rng.Start, rng.End - rng.Start + 1) ]
   let names = 
     [ "data1"; "olympics"; "data"; "'group data'"; "'by Athlete'"; "'sum Gold'"; 

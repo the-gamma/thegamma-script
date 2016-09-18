@@ -394,14 +394,6 @@ let ``Report error on nested expression after let and parse it as command`` () =
   actual |> assertErrors [216, "2"]
 
 [<Test>]
-let ``Report error on expression after let binding and parse it as command`` () =
-  let actual = parse """
-    let a = 1 2
-    let b = 3"""
-  actual |> assertCmds ["a"; ""; "b"] [hasSubExpr (isVal 1.0); hasSubExpr (isVal 2.0); hasSubExpr (isVal 3.0)]
-  actual |> assertErrors [216, "2"]
-
-[<Test>]
 let ``Correctly parse mix of let bindings and expression commands`` () =
   let actual = parse """
     let a = 1 + 2 
@@ -409,6 +401,16 @@ let ``Correctly parse mix of let bindings and expression commands`` () =
     let b = 1"""
   actual |> assertCmds ["a";"";"b"] [ any; hasSubExpr (isVal 3.0); any ]
   actual |> assertErrors []
+
+(*
+[<Test>]
+let ``Report error on expression after let binding and parse it as command`` () =
+  let actual = parse """
+    let a = 1 2
+    let b = 3"""
+  actual |> assertCmds ["a"; ""; "b"] [hasSubExpr (isVal 1.0); hasSubExpr (isVal 2.0); hasSubExpr (isVal 3.0)]
+  actual |> assertErrors [216, "2"]
+*)
 
 // --------------------------------------------------------------------------------------
 // TESTS: Binary operator precedence & parenthesis

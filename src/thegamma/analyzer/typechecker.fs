@@ -2,19 +2,14 @@
 
 open TheGamma
 open TheGamma.Common
-(*
+open System.Collections.Generic
+
 // ------------------------------------------------------------------------------------------------
-// Type checking
+// Helper functions for type equality and substitution
 // ------------------------------------------------------------------------------------------------
 
-type CheckingContext = 
-  { Variables : Map<string, Type> }
-
-type CheckingResult = 
-  { Errors : Error<Range> list }
-
-let addError e ctx = { ctx with Errors = e::ctx.Errors }
-let addVariable k v ctx = { ctx with Variables = Map.add k v ctx.Variables }
+type TypeContext = 
+  { EquivalentVars : (TypeVar * TypeVar) list }
 
 let rec listsEqual l1 l2 f = 
   match l1, l2 with
@@ -30,293 +25,370 @@ let rec arraysEqual (l1:_[]) (l2:_[]) f =
     else false
   loop 0
 
-let rec membersEqual m1 m2 = // Ignoring types, because generics make that hard
+let rec membersEqual ctx m1 m2 =
   match m1, m2 with 
-  | Member.Property(n1, t1, s1, d1, _), Member.Property(n2, t2, s2, d2, _) -> n1 = n2 && s1 = s2 && d1 = d2 // && typesEqual t1 t2
-  | Member.Method(n1, t1, a1, r1, d1, _), Member.Method(n2, t2, a2, r2, d2, _) -> 
-      n1 = n2 && d1 = d2 && // t1 = t2 && typesEqual r1 r2 && 
+  | Member.Property(n1, t1, s1, d1, _), Member.Property(n2, t2, s2, d2, _) -> 
+      n1 = n2 && s1 = s2 && d1 = d2 && typesEqualAux ctx t1 t2
+  | Member.Method(n1, a1, r1, d1, _), Member.Method(n2, a2, r2, d2, _) -> 
+      n1 = n2 && d1 = d2 && typesEqualAux ctx r1 r2 && 
         listsEqual a1 a2 (fun (s1, b1, t1) (s2, b2, t2) -> 
-          s1 = s2 && b1 = b2(* && typesEqual t1 t2 *) )
+          s1 = s2 && b1 = b2 && typesEqualAux ctx t1 t2)
   | _ -> false
 
-and typesEqual t1 t2 = 
+and typesEqualAux ctx t1 t2 = 
   match t1, t2 with
-  | Type.Any, Type.Any -> true
+  | Type.Any, _ | _, Type.Any -> true
+  | Type.Parameter(p1), Type.Parameter(p2) ->
+      ctx.EquivalentVars |> List.exists (fun (l, r) -> l = p1 && r = p2)
   | Type.Delayed(g1, _), Type.Delayed(g2, _) -> g1 = g2
+  | Type.List t1, Type.List t2 -> typesEqualAux ctx t1 t2
   | Type.Function(a1, r1), Type.Function(a2, r2) -> 
-      listsEqual (r1::a1) (r2::a2) typesEqual
+      listsEqual (r1::a1) (r2::a2) (typesEqualAux ctx)
   | Type.Object(o1), Type.Object(o2) -> 
-      listsEqual o1.Typeargs o2.Typeargs typesEqual &&
-      arraysEqual o1.Members o2.Members membersEqual
-  | Type.Parameter n1, Type.Parameter n2 -> n1 = n2
-  | Type.Primitive n1, Type.Primitive n2 -> n1 = n2
-  | Type.Unit, Type.Unit -> true
+      arraysEqual o1.Members o2.Members (membersEqual ctx)
+  | Type.Primitive n1, Type.Primitive n2 -> n1 = n2  
+  | Type.Forall(v1, t1), Type.Forall(v2, t2) when List.length v1 = List.length v2 ->
+      let ctx = { ctx with EquivalentVars = List.append (List.zip v1 v2) ctx.EquivalentVars }
+      typesEqualAux ctx t1 t2
+  | Type.App(t1, ts1), Type.App(t2, ts2) when List.length ts1 = List.length ts2 ->
+      (t1, t2)::(List.zip ts1 ts2) |> List.forall (fun (t1, t2) -> typesEqualAux ctx t1 t2)
   | _ -> false
 
-type ObjectMembers = 
-  | Members of Member[]
-  | NotAnObject
-  | SilentError
+/// Returns true when closed types have equivalent structure up to renaming of local type variables
+let typesEqual = typesEqualAux { EquivalentVars = [] }
 
-let rec getObjectMembers t = async {
-  match t with
-  | Type.Delayed(_, f) ->
-      let! t = Async.AwaitFuture f
-      return! getObjectMembers t 
-  | Type.Object(o) -> return Members(o.Members)
-  | Type.Unit
-  | Type.Parameter _
-  | Type.Function _
-  | Type.List _
-  | Type.Primitive _ -> return NotAnObject
-  | Type.Any _ -> return SilentError }
-
-let rec unifyTypes assigns ts1 ts2 =
-  match ts1, ts2 with
-  | Type.Delayed(id1, f1)::ts1, Type.Delayed(id2, f2)::ts2 -> async {
-      let! o1 = f1 |> Async.AwaitFuture
-      let! o2 = f2 |> Async.AwaitFuture
-      return! unifyTypes assigns (o1::ts1) (o2::ts2) }      
-      
-  | t1::ts1, t2::ts2 when typesEqual t1 t2 -> unifyTypes assigns ts1 ts2
-
-  | Type.Object(o1)::ts1, Type.Object(o2)::ts2 when arraysEqual o1.Members o2.Members membersEqual ->
-      unifyTypes assigns (o1.Typeargs @ ts1) (o2.Typeargs @ ts2)
-  | Type.Any::ts1, t::ts2 | t::ts1, Type.Any::ts2 -> unifyTypes assigns ts1 ts2
-  | (Type.Parameter n)::ts1, t::ts2 | t::ts1, (Type.Parameter n)::ts2 -> 
-      unifyTypes ((n, t)::assigns) ts1 ts2
-  | Type.Function(tis1, to1)::ts1, Type.Function(tis2, to2)::ts2 ->
-      unifyTypes assigns (to1::tis1 @ ts1) (to2::tis2 @ ts2)
-  | Type.List(t1)::ts1, Type.List(t2)::ts2 -> 
-      unifyTypes assigns (t1::ts1) (t2::ts2)
-  | [], [] -> 
-      async { return (fun res rng -> assigns, res) }
-  | ts1, ts2 -> 
-      async { return (fun res rng ->
-          Log.error("typechecker", "Cannot unify types: %O and %O", Array.ofList ts1, Array.ofList ts2)
-          assigns, addError (Errors.TypeChecker.cannotUnityTypes rng) res) }
-
-let avoidCapture bound assigns =
-  let renames = bound |> List.choose (fun n -> 
-    let assigned = Map.tryFindKey (fun k v -> match v with Type.Parameter nn -> n = nn | _ -> false) assigns
-    if assigned.IsSome then Some(n, n + "0") else None) 
-  renames |> List.fold (fun assigns (o, n) -> Map.add o (Type.Parameter n) assigns) assigns,
-  Map.ofSeq renames   
+let (|BoundTypeVariables|) t = 
+  match t with 
+  | Type.Forall(vars, _) -> vars, t
+  | _ -> [], t
 
 let rec substituteMembers assigns members = 
   members |> Array.map (function
-    | Member.Method(n,tp,ars,t,d,e) -> 
-        let assigns0 = assigns
-        let assigns, renames = avoidCapture tp assigns
-        // Log.trace("typechecker", "Substituting in %s<%s>, renaming: %O, assings: %O", n, String.concat "," tp, Map.toArray renames, Map.toArray assigns0)
-        let tp = tp |> List.map (fun tp -> match Map.tryFind tp renames with Some r -> r | _ -> tp)
-        let nars = ars |> List.map (fun (n,o,t) -> n, o, substituteTypes assigns t)
-        Member.Method(n,tp,nars,substituteTypes assigns t,d,e)
+    | Member.Method(n,ars,BoundTypeVariables (vars, t),d,e) -> 
+        // Generic methods are encoded as methods with forall return type
+        // but we need to avoid substituting in parameters too!
+        let assigns = vars |> List.fold (fun assigns var -> Map.remove var assigns) assigns
+        let ars = ars |> List.map (fun (n,o,t) -> n, o, substituteTypes assigns t)
+        Member.Method(n,ars,substituteTypes assigns t,d,e)
     | Member.Property(n,t,s,d,e) -> Member.Property(n,substituteTypes assigns t,s,d,e))      
 
+/// Substitute types for type variables in a given type
 and substituteTypes assigns t =
   match t with
   | Type.Parameter s when Map.containsKey s assigns -> assigns.[s]
-  | Type.Parameter _ | Type.Any | Type.Primitive _ | Type.Unit -> t
+  | Type.Parameter _ | Type.Any | Type.Primitive _ -> t
   | Type.Function(ts, t) -> Type.Function(List.map (substituteTypes assigns) ts, substituteTypes assigns t)
   | Type.List(t) -> Type.List(substituteTypes assigns t)
-  | Type.Object(o) ->
-      let members = substituteMembers assigns o.Members
-      let bound = o.Typeargs |> List.choose (function Type.Parameter n -> Some n | _ -> None)
-      let assigns, _ = avoidCapture bound assigns
-      { Typeargs = List.map (substituteTypes assigns) o.Typeargs
-        Members = members } |> Type.Object
+  | Type.Object(o) -> { Members = substituteMembers assigns o.Members } |> Type.Object
   | Type.Delayed(g, f) -> 
       let f = 
         { new Future<Type> with 
             member x.Then(g) =             
               f.Then(fun t -> g (substituteTypes assigns t)) }
       Type.Delayed(g, f)
+  | Type.App(t, ts) -> Type.App(substituteTypes assigns t, List.map (substituteTypes assigns) ts)
+  | Type.Forall(vars, t) ->
+      let assigns = vars |> List.fold (fun assigns var -> Map.remove var assigns) assigns
+      Type.Forall(vars, substituteTypes assigns t)
 
-let rec applyTypes assigns t = 
-  match t with 
-  | Type.Delayed(g, f) ->
-      let f = 
-        { new Future<Type> with 
-            member x.Then(g) =             
-              f.Then(fun t -> g (applyTypes assigns t)) }
-      Type.Delayed(g, f)
-  | Type.Object(o) ->
-      { Typeargs = List.map (substituteTypes assigns) o.Typeargs
-        Members = substituteMembers assigns o.Members } |> Type.Object      
-  | t when List.isEmpty (Map.toList assigns) -> t
-  | Type.Any -> Type.Any
-  | _ -> 
-      Log.error("typechecker", "Invalid type application %O with %O", t, Map.toArray assigns)
-      failwith "Invalid type application"
+type UnifictionContext = 
+  { FreeVars : Set<TypeVar>
+    Assignments : (TypeVar * Type) list
+    EquivalentVars : (TypeVar * TypeVar) list 
+    Errors : (Type * Type) list }
 
-let rec typeCheckExpr ctx ctxTyp res (expr:Expr<unit>) = async {
-  match expr.Expr with
-  | ExprKind.Null ->
-      return failwith "Unexpected null in source code."
-  | ExprKind.Unit ->
-      return { Expr = ExprKind.Unit; Type = Type.Unit; Range = expr.Range }, res
-  | ExprKind.Empty ->
-      return { Expr = ExprKind.Empty; Type = Type.Any; Range = expr.Range }, res
-  | ExprKind.Variable(v) when ctx.Variables.ContainsKey v.Name ->  
-      return { Expr = ExprKind.Variable v; Type = ctx.Variables.[v.Name]; Range = expr.Range }, res
-  | ExprKind.Variable(v) ->
-      return 
-        { Expr = ExprKind.Variable v; Type = Type.Any; Range = expr.Range }, 
-        res |> addError (Errors.TypeChecker.variableNotInScope expr.Range v.Name)
-  | ExprKind.Number n -> 
-      return { Expr = ExprKind.Number n; Type = Type.Primitive "num"; Range = expr.Range }, res
-  | ExprKind.String s -> 
-      return { Expr = ExprKind.String s; Type = Type.Primitive "string"; Range = expr.Range }, res
-  | ExprKind.Boolean b -> 
-      return { Expr = ExprKind.Boolean b; Type = Type.Primitive "bool"; Range = expr.Range }, res
+let rec unifyTypesAux ctx ts1 ts2 =
+  match ts1, ts2 with
+  | t1::ts1, t2::ts2 when typesEqualAux { EquivalentVars = ctx.EquivalentVars } t1 t2 ->
+      unifyTypesAux ctx ts1 ts2  
+  | Type.Parameter n::ts1, t::ts2 when 
+        ( ctx.FreeVars.Contains n &&
+          match t with Type.Parameter _ -> false | _ -> true ) ->
+      unifyTypesAux { ctx with Assignments = (n, t)::ctx.Assignments } ts1 ts2
+  | Type.Function(tis1, to1)::ts1, Type.Function(tis2, to2)::ts2 ->
+      unifyTypesAux ctx (to1::tis1 @ ts1) (to2::tis2 @ ts2)
+  | Type.List(t1)::ts1, Type.List(t2)::ts2 -> 
+      unifyTypesAux ctx (t1::ts1) (t2::ts2)
+  | Type.Forall(v1, t1)::ts1, Type.Forall(v2, t2)::ts2 when List.length v1 = List.length v2 ->
+      let ctx = { ctx with UnifictionContext.EquivalentVars = List.append (List.zip v1 v2) ctx.EquivalentVars }
+      unifyTypesAux ctx (t1::ts1) (t2::ts2)
+  | Type.App(t1, ta1)::tb1, Type.App(t2, ta2)::tb2 when List.length ta1 = List.length tb2 ->
+      unifyTypesAux ctx (t1::(List.append ta1 tb1)) (t2::(List.append ta2 tb2))
+  | t1::ts1, t2::ts2 -> 
+      unifyTypesAux { ctx with Errors = (t1, t2)::ctx.Errors } ts1 ts2
+  | [], [] -> ctx
+  | _ -> failwith "unifyTypesAux: The lists of types had mismatching lengths"
 
-  | ExprKind.Function(n, e) ->
-      let varTy = ctxTyp |> Option.bind (function
-        | Type.Function([ty], _) -> Some ty | _ -> None)
-      let varTy = defaultArg varTy Type.Any
-      Log.trace("typechecker", "function: '%s -> ...' in context: %O", n.Name, varTy)
-      let! e, res = typeCheckExpr (addVariable n.Name varTy ctx) None res e
-      return { Expr = ExprKind.Function(n, e); Type = Type.Function([varTy], e.Type); Range = expr.Range }, res
+/// Unify a type with given free type variables with a given closed type
+/// and return assignments (possibly conflicting) with mismatching types 
+let unifyTypes free ts1 ts2 = 
+  let ctx = { FreeVars = set free; Assignments = []; EquivalentVars = []; Errors = [] }
+  let ctx = unifyTypesAux ctx [ts1] [ts2]
+  ctx.Assignments, ctx.Errors
 
-  | ExprKind.List(els) ->
-      let! res, els =  els |> Async.foldMap (typeCheckExpr ctx None) res
-      let mutable tys = []
-      for el in els do
-        let known = tys |> List.exists (typesEqual el.Type)
-        if not known then tys <- el.Type::tys
-      let ty, res =
-        match tys with
-        | [] -> Type.Any, res // TODO: Something clever
-        | [ty] -> ty, res
-        | ty::_ -> Type.Any, res 
-            // TODO: Ideally we would avoid explicit boxing
-            // |> addError (Errors.TypeChecker.mismatchingListTypes expr.Range)
-      return { Expr = ExprKind.List els; Type = Type.List(ty); Range = expr.Range }, res
 
-  | ExprKind.Property(e, name) ->
-      Log.trace("typechecker", "checking access %s", name.Name)
-      let! typed, res = typeCheckExpr ctx None res e
-      let! members = getObjectMembers typed.Type 
-      Log.trace("typechecker", "checked access %s", name.Name)
-      let resTyp, res = 
-        match members with
-        | ObjectMembers.Members members ->
-            match members |> Seq.tryPick (function Member.Property(name=n; typ=r) when n = name.Name -> Some r | _ -> None) with
-            | Some resTyp -> resTyp, res
-            | _ -> Type.Any, res |> addError (Errors.TypeChecker.propertyMissing name.Range name.Name members)
-        | ObjectMembers.SilentError -> Type.Any, res
-        | ObjectMembers.NotAnObject -> Type.Any, res |> addError (Errors.TypeChecker.notAnObject e.Range typed.Type)
-      return { Expr = ExprKind.Property(typed, name); Type = resTyp; Range = expr.Range }, res
+// ------------------------------------------------------------------------------------------------
+// Type checking 
+// ------------------------------------------------------------------------------------------------
 
-  | ExprKind.Call(e, name, args) ->
-      let! typed, res = typeCheckExpr ctx None res e
-      let! members = getObjectMembers typed.Type 
+type CheckingContext = 
+  { Errors : ResizeArray<Error<Range>> 
+    Globals : IDictionary<string, Entity> 
+    Ranges : IDictionary<Symbol, Range> }
 
-      let positionBased, nameBased, res = 
-        let pb = args |> List.takeWhile (fun arg -> arg.Name.IsNone) 
-        let nb = args |> List.skipWhile (fun arg -> arg.Name.IsNone)
-        pb |> List.map (fun arg -> arg.Value) |> Array.ofList,
-        nb |> List.choose (fun arg -> arg.Name |> Option.map (fun n -> n.Name, arg.Value)) |> Map.ofList,
-        match nb |> List.tryFind (fun arg -> arg.Name.IsNone) with
-        | Some arg -> res |> addError (Errors.TypeChecker.nameBasedParamMustBeLast arg.Value.Range)
-        | _ -> res
-                
-      let noRange = { Start = 0; End = 0 }
-      let checkArguments pars = 
-        pars |> List.mapi (fun i p -> i, p) |> Async.foldMap (fun res (index, (name, optional, typ)) -> async {
-          let arg = 
-            if index < positionBased.Length then Some(positionBased.[index]) 
-            else Map.tryFind name nameBased 
-          match arg with
-          | Some arg -> 
-              let! t, res = typeCheckExpr ctx (Some typ) res arg
-              return { Name = Some { Name = name; Range = arg.Range }; Value = t }, res  // Here we are returning wrong range 
-          | None when optional ->
-              let v = { Expr = ExprKind.Null; Range = noRange; Type = typ }
-              return { Name = Some { Name = name; Range = noRange }; Value = v }, res // dtto
-          | _ ->
-              let v = { Expr = ExprKind.Empty; Range = noRange; Type = typ }
-              return { Name = Some { Name = name; Range = noRange }; Value = v }, res }) res
-        
+let addError ctx ent err = 
+  ctx.Errors.Add(err ctx.Ranges.[ent.Symbol])
 
-        //List.zip args argTys |> Async.foldMap (fun res (arg, argTy) -> async {
-          //let! t, res = typeCheckExpr ctx argTy res arg.Value
-          //return { Name = arg.Name; Value = t }, res }) res
+let (|FindProperty|_|) (name:Name) { Members = membs } = 
+  membs |> Seq.tryPick (function 
+    Member.Property(name=n; typ=r) when n = name.Name -> Some r | _ -> None) 
 
-      let! resTyp, typedArgs, res = async {
-        match members with
-        | ObjectMembers.Members members -> 
-            match members |> Seq.tryPick (function Member.Method(name=n; typars=tp; arguments=args; typ=r) when n = name.Name -> Some(tp, r, args) | _ -> None) with
-            | Some(tp, resTyp, pars) -> 
-                // TODO: check arguments
-                let! res, typedArgs = checkArguments pars
-                let typedArgs = 
-                  List.zip pars typedArgs |> List.map (fun ((n, _, _), ta) ->
-                     { ta with Name = Some { Name = n; Range = ta.Value.Range }})
+let (|FindMethod|_|) (name:Name) { Members = membs } = 
+  membs |> Seq.tryPick (function 
+    Member.Method(name=n; arguments=args; typ=r) when n = name.Name -> Some (args, r) | _ -> None) 
 
-                let parTys = pars |> List.map (fun (_, _, t) -> t)
-                let argTys = typedArgs |> List.map (fun a -> a.Value.Type)
-                Log.trace("typechecker", "unifying %s: pars: %O, args: %O", name.Name, Array.ofList parTys, Array.ofList argTys)
-                let! unifyFunc = unifyTypes [] parTys argTys 
-                let assigns, res = unifyFunc res name.Range
+/// Given a list of types, find the most frequent type (using Type.Any as the last resort)
+let inferListType typs = 
+  typs 
+  |> List.filter (function Type.Any -> false | _ -> true)
+  |> List.groupWith typesEqual
+  |> List.map (fun g -> List.head g, List.length g)
+  |> List.append [Type.Any, 0]
+  |> List.maxBy snd
+  |> fst
 
-                Log.trace("typechecker", "call %s: tyargs: %s, assigns: %O", name.Name, String.concat "," tp, Array.ofList assigns)
-                let resTyp = applyTypes (Map.ofList assigns) resTyp
-                Log.trace("typechecker", "call %s: result type: %O", name.Name, resTyp)
-                return resTyp, typedArgs, res 
-            | _ -> 
-                //let! res, _ = checkArguments None
-                let res = res |> addError (Errors.TypeChecker.methodMissing name.Range name.Name members)
-                return Type.Any, [], res
-        | ObjectMembers.SilentError -> 
-            //let! res, typedArgs = checkArguments None
-            return Type.Any, [], res
-        | ObjectMembers.NotAnObject -> 
-            //let! res, typedArgs = checkArguments None
-            return Type.Any, [], res |> addError (Errors.TypeChecker.notAnObject e.Range typed.Type) }
+/// Resolve type of parameter - parSpec can be Choice1Of2 with 
+/// parameter name or Choice2Of2 with parameter index.
+let resolveParameterType instTy methName parSpec = 
+  match instTy with
+  | Type.Object(FindMethod methName (args, _)) ->
+      match parSpec with
+      | Choice1Of2 name -> args |> Seq.pick (fun (n, _, t) -> if n = name then Some t else None) // TODO: Can crash
+      | Choice2Of2 idx -> let _, _, t = args.[idx] in t // TODO: Can crash
+  | _ -> failwith "resolveParameterType: Instance is not an object"
 
-      return { Expr = ExprKind.Call(typed, name, typedArgs); Type = resTyp; Range = expr.Range }, res }
 
-let rec typeCheckCmd ctx res cmds = async {
-  match cmds with
-  | ({ Command = CommandKind.Let(name, expr) } as cmd)::cmds ->
-      let! typed, res = typeCheckExpr ctx None res expr
-      let! cmds, res = typeCheckCmd (addVariable name.Name typed.Type ctx) res cmds
-      return { Command = CommandKind.Let(name, typed); Range = cmd.Range}::cmds, res
-  | ({ Command = CommandKind.Expr(expr) } as cmd)::cmds ->      
-      let! typed, res = typeCheckExpr ctx None res expr
-      let! cmds, res = typeCheckCmd ctx res cmds
-      return { Command = CommandKind.Expr(typed); Range = cmd.Range}::cmds, res
-  | [] -> 
-      return [], res }
+let rec checkMethodCall ctx memTy pars argList args = 
 
-let typeCheckProgram ctx res prog = async {
-  let! cmds, res = typeCheckCmd ctx res prog.Body
-  return { Body = cmds; Range = prog.Range }, res }
+  // Split arguments into position & name based and report 
+  // error if there is non-named argument after named argument
+  let positionBased, nameBased = 
+    let pb = args |> List.takeWhile (fun arg -> arg.Kind <> EntityKind.NamedParam) 
+    let nb = args |> List.skipWhile (fun arg -> arg.Kind <> EntityKind.NamedParam)
+    pb |> Array.ofList,
+    nb |> List.choose (fun arg -> 
+      match arg.Kind with
+      | EntityKind.NamedParam -> Some(arg.Name.Name, arg.Antecedents.[0])
+      | _ ->
+          Errors.TypeChecker.nameBasedParamMustBeLast |> addError ctx arg
+          None ) |> Map.ofList
+
+  // Match actual arguments with the parameters and report
+  // error if non-optional parameter is missing an assignment
+  let matchedArguments = 
+    pars |> List.mapi (fun index (name, optional, typ) ->
+      let arg = 
+        if index < positionBased.Length then Some(positionBased.[index]) 
+        else Map.tryFind name nameBased 
+      match arg with
+      | Some arg -> name, typ, getType ctx arg, Some arg
+      | None when optional -> name, typ, typ, None
+      | None ->
+          Errors.TypeChecker.parameterMissingValue name |> addError ctx argList
+          name, typ, Type.Any, None)
+
+  // Infer assignments for type parameters from actual arguments
+  let tyVars, resTy = match memTy with Type.Forall(tya, resTy) -> tya, resTy | resTy -> [], resTy
+  let assigns = 
+    matchedArguments |> List.collect (fun (name, parTy, argTy, entityOpt) ->
+      let assigns, errors = unifyTypes tyVars parTy argTy
+      if entityOpt.IsSome then
+        for t1, t2 in errors do
+          Errors.TypeChecker.incorrectParameterType name parTy argTy t1 t2 |> addError ctx entityOpt.Value 
+      assigns )
+
+  // Report errors if we inferred conflicting assignments for one variable
+  for _, group in List.groupBy fst assigns do
+    match group with
+    | (v, t1)::(_::_ as ts) ->
+        for _, t in ts do
+          Errors.TypeChecker.inferenceConflict v t1 t |> addError ctx argList
+    | _ -> ()
+  
+  // Substitute in the return type
+  let res = substituteTypes (Map.ofList assigns) resTy
+  //printfn "Result of call: %A" res
+  res
+  
+
+/// Get type of an entity and record errors generated when type checking this entity
+and getType ctx (e:Entity) = 
+  if e.Type.IsNone then 
+    let errorCount = ctx.Errors.Count
+    e.Type <- Some (typeCheckEntity ctx e)
+    e.Errors <- [ for i in errorCount .. ctx.Errors.Count - 1 -> ctx.Errors.[i] ]
+  e.Type.Value
+
+/// Type check entity - assumes that all antecedents of the entity 
+/// have been reduced to non-delayed type before
+and typeCheckEntity ctx (e:Entity) = 
+  match e.Kind with
+  | EntityKind.GlobalValue ->
+      if not (ctx.Globals.ContainsKey(e.Name.Name)) then
+        Errors.TypeChecker.variableNotInScope e.Name.Name |> addError ctx e
+        Type.Any
+      else
+        getType ctx ctx.Globals.[e.Name.Name]
+
+  | EntityKind.Variable ->
+      let inst = match e.Antecedents with [a] -> a | _ -> failwith "typeCheckEntity: Variable should have one antecedent"
+      getType ctx inst      
+
+  | EntityKind.ChainElement(isProperty = true) ->
+      let name, inst = match e.Antecedents with [name; a] -> name, a | _ -> failwith "typeCheckEntity: Property should have two antecedents"
+      let typ = getType ctx inst
+      match typ with 
+      | Type.Any -> Type.Any
+      | Type.Object(FindProperty e.Name resTyp) -> resTyp
+      | Type.Object { Members = members } ->
+          Errors.TypeChecker.propertyMissing e.Name.Name members |> addError ctx name
+          Type.Any
+      | typ ->
+          Errors.TypeChecker.notAnObject e.Name.Name typ |> addError ctx inst
+          Type.Any
+
+  | EntityKind.ChainElement(isProperty = false; hasInstance = hasInstance) ->
+      if not hasInstance then failwith "typeCheckEntity: Method calls without instance are not supported"
+      let name, inst, arglist, ents = 
+        match e.Antecedents with 
+        | [name; inst; arg] -> name, inst, arg, List.tail arg.Antecedents 
+        | _ -> failwith "typeCheckEntity: Method call is missing required antecedent"
+      match getType ctx inst with 
+      | Type.Any -> Type.Any
+      | Type.Object(FindMethod e.Name (args, resTyp)) -> checkMethodCall ctx resTyp args arglist ents
+      | Type.Object { Members = members } ->
+          Errors.TypeChecker.methodMissing e.Name.Name members |> addError ctx name
+          Type.Any
+      | typ ->
+          Errors.TypeChecker.notAnObject e.Name.Name typ |> addError ctx inst
+          Type.Any
+
+  | EntityKind.Operator operator ->      
+      e.Antecedents |> List.iteri (fun idx operand ->
+        let typ = getType ctx operand 
+        if not (typesEqual typ (Type.Primitive PrimitiveType.Number)) then
+          Errors.TypeChecker.numericOperatorExpectsNumbers operator idx typ |> addError ctx operand )
+      Type.Primitive PrimitiveType.Number
+
+  | EntityKind.List ->      
+      let typs = e.Antecedents |> List.map (getType ctx)
+      let typ = inferListType typs 
+      for a in e.Antecedents do 
+        let elty = getType ctx a
+        if not (typesEqual typ elty) then
+          Errors.TypeChecker.listElementTypeDoesNotMatch typ elty |> addError ctx a
+      Type.List typ
+
+  | EntityKind.Binding ->
+      // Binding node is used to resolve type of a lambda function variable. Its
+      // antecedent is `Scope` (in which case we cannot type check it) or 
+      // `EntityKind.CallSite` containing reference to the method around it - 
+      // assuming lambda appears in something like: `foo(10, fun x -> ...)`
+      let inst, methName, parSpec = 
+        match e.Antecedents with 
+        | [ { Kind=EntityKind.CallSite p; Name = name } as v ] -> List.head v.Antecedents, name, p
+        | _ -> failwith "typeCheckEntity: Binding should have call site antecedent"
+      match resolveParameterType (getType ctx inst) methName parSpec with
+      | Type.Function([tin], _) -> tin
+      | _ -> failwith "typeCheckEntity: Expected parameter of function type"
+
+  | EntityKind.Function ->
+      let var, body = match e.Antecedents with [v; b] -> v, b | _ -> failwith "typeCheckEntity: Property should have two antecedents"
+      Type.Function([getType ctx var], getType ctx body)
+
+  // Entities with primitive types
+  | EntityKind.Constant(Constant.Number _) -> Type.Primitive(PrimitiveType.Number)
+  | EntityKind.Constant(Constant.String _) -> Type.Primitive(PrimitiveType.String)
+  | EntityKind.Constant(Constant.Boolean _) -> Type.Primitive(PrimitiveType.Bool)
+  | EntityKind.Constant(Constant.Empty) -> Type.Any
+
+  // Entities that do not have a real type
+  | EntityKind.Root -> Type.Any
+  | EntityKind.Command -> Type.Any
+  | EntityKind.ArgumentList -> Type.Any
+  | EntityKind.NamedParam -> Type.Any
+  | EntityKind.NamedMember -> Type.Any
+  | EntityKind.CallSite _ -> Type.Any
+  | EntityKind.Scope -> Type.Any
+  | EntityKind.Program -> Type.Any
+
+
+/// Perform type applications & evaluate delayed types
+let rec reduceType t = async {
+  match t with
+  | Type.App(Type.Forall(vars, t), args) ->
+      if List.length vars <> List.length args then failwith "reduceType: Invalid type application"
+      let t = substituteTypes (Map.ofList (List.zip vars args)) t
+      return! reduceType t 
+
+  | Type.Delayed(_, f) ->
+      let! t = Async.AwaitFuture f
+      return! reduceType t
+  | _ -> return t }
+
+
+/// Type check entity & return its type. This first recursively processes
+/// all antecedants to make sure that no antecedant is delayed  
+/// (this way, `getType` can be ordinary synchronouus function)
+let rec typeCheckEntityAsync ctx (e:Entity) = async {
+  for a in e.Antecedents do
+    let! _ = typeCheckEntityAsync ctx a
+    ()
+  let! t = reduceType (getType ctx e)
+  e.Type <- Some t
+  return t }
 
 
 // ------------------------------------------------------------------------------------------------
 // User friendly entry point
 // ------------------------------------------------------------------------------------------------
-          
 
+let globalEntity name typ root =           
+  { Kind = EntityKind.GlobalValue
+    Antecedents = [root]
+    Name = { Name = name }
+    Symbol = createSymbol()
+    Type = Some typ 
+    Errors = [] }
+
+let collectTypeErrors (entity:Entity) = 
+  let errors = ResizeArray<_>()
+  let visited = Dictionary<Symbol, bool>()
+  let rec loop e = 
+    if not (visited.ContainsKey e.Symbol) then
+      visited.[e.Symbol] <- true
+      for e in e.Antecedents do loop e
+      errors.AddRange(e.Errors)
+  loop entity
+  errors |> List.ofSeq
+
+let typeCheckProgram (globals:Entity list) bound prog = async {
+  let rangeLookup = dict [ for r, e in bound -> e.Symbol, r ]
+  let vars = dict [ for e in globals -> e.Name.Name, e ]
+  let ctx = { Globals = vars; Errors = ResizeArray<_>(); Ranges = rangeLookup }
+  let! _ = typeCheckEntityAsync ctx prog 
+  return () }
+
+// ------------------------------------------------------------------------------------------------
+// Collecting editors
+// ------------------------------------------------------------------------------------------------
+(*
 let needsEscaping (s:string) = 
   (s.[0] >= '0' && s.[0] <= '9') ||
   (s.ToCharArray() |> Array.exists (fun c -> not ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) ))
 
 let escapeIdent s = 
   if needsEscaping s then "'" + s + "'" else s
-
-let typeCheck globals input = async {
-  let errs1, untyped = parse input
-  let! checkd, ctx = typeCheckProgram { Variables = globals } { Errors = [] } untyped
-  return errs1 @ ctx.Errors, checkd }
-
-
-// ------------------------------------------------------------------------------------------------
-// Collecting editors
-// ------------------------------------------------------------------------------------------------
 
 type EditorInfo = 
   { Source : string

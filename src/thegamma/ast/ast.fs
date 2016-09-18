@@ -147,6 +147,8 @@ type [<RequireQualifiedAccess>] EntityKind =
   /// Function declaration; Antecedents are variable entity & body entity
   | Function
 
+  /// Represents the whole program; Antecedents are commands
+  | Program
   /// Represents an entity for a command; Antecedents
   | Command
   /// Root node of the entity tree with no antecedant

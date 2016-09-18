@@ -4,13 +4,18 @@
   "version": "0.0.1",
   "description": "The Gamma project",
   "scripts": {
+    "prejusttest": "fable tests/thegamma-tests",
+    "justtest": "mocha out/tests/thegamma-tests",
+
     "pretest": "concurrently \"fable src/thegamma\" \"fable src/libraries\" \"fable src/gui\" \"fable src/main\" \"fable tests/thegamma-tests\"",
     "test": "mocha out/tests/thegamma-tests",
+
     "build": "concurrently \"fable src/thegamma\" \"fable src/libraries\" \"fable src/gui\" \"fable src/main\"",
     "postbuild": "webpack",
-    "watchfable": "concurrently \"fable -w src/thegamma\" \"fable -w src/libraries\" \"fable -w src/gui\" \"fable -w src/main\"",
+
     "prewatchwebpack": "sleep 60",
     "watchwebpack": "webpack --watch",
+    "watchfable": "concurrently \"fable -w src/thegamma\" \"fable -w src/libraries\" \"fable -w src/gui\" \"fable -w src/main\"",
     "watch": "concurrently \"npm run watchfable\" \"npm run watchwebpack\""
   },
   "author": "Tomas Petricek",

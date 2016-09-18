@@ -104,6 +104,7 @@ let formatEntityKind = function
   | EntityKind.Constant(Constant.Boolean false) -> "`false` value" 
   | EntityKind.Function -> "function"
   | EntityKind.Command -> "command"
+  | EntityKind.Program -> "program"
   | EntityKind.Root -> "root"
   | EntityKind.Scope -> "scope"
   | EntityKind.CallSite _ -> "call site"
