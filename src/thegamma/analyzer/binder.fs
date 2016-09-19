@@ -70,12 +70,12 @@ let rec bindExpression callSite ctx node =
         | Some n -> bindEntity ctx EntityKind.NamedParam [expr] n.Node |> setEntity ctx n
         | None -> expr)
       let args = bindEntity ctx EntityKind.ArgumentList (ctx.Root::args) anonymous |> setEntity ctx argsNode
-      let named = bindEntity ctx EntityKind.NamedMember [ctx.Root] name.Node |> setEntity ctx name
+      let named = bindEntity ctx EntityKind.NamedMember [inst] name.Node |> setEntity ctx name
       bindEntity ctx (EntityKind.ChainElement(instExpr.IsSome, false)) [named; inst; args] name.Node |> setEntity ctx node 
 
   | Expr.Property(expr, name) ->
       let ante = bindExpression ctx expr
-      let named = bindEntity ctx EntityKind.NamedMember [ctx.Root] name.Node |> setEntity ctx name      
+      let named = bindEntity ctx EntityKind.NamedMember [ante] name.Node |> setEntity ctx name      
       bindEntity ctx (EntityKind.ChainElement(true, true)) [named; ante] name.Node |> setEntity ctx node 
 
   | Expr.Binary(l, op, r) ->

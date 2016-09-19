@@ -15,11 +15,11 @@ type EditorWorkerMessage =
   | UpdateNow of string
   | Refersh of string
 
-type EditorService(article, checker:string -> Async<bool * Program>, delay) = 
+type EditorService(article, checker:string -> Async<bool * (Range * Entity)[] * Program>, delay) = 
   let renderEditors = Control.Event<_>()
   let update text = async {
     Log.event("options", "update", article, text)
-    let! (_:bool), prg = checker text 
+    let! _, _, prg = checker text 
         
     Log.trace("service", "Collecting editors")
     //let! eds = Async.collect collectCmdEditors prg.Body 
@@ -69,8 +69,10 @@ type EditorService(article, checker:string -> Async<bool * Program>, delay) =
 // Type checker
 // ------------------------------------------------------------------------------------------------
 
+type Entities = (Range * Entity)[]
+
 type CheckingMessage = 
-  | TypeCheck of code:string * AsyncReplyChannel<bool * Program>
+  | TypeCheck of code:string * AsyncReplyChannel<bool * Entities * Program>
   | IsWellTyped of code:string * AsyncReplyChannel<bool>
 
 type Position = { Line:int; Column:int }
@@ -86,22 +88,41 @@ let rangeToLoc lengths (rng:Range) =
   { Start = offsetToLocation 1 rng.Start lengths
     End = offsetToLocation 1 rng.Start lengths }
 
-type CheckingService(article, globals:Future<Map<string, Type>>) =
+type CheckingService(article, globals:Future<(string * Type) list>) =
   let errorsReported = Control.Event<_>()
   let emptyProg = { Body = Ast.node { Start = 0; End = 0 } [] }
+  let bindingContext = Binder.createContext article
+  let globals = async { 
+    let! globals = Async.AwaitFuture globals
+    return globals |> List.map (fun (n, t) -> TypeChecker.globalEntity n t bindingContext.Root ) } |> Async.AsFuture "globals"
+  let errorsToLineCol (code:string) errors = 
+    let lengths = code.Split('\n') |> Array.toList |> List.map (fun l -> l.Length)
+    errors |> Array.map (fun e -> 
+      { Number = e.Number; Message = e.Message; Range = rangeToLoc lengths e.Range })
+
+  let typeCheck code = async {
+    let! globals = Async.AwaitFuture globals
+    try
+      let progSyntax, parseErrors = Parser.parseProgram code
+      let progEntity, boundEntities = Binder.bindProgram bindingContext progSyntax
+      do! TypeChecker.typeCheckProgram globals boundEntities progEntity
+      let typeErrors = TypeChecker.collectTypeErrors progEntity
+      Log.trace("service", "Type checking completed")
+      let errors = errorsToLineCol code (Array.append parseErrors typeErrors)
+      return Some(progSyntax, boundEntities, errors)
+    with e ->
+      Log.exn("service", "Type checking failed: %O", e)
+      return None }
+
   let agent = MailboxProcessor.Start(fun inbox ->
     let rec loop lastCode lastResult = async {
       let! msg = inbox.Receive()
       match msg with
       | IsWellTyped(code, repl) ->
-          let! globals = Async.AwaitFuture globals
-          try
-            //let! errors, result = TypeChecker.typeCheck globals code
-            //repl.Reply(errors.IsEmpty)
-            repl.Reply(true)
-          with e ->
-            Log.exn("service", "Type checking failed: %O", e)
-            repl.Reply(false)
+          let! tc = typeCheck code
+          match tc with 
+          | Some(_, _, errs) when errs.Length = 0 -> repl.Reply(true)
+          | _ -> repl.Reply(false)
           return! loop lastCode lastResult
 
       | TypeCheck(code, repl) when code = lastCode ->
@@ -111,26 +132,18 @@ type CheckingService(article, globals:Future<Map<string, Type>>) =
 
       | TypeCheck(code, repl) ->
           Log.trace("service", "Type checking source code")
-          let! globals = Async.AwaitFuture globals
-          try
-            Log.event("compiler", "check-source", article, code)
-            let result, errors = Parser.parseProgram code
-            //let! errors, result = TypeChecker.typeCheck globals code
-            Log.trace("service", "Type checking completed")
-
-            let lengths = code.Split('\n') |> Array.toList |> List.map (fun l -> l.Length)
-            let errors = errors |> Array.map (fun e -> 
-              { Number = e.Number; Message = e.Message; Range = rangeToLoc lengths e.Range })
-
-            errorsReported.Trigger(code, errors)
-            let result = (errors.Length = 0, result)
-            repl.Reply(result)
-            return! loop code result
-          with e ->
-            Log.exn("service", "Type checking failed: %O", e)
-            repl.Reply((false, emptyProg))
-            return! loop lastCode lastResult }
-    loop "" (false, emptyProg))
+          let! tc = typeCheck code
+          match tc with 
+          | Some(prog, ents, errors) ->
+              errorsReported.Trigger(code, errors)            
+              let result = (errors.Length = 0, ents, prog)
+              repl.Reply(result)
+              return! loop code result
+          | None -> 
+              repl.Reply((false, [||], emptyProg))
+              return! loop lastCode lastResult }
+    
+    loop "" (false, [||], emptyProg))
 
   member x.ErrorsReported = errorsReported.Publish
   member x.TypeCheck(code) = agent.PostAndAsyncReply(fun ch -> TypeCheck(code, ch))

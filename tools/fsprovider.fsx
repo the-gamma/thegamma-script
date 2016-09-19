@@ -85,13 +85,13 @@ let rec formatType ctx (genPars:Map<_, _>) (typ:System.Type) =
   | "Boolean" -> PrimitiveType.Create("bool")
   | "String" -> PrimitiveType.Create("string")
   | "Double" -> PrimitiveType.Create("float")
-  | "DateTime" -> PrimitiveType.Create("datetime") // you wish
+  | "DateTime" -> PrimitiveType.Create("object") // you wish
   | "Object" -> PrimitiveType.Create("object")
   | "Int32" -> PrimitiveType.Create("int")
   | "Void" -> PrimitiveType.Create("unit")
   | "Unit" -> PrimitiveType.Create("unit")
-  | "Tuple`2" -> PrimitiveType.Create("tuple") // TODO: Something clever
-  | "FSharpOption`1" -> PrimitiveType.Create("option") // TODO: Something clever
+  | "Tuple`2" -> PrimitiveType.Create("object") // TODO: Something clever
+  | "FSharpOption`1" -> PrimitiveType.Create("object") // TODO: Something clever
   | "FSharpFunc`2" -> 
       let inp, out = getFunctionTypes ctx [] typ
       FunctionType.Create(List.map (formatType ctx genPars) inp, formatType ctx genPars out)

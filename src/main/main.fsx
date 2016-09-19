@@ -27,7 +27,7 @@ let services =
 
 type ProvidedTypes = 
   { LookupNamed : string -> Type list -> Type
-    Globals : Map<string, Expression * Type> }
+    Globals : list<string * Expression * Type> }
     
 let types = async {
   let mutable named = Map.empty
@@ -37,7 +37,9 @@ let types = async {
         if List.length tya <> List.length tyargs then 
           Log.error("Named type '%s' has mismatching length of type arguments", n)
           failwith (sprintf "Named type '%s' has mismatching length of type arguments" n)
-        r // TODO: TypeChecker.applyTypes (Map.ofList (List.zip tya tyargs)) r
+        if tya.Length > 0 then 
+          Type.App(r, tyargs)
+        else r 
     | None -> 
         Log.error("Could not find named type '%s'", n)
         failwith (sprintf "Could not find named type '%s'" n)
@@ -82,18 +84,18 @@ let types = async {
 
   let globals = 
     allTys 
-    |> List.choose (function TypePoviders.GlobalValue(s, e, t) -> Some(s, (e, t)) | _ -> None)
-    |> Map.ofSeq
+    |> List.choose (function TypePoviders.GlobalValue(s, e, t) -> Some(s, e, t) | _ -> None)
   
   return { Globals = globals; LookupNamed = lookupNamed } } |> Async.StartAsFuture "types"
 
 let globalTypes = async { 
   let! ty = types |> Async.AwaitFuture
-  return ty.Globals |> Map.map (fun _ (_, t) -> t) } |> Async.StartAsFuture "global types"
+  Log.trace("typechecker", "Global values: %O", Array.ofList ty.Globals)
+  return ty.Globals |> List.map (fun (n, _, t) -> n, t) } |> Async.StartAsFuture "global types"
 
 let globalExprs = async { 
   let! ty = types |> Async.AwaitFuture
-  return ty.Globals |> Map.map (fun _ (e, _) -> e) } |> Async.StartAsFuture "global exps"
+  return ty.Globals |> List.map (fun (n, e, _) -> n, e) |> Map.ofList } |> Async.StartAsFuture "global exps"
 
 // ------------------------------------------------------------------------------------------------
 // HTML helpers
@@ -201,7 +203,7 @@ let setupEditor (parent:HTMLElement) =
       match compiled with
       | Some compiled when text = source -> return compiled
       | _ ->
-        let! _, prog = checkingService.TypeCheck(text)
+        let! _, _, prog = checkingService.TypeCheck(text)
         let! newBody = prog.Body.Node |> Async.map (callShowMethod outputId)
         let prog = { prog with Body = { prog.Body with Node = newBody } }
         return! CodeGenerator.compileAndRun globalExprs text prog }
@@ -290,7 +292,7 @@ let setupEditor (parent:HTMLElement) =
     let text = getText()
     Log.event("gui", "share", article, text)
     async { 
-      let! ok, prog = checkingService.TypeCheck(text)
+      let! ok, _, prog = checkingService.TypeCheck(text)
       let! newBody = prog.Body.Node |> Async.map (callShowMethod "output-id-placeholder")
       let prog = { prog with Body = { prog.Body with Node = newBody } }
       let! compiled = CodeGenerator.compileAndRun globalExprs text prog         
@@ -302,8 +304,15 @@ let setupEditor (parent:HTMLElement) =
     Log.event("gui", "run", article, "click")
     getText() |> run |> Async.StartImmediate |> box
 
+  ed, checkingService
 
-Monaco.setupMonacoServices(globalTypes)
+let servicesLookup = ResizeArray<Lazy<monaco.editor.ICodeEditor> * _>()
+
+Monaco.setupMonacoServices(fun name ->
+  servicesLookup |> Seq.pick (fun (ed, svc) ->
+    if ed.IsValueCreated && ed.Value.getModel().uri.toString() = name then Some(svc)
+    else None )
+)
 
 for el in findElements (withClass "ia-figure") document.body do
-  setupEditor (el :?> HTMLElement)
+  servicesLookup.Add(setupEditor (el :?> HTMLElement))

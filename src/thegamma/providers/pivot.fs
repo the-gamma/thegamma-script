@@ -153,6 +153,7 @@ let getTypeAndEmitter = function
   | PrimitiveType.String -> Type.Primitive(PrimitiveType.String), id
   | PrimitiveType.Number -> Type.Primitive(PrimitiveType.Number), fun e -> ident "Number" /@/ [e]
   | PrimitiveType.Bool -> Type.Primitive(PrimitiveType.Number), fun e -> ident "Boolean" /@/ [e]
+  | PrimitiveType.Unit -> Type.Primitive(PrimitiveType.Unit), fun e -> NullLiteral(None)
 
 let propertyEmitter = 
   { Emit = fun (this, _) -> this }

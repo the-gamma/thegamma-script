@@ -111,7 +111,7 @@ module TypeChecker =
 
   let parameterMissingValue par rng = 
     { Number = 308; Range = rng 
-      Message = "Required parameter `%s` is not given a value." }
+      Message = sprintf "Required parameter `%s` is not given a value." par }
 
   let incorrectParameterType parName parType actualType err1 err2 rng = 
     { Number = 309; Range = rng 

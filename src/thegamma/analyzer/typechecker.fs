@@ -25,6 +25,12 @@ let rec arraysEqual (l1:_[]) (l2:_[]) f =
     else false
   loop 0
 
+let rec memberNamesEqual m1 m2 =
+  match m1, m2 with 
+  | Member.Property(name=n1), Member.Property(name=n2)
+  | Member.Method(name=n1), Member.Method(name=n2) -> n1 = n2 
+  | _ -> false
+
 let rec membersEqual ctx m1 m2 =
   match m1, m2 with 
   | Member.Property(n1, t1, s1, d1, _), Member.Property(n2, t2, s2, d2, _) -> 
@@ -44,8 +50,7 @@ and typesEqualAux ctx t1 t2 =
   | Type.List t1, Type.List t2 -> typesEqualAux ctx t1 t2
   | Type.Function(a1, r1), Type.Function(a2, r2) -> 
       listsEqual (r1::a1) (r2::a2) (typesEqualAux ctx)
-  | Type.Object(o1), Type.Object(o2) -> 
-      arraysEqual o1.Members o2.Members (membersEqual ctx)
+  | Type.Object(o1), Type.Object(o2) -> arraysEqual o1.Members o2.Members (membersEqual ctx)
   | Type.Primitive n1, Type.Primitive n2 -> n1 = n2  
   | Type.Forall(v1, t1), Type.Forall(v2, t2) when List.length v1 = List.length v2 ->
       let ctx = { ctx with EquivalentVars = List.append (List.zip v1 v2) ctx.EquivalentVars }
@@ -99,21 +104,24 @@ type UnifictionContext =
 
 let rec unifyTypesAux ctx ts1 ts2 =
   match ts1, ts2 with
-  | t1::ts1, t2::ts2 when typesEqualAux { EquivalentVars = ctx.EquivalentVars } t1 t2 ->
-      unifyTypesAux ctx ts1 ts2  
   | Type.Parameter n::ts1, t::ts2 when 
         ( ctx.FreeVars.Contains n &&
           match t with Type.Parameter _ -> false | _ -> true ) ->
       unifyTypesAux { ctx with Assignments = (n, t)::ctx.Assignments } ts1 ts2
   | Type.Function(tis1, to1)::ts1, Type.Function(tis2, to2)::ts2 ->
       unifyTypesAux ctx (to1::tis1 @ ts1) (to2::tis2 @ ts2)
+  | Type.Object({ Members = m1 })::ts1, Type.Object({ Members = m2 })::ts2 
+      when arraysEqual m1 m2 memberNamesEqual ->
+        unifyTypesAux ctx ts1 ts2
   | Type.List(t1)::ts1, Type.List(t2)::ts2 -> 
       unifyTypesAux ctx (t1::ts1) (t2::ts2)
   | Type.Forall(v1, t1)::ts1, Type.Forall(v2, t2)::ts2 when List.length v1 = List.length v2 ->
       let ctx = { ctx with UnifictionContext.EquivalentVars = List.append (List.zip v1 v2) ctx.EquivalentVars }
       unifyTypesAux ctx (t1::ts1) (t2::ts2)
-  | Type.App(t1, ta1)::tb1, Type.App(t2, ta2)::tb2 when List.length ta1 = List.length tb2 ->
+  | Type.App(t1, ta1)::tb1, Type.App(t2, ta2)::tb2 when List.length ta1 = List.length ta2 ->
       unifyTypesAux ctx (t1::(List.append ta1 tb1)) (t2::(List.append ta2 tb2))
+  | t1::ts1, t2::ts2 when typesEqualAux { EquivalentVars = ctx.EquivalentVars } t1 t2 ->
+      unifyTypesAux ctx ts1 ts2  
   | t1::ts1, t2::ts2 -> 
       unifyTypesAux { ctx with Errors = (t1, t2)::ctx.Errors } ts1 ts2
   | [], [] -> ctx
@@ -126,6 +134,14 @@ let unifyTypes free ts1 ts2 =
   let ctx = unifyTypesAux ctx [ts1] [ts2]
   ctx.Assignments, ctx.Errors
 
+/// Perform type applications 
+let rec reduceType t = 
+  match t with
+  | Type.App(Type.Forall(vars, t), args) ->
+      if List.length vars <> List.length args then failwith "reduceType: Invalid type application"
+      let t = substituteTypes (Map.ofList (List.zip vars args)) t
+      reduceType t 
+  | _ -> t
 
 // ------------------------------------------------------------------------------------------------
 // Type checking 
@@ -246,7 +262,7 @@ and typeCheckEntity ctx (e:Entity) =
 
   | EntityKind.ChainElement(isProperty = true) ->
       let name, inst = match e.Antecedents with [name; a] -> name, a | _ -> failwith "typeCheckEntity: Property should have two antecedents"
-      let typ = getType ctx inst
+      let typ = reduceType (getType ctx inst)
       match typ with 
       | Type.Any -> Type.Any
       | Type.Object(FindProperty e.Name resTyp) -> resTyp
@@ -258,12 +274,14 @@ and typeCheckEntity ctx (e:Entity) =
           Type.Any
 
   | EntityKind.ChainElement(isProperty = false; hasInstance = hasInstance) ->
-      if not hasInstance then failwith "typeCheckEntity: Method calls without instance are not supported"
+      if not hasInstance then 
+        Log.error("typechecker", "typeCheckEntity: Method calls without instance are not supported")
+        Type.Any else
       let name, inst, arglist, ents = 
         match e.Antecedents with 
         | [name; inst; arg] -> name, inst, arg, List.tail arg.Antecedents 
         | _ -> failwith "typeCheckEntity: Method call is missing required antecedent"
-      match getType ctx inst with 
+      match reduceType (getType ctx inst) with 
       | Type.Any -> Type.Any
       | Type.Object(FindMethod e.Name (args, resTyp)) -> checkMethodCall ctx resTyp args arglist ents
       | Type.Object { Members = members } ->
@@ -298,7 +316,7 @@ and typeCheckEntity ctx (e:Entity) =
         match e.Antecedents with 
         | [ { Kind=EntityKind.CallSite p; Name = name } as v ] -> List.head v.Antecedents, name, p
         | _ -> failwith "typeCheckEntity: Binding should have call site antecedent"
-      match resolveParameterType (getType ctx inst) methName parSpec with
+      match resolveParameterType (reduceType (getType ctx inst)) methName parSpec with
       | Type.Function([tin], _) -> tin
       | _ -> failwith "typeCheckEntity: Expected parameter of function type"
 
@@ -324,29 +342,48 @@ and typeCheckEntity ctx (e:Entity) =
 
 
 /// Perform type applications & evaluate delayed types
-let rec reduceType t = async {
+let rec evaluateDelayedType topLevel (t:Type) = async {
   match t with
-  | Type.App(Type.Forall(vars, t), args) ->
-      if List.length vars <> List.length args then failwith "reduceType: Invalid type application"
-      let t = substituteTypes (Map.ofList (List.zip vars args)) t
-      return! reduceType t 
-
+  | Type.App(t, args) ->
+      let! t = evaluateDelayedType topLevel t 
+      return Type.App(t, args)
+  | Type.Forall(vars, t) ->
+      let! t = evaluateDelayedType topLevel t 
+      return Type.Forall(vars, t)  
+  | Type.Object(obj) when topLevel ->
+      let! members = obj.Members |> Async.Array.map (fun m -> async {
+        match m with
+        | Member.Method(n, args, typ, doc, e) -> 
+            let! args = args |> Async.map (fun (n, opt, t) -> async {
+              let! t = evaluateDelayedType false t
+              return n, opt, t }) 
+            return Member.Method(n, args, typ, doc, e)
+        | prop -> return prop })
+      return Type.Object { obj with Members = members }
   | Type.Delayed(_, f) ->
       let! t = Async.AwaitFuture f
-      return! reduceType t
-  | _ -> return t }
+      return! evaluateDelayedType topLevel t
+  | t -> return t }
 
 
 /// Type check entity & return its type. This first recursively processes
 /// all antecedants to make sure that no antecedant is delayed  
 /// (this way, `getType` can be ordinary synchronouus function)
-let rec typeCheckEntityAsync ctx (e:Entity) = async {
-  for a in e.Antecedents do
-    let! _ = typeCheckEntityAsync ctx a
-    ()
-  let! t = reduceType (getType ctx e)
-  e.Type <- Some t
-  return t }
+let typeCheckEntityAsync ctx (e:Entity) = async {
+  let visited = Dictionary<Symbol, bool>()
+
+  let rec loop e = async {
+    if not (visited.ContainsKey(e.Symbol)) && e.Type.IsNone then
+      visited.[e.Symbol] <- true
+      for a in e.Antecedents do
+        do! loop a 
+      Log.trace("typechecker", "Checking entity '%s' (%O)", e.Name.Name, e.Kind)
+      let! t = evaluateDelayedType true (getType ctx e)
+      Log.trace("typechecker", "Type of entity '%s' (%O) is: %O", e.Name.Name, e.Kind, t)
+      e.Type <- Some t }
+
+  do! loop e
+  return getType ctx e }
 
 
 // ------------------------------------------------------------------------------------------------
@@ -370,14 +407,18 @@ let collectTypeErrors (entity:Entity) =
       for e in e.Antecedents do loop e
       errors.AddRange(e.Errors)
   loop entity
-  errors |> List.ofSeq
+  errors.ToArray()
 
 let typeCheckProgram (globals:Entity list) bound prog = async {
-  let rangeLookup = dict [ for r, e in bound -> e.Symbol, r ]
-  let vars = dict [ for e in globals -> e.Name.Name, e ]
-  let ctx = { Globals = vars; Errors = ResizeArray<_>(); Ranges = rangeLookup }
-  let! _ = typeCheckEntityAsync ctx prog 
-  return () }
+  Log.trace("typechecker", "Type checking program")
+  try
+    let rangeLookup = dict [ for r, e in bound -> e.Symbol, r ]
+    let vars = dict [ for e in globals -> e.Name.Name, e ]
+    let ctx = { Globals = vars; Errors = ResizeArray<_>(); Ranges = rangeLookup }
+    let! _ = typeCheckEntityAsync ctx prog 
+    Log.trace("typechecker", "Completed type checking")
+  with e ->
+    Log.exn("typechecker", "Type checking program failed: %O", e) }
 
 // ------------------------------------------------------------------------------------------------
 // Collecting editors

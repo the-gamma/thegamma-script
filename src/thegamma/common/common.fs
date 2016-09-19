@@ -45,7 +45,7 @@ let isLocalHost() =
 
 let mutable enabledCategories = 
   if not (isLocalHost ()) then set []
-  else set [ "SYSTEM"; "PARSING"; "BINDER"; "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "SERVICE"; "CODEGEN"; "RUNTIME" ]
+  else set [ "SYSTEM"; "PARSING"; "BINDER"; "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "PROVIDERS"; "SERVICE"; "CODEGEN"; "RUNTIME" ]
 
 type Log =
   static member setEnabled(cats) = enabledCategories <- cats
@@ -121,6 +121,7 @@ type Microsoft.FSharp.Control.Async with
         running <- true
         async { try 
                   let! r = op
+                  Log.trace("system", "Future '%s' evaluated to: %O", n, r)
                   res <- Choice2Of3 r                  
                 with e ->
                   Log.exn("system", "Evaluating future failed: %O", e)

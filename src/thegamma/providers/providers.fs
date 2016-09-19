@@ -76,6 +76,7 @@ module FSharpProvider =
           | "int" | "float" -> Type.Primitive PrimitiveType.Number
           | "string" -> Type.Primitive PrimitiveType.String
           | "bool" -> Type.Primitive PrimitiveType.Bool
+          | "unit" -> Type.Primitive PrimitiveType.Unit
           | t -> failwith ("provideFSharpType: Unsupported type: " + t)
       | "function"->
           let t = unbox<FunctionType> t
@@ -116,7 +117,9 @@ module FSharpProvider =
 
       match getTypeParameters exp.typepars with
       | [] -> return Type.Object { Members = mems }
-      | typars -> return Type.Forall(typars, Type.Object { Members = mems }) } |> Async.AsFuture exp.name
+      | typars ->
+          let obj = Type.Object { Members = mems }
+          return Type.Forall(typars, obj) } |> Async.AsFuture exp.name
             
     async {
       let! json = Http.Request("GET", url)
@@ -130,6 +133,10 @@ module FSharpProvider =
                 match chain with
                 | None -> Some(IdentifierExpression(s, None))
                 | Some e -> Some(MemberExpression(e, IdentifierExpression(s, None), false, None)) ) None |> Option.get
+              let ty = 
+                match getTypeParameters exp.typepars with 
+                | [] -> ty
+                | tya -> Type.App(ty, [for v in tya -> Type.Any])
               ProvidedType.GlobalValue(exp.name, e, ty)
             else
               ProvidedType.NamedType(exp.name, getTypeParameters exp.typepars, ty) ] }

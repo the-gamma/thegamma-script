@@ -77,8 +77,8 @@
     <Compile Include="providers/pivot.fs" />
     <Compile Include="codegen.fs" />
     <Compile Include="editors.fs" />
-    <Compile Include="monaco.fs" />
     <Compile Include="services.fs" />
+    <Compile Include="monaco.fs" />
     <Content Include="App.config">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>

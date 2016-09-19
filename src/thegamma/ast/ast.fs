@@ -94,6 +94,7 @@ and [<RequireQualifiedAccess>] PrimitiveType =
   | Number
   | String
   | Bool
+  | Unit
 
 and TypeVar = string
 
@@ -164,7 +165,7 @@ type [<RequireQualifiedAccess>] EntityKind =
   | CallSite of Choice<string, int>
   /// Named param in a call site; Antecedant is the expression assigned to it
   | NamedParam
-  /// Named member (property or call); Antecedent is the root
+  /// Named member (property or call); Antecedent is the instance (or Root if no instance)
   | NamedMember
   /// Call or property access; Antecedents are `NamedMember`, followed by a scope 
   /// (for global calls) or instance expression entity (for instance calls), and

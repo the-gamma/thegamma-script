@@ -14,14 +14,19 @@ open NUnit.Framework
 // Helper functions for type-checking code & producing fake types
 // ------------------------------------------------------------------------------------------------
 
+// Helpers for generating object types
 let noEmitter = { Emit = fun _ -> failwith "mock emitter" }
 let prop n t = Member.Property(n, t, None, Documentation.None, noEmitter)
 let meth n t a = Member.Method(n, a, t, Documentation.None, noEmitter)
-let obj membrs = Type.Object { Members = Array.ofList membrs }
+let obj membrs = Type.Object { Members = Array.ofList membrs; }
+let delay n f = Type.Delayed(n, Async.AsFuture n (async { return f () }))
+
+// Helpers for generating primitive types
 let str = Type.Primitive PrimitiveType.String
 let num = Type.Primitive PrimitiveType.Number
 let bool = Type.Primitive PrimitiveType.Bool
-let delay n f = Type.Delayed(n, Async.AsFuture n (async { return f () }))
+
+// Helper for generating other types
 let forall n t = Type.Forall([n], t)
 let apply t f = Type.App(f, [t])
 let par n = Type.Parameter(n)
@@ -31,6 +36,8 @@ let func t1 t2 = Type.Function([t1], t2)
 let findEntity name kind (entities:(Range * Entity)[]) =
   entities |> Seq.find (fun (_, e) -> e.Kind = kind && e.Name.Name = name)
 
+/// Parse and type check given code, find the specified entity & return its type
+/// together with all the errors produced by type checking of the program
 let check (code:string) ename ekind vars = 
   let ctx = Binder.createContext("script")
   let code = code.Replace("\n    ", "\n")
@@ -103,10 +110,21 @@ let rec seriesObj () =
 and series t = apply t (forall "a" (delay "series" (fun () ->
   seriesObj () )))
 
+let rec tableObj () =
+  obj [
+    meth "make" (forall "b" (table (par "b"))) [
+      "data", false, series (par "b") ]
+    prop "data" (series (par "a"))
+  ]
+
+and table t = apply t (forall "a" (delay "table" (fun () ->
+  tableObj () )))
+
 let vars = 
-  [ "series", substituteTypes (Map.ofSeq ["a", Type.Any]) (seriesObj ()) 
-    "numbers", substituteTypes (Map.ofSeq ["a", Type.Primitive PrimitiveType.Number]) (seriesObj ()) 
-    "test", testObj () ] 
+  [ "series", series Type.Any
+    "numbers", series (Type.Primitive PrimitiveType.Number)
+    "table", table (Type.Any)
+    "test", testObj () ]
 
 
 // ------------------------------------------------------------------------------------------------
@@ -146,6 +164,15 @@ let ``Type check method call and infer result type from argument`` () =
   let code = """
     let res = series.make([1,2,3])
       .add(4).sort(reverse=true).head
+  """
+  let actual = check code "res" EntityKind.Variable vars
+  actual |> assertType (Type.Primitive PrimitiveType.Number)
+  actual |> assertErrors []
+
+[<Test>]
+let ``Type check method call and infer result type from object argument`` () =
+  let code = """
+    let res = table.make(numbers).data.head
   """
   let actual = check code "res" EntityKind.Variable vars
   actual |> assertType (Type.Primitive PrimitiveType.Number)

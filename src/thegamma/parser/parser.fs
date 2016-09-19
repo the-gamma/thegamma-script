@@ -228,8 +228,12 @@ let makeCallOrProp optInst prevId prevArgs =
       node fullRng (Expr.Call(optInst, prevId, prevArgs))
 
 /// Property access or method call after '.' in a nested block
-let rec parseChain optInst prevId prevArgs ctx = 
+let rec parseChain dotRng optInst prevId prevArgs ctx = 
   let inst = makeCallOrProp optInst prevId prevArgs
+  let emptyMember = 
+    let rng = { Start=dotRng.End + 1; End=dotRng.End + 1 }
+    node rng (Expr.Property(inst, node rng { Name = "" }))
+
   match nestedToken ctx with
   | Some (Identifier id) ->
       next ctx
@@ -239,11 +243,11 @@ let rec parseChain optInst prevId prevArgs ctx =
       // Error: Expected identifier (after '.') but there was some other token
       // at the correct level of nesting, so skip it & try prsing next thing
       Errors.Parser.unexpectedTokenAfterDot t.Range t.Token |> addError ctx 
-      if t.Token = TokenKind.EndOfFile then inst
+      if t.Token = TokenKind.EndOfFile then emptyMember
       else 
         next ctx
         use _silent = usingSilentMode ctx
-        parseChain optInst prevId prevArgs ctx
+        parseChain dotRng optInst prevId prevArgs ctx
       
   | None ->
   match token ctx with
@@ -259,14 +263,14 @@ let rec parseChain optInst prevId prevArgs ctx =
           next ctx
           ctx.IndentStack <- (ctx.IndentCurrent, si)::stack
           parseMember (Some inst) id ctx
-      | _ -> inst
+      | _ -> emptyMember
 
   | _, t ->      
       // Error: Expected more after '.' but the nested scope ends here
       // Just return what we got so far & end the current chain
       let rng = lastCallOrPropertyRange inst
       Errors.Parser.unexpectedScopeEndAfterDot t.Range rng t.Token |> addError ctx 
-      inst
+      emptyMember
 
 
 /// Helper used by 'parseMember' - parse '.' or '(...)' after ident in a chain
@@ -281,16 +285,16 @@ and parseDotOrLParen optInst id ctx whiteAndTok =
       
       // Call can be followed by '.' or end of call chain
       match nestedToken ctx with
-      | Some(white, { Token = TokenKind.Dot }) ->
+      | Some(white, { Token = TokenKind.Dot; Range = dotRng }) ->
           next ctx
-          Some(parseChain optInst id (Some args) ctx)
+          Some(parseChain dotRng optInst id (Some args) ctx)
       | _ ->
           Some(makeCallOrProp optInst id (Some args))
 
-  | white, { Token = TokenKind.Dot } ->
+  | white, { Token = TokenKind.Dot; Range = dotRng } ->
       next ctx
       let optInst = optInst |> Option.map (whiteAfter white)
-      Some(parseChain optInst id None ctx)
+      Some(parseChain dotRng optInst id None ctx)
 
   | _ -> None
 

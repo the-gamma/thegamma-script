@@ -122,6 +122,7 @@ let rec formatType = function
   | Type.Primitive PrimitiveType.Bool -> "bool"
   | Type.Primitive PrimitiveType.Number -> "number"
   | Type.Primitive PrimitiveType.String -> "string"
+  | Type.Primitive PrimitiveType.Unit -> "unit"
   | Type.Object { Members = mem } ->  
       let mems = mem |> Seq.truncate 5 |> Seq.map (fun m -> m.Name) |> String.concat ", "
       "{ " + if mem.Length > 5 then mems + ", ..." else mems + " }"
@@ -138,6 +139,7 @@ let formatTypeInfo = function
   | Type.Primitive PrimitiveType.Bool -> "boolean"
   | Type.Primitive PrimitiveType.Number -> "number"
   | Type.Primitive PrimitiveType.String -> "string"
+  | Type.Primitive PrimitiveType.Unit -> "unit"
   | Type.Object _ -> "object type"
   | Type.Function _ -> "function type"
   | Type.List _ -> "list type"
