@@ -31,11 +31,17 @@ let rec memberNamesEqual m1 m2 =
   | Member.Method(name=n1), Member.Method(name=n2) -> n1 = n2 
   | _ -> false
 
+let (|BoundTypeVariables|) t = 
+  match t with 
+  | Type.Forall(vars, _) -> vars, t
+  | _ -> [], t
+
 let rec membersEqual ctx m1 m2 =
   match m1, m2 with 
   | Member.Property(n1, t1, s1, d1, _), Member.Property(n2, t2, s2, d2, _) -> 
       n1 = n2 && s1 = s2 && d1 = d2 && typesEqualAux ctx t1 t2
-  | Member.Method(n1, a1, r1, d1, _), Member.Method(n2, a2, r2, d2, _) -> 
+  | Member.Method(n1, a1, BoundTypeVariables (v1, r1), d1, _), Member.Method(n2, a2, BoundTypeVariables (v2, r2), d2, _) -> 
+      let ctx = { ctx with EquivalentVars = List.append (List.zip v1 v2) ctx.EquivalentVars }
       n1 = n2 && d1 = d2 && typesEqualAux ctx r1 r2 && 
         listsEqual a1 a2 (fun (s1, b1, t1) (s2, b2, t2) -> 
           s1 = s2 && b1 = b2 && typesEqualAux ctx t1 t2)
@@ -61,11 +67,6 @@ and typesEqualAux ctx t1 t2 =
 
 /// Returns true when closed types have equivalent structure up to renaming of local type variables
 let typesEqual = typesEqualAux { EquivalentVars = [] }
-
-let (|BoundTypeVariables|) t = 
-  match t with 
-  | Type.Forall(vars, _) -> vars, t
-  | _ -> [], t
 
 let rec substituteMembers assigns members = 
   members |> Array.map (function
@@ -360,6 +361,13 @@ let rec evaluateDelayedType topLevel (t:Type) = async {
             return Member.Method(n, args, typ, doc, e)
         | prop -> return prop })
       return Type.Object { obj with Members = members }
+  | Type.Function(t1s, t2) ->
+      let! t2 = evaluateDelayedType topLevel t2
+      let! t1s = Async.map (evaluateDelayedType topLevel) t1s
+      return Type.Function(t1s, t2)
+  | Type.List(t) ->
+      let! t = evaluateDelayedType topLevel t
+      return Type.List(t)
   | Type.Delayed(_, f) ->
       let! t = Async.AwaitFuture f
       return! evaluateDelayedType topLevel t

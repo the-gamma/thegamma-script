@@ -175,13 +175,6 @@ open TheGamma.TypeChecker
 let replace (rng:Range) newValue (text:string) = 
   text.Substring(0, rng.Start) + newValue + text.Substring(rng.End+1)
 
-let needsEscaping (s:string) = 
-  (s.[0] >= '0' && s.[0] <= '9') ||
-  (s.ToCharArray() |> Array.exists (fun c -> not ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) ))
-
-let escapeIdent s = 
-  if needsEscaping s then "'" + s + "'" else s
-
 let replaceNameWithValue (text:string) (n:Node<Name>) value =
   let newValue = escapeIdent value
   replace n.Range newValue text
@@ -194,10 +187,10 @@ let removeRangeWithPrecendingDot (text:string) (rng:Range) =
   // Once we have comments, we need to skip over them too
   let mutable start = rng.Start
   while start > 0 && text.[start] <> '.'  do start <- start - 1
-  text.Substring(0, start) + text.Substring(rng.End)
+  text.Substring(0, start) + text.Substring(rng.End+1)
   
 let insertDotTextAfter (origText:string) (rng:Range) ins =
-  origText.Substring(0, rng.End) + "." + escapeIdent ins + origText.Substring(rng.End)
+  origText.Substring(0, rng.End+1) + "." + escapeIdent ins + origText.Substring(rng.End+1)
 
 let renderDoc = function
   | Documentation.Text(s) -> h?h3 [] [ text s ]
@@ -246,7 +239,7 @@ let renderEditor typeCheck (setValue:string -> string -> string -> unit) origTex
                   yield text n.Node.Name 
                   yield text " "
                   yield h?button [
-                    //if dis then yield "disabled" => "disabled"
+                    if dis then yield "disabled" => "disabled"
                     yield "click" =!> fun el e -> setValue "list-delete" n.Node.Name edit ] 
                     [ h?i ["class" => if dis then "fa fa-ban" else "fa fa-times" ] [] ]
                 ]

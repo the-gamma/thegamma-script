@@ -16,6 +16,23 @@ open NUnit.Framework
 /// Type-safe assertion
 let equal (expected:'T) (actual:'T) = Assert.AreEqual(expected, actual)
 
+/// Assert that ranges of all names in parsed tree are correct
+let assertNamesMatch (code:string, cmds, _) = 
+  let names = ResizeArray<_>()
+  let rec collectIdents (e:Node<Expr>) = 
+    match e.Node with
+    | ExprNode(es, ns) -> 
+        names.AddRange(ns)
+        for e in es do collectIdents e
+    | _ -> ()
+  for c in cmds do
+    match c.Node with
+    | Command.Expr(e) -> collectIdents e
+    | Command.Let(n, e) -> names.Add(n); collectIdents e
+  for n in names do
+    equal (Ast.escapeIdent n.Node.Name) 
+      (code.Substring(n.Range.Start, n.Range.End - n.Range.Start + 1))
+
 /// Assert that result contains given errors
 let assertErrors expectErrors ((code:string), cmds, errs) = 
   equal (List.length expectErrors) (List.length errs)
@@ -498,3 +515,27 @@ let ``Report error when function is missing arrow``() =
     foo(fun x 1 + 2)"""
   actual |> assertErrors [218, "1"]
   actual |> assertSubExpr (isFun "x" (hasSubExpr (isVal 2.0)))
+
+// --------------------------------------------------------------------------------------
+// TESTS: Explicit functions
+// --------------------------------------------------------------------------------------
+
+let ``Ranges of identifiers in Olympic sample are correct`` = 
+  let actual = parse """
+    let phelp =
+      olympics.'by athlete'.'United States'.'Michael Phelps'.data
+        .'group data'.'by Athlete'.'sum Gold'.then
+        .'get series'.'with key Athlete'.'and value Gold'
+
+    let data =
+      olympics.data
+        .'group data'.'by Team'.'sum Gold'.then
+        .'sort data'.'by Gold descending'.'and by Team'.then
+        .paging.skip(43).take(10)
+        .'get series'.'with key Team'.'and value Gold'
+
+    chart.columns([data, phelp], ["#F4C300","#3CB3EC"])
+      .legend(position="none")
+  """
+  actual |> assertErrors []
+  actual |> assertNamesMatch 

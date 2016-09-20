@@ -8,6 +8,15 @@ let node rng node =
     Node = node
     Range = rng }
 
+/// Does an identifier need escaping?
+let needsEscaping (s:string) = 
+  (s.[0] >= '0' && s.[0] <= '9') ||
+  (s.ToCharArray() |> Array.exists (fun c -> not ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) ))
+
+/// Escape identifier if it needs escaping
+let escapeIdent s = 
+  if needsEscaping s then "'" + s + "'" else s
+
 /// Union ranges, assuming Start <= End for each of them
 let unionRanges r1 r2 =
   { Start = min r1.Start r2.Start; End = max r1.End r2.End }
