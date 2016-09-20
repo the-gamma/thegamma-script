@@ -102,10 +102,9 @@ module FSharpProvider =
             let m = unbox<MethodMember> m
             let args = [ for a in m.arguments -> a.name, a.optional, mapType a.``type`` ]
             let emitter = { Emit = fun (inst, args) ->
-              // TODO: match arguments based on name or something
               CallExpression
                 ( MemberExpression(inst, IdentifierExpression(m.name, None), false, None), 
-                  List.map snd args, None) }
+                  args, None) }
             
             let typ = 
               match getTypeParameters m.typepars with
@@ -222,10 +221,10 @@ module RestProvider =
   let propAccess trace = 
     { Emit = fun (inst, _args) -> addTraceCall inst trace }
 
-  let methCall trace =
+  let methCall argNames trace =
     { Emit = fun (inst, args) ->
         let withTrace = addTraceCall inst trace
-        args |> Seq.fold (fun inst (name, value) ->
+        Seq.zip argNames args |> Seq.fold (fun inst (name, value) ->
           let trace = BinaryExpression(BinaryPlus, StringLiteral(name + "=", None), value, None)
           let mem = MemberExpression(inst, IdentifierExpression("addTrace", None), false, None)
           CallExpression(mem, [trace], None) ) withTrace }
@@ -261,7 +260,7 @@ module RestProvider =
         typ, 
         fun d -> 
           ident("_series")?series?create /@/ 
-            [ ident("_restruntime")?convertTupleSequence /@/ [func "v" e1; func "v" e2; d] 
+            [ ident("_runtime")?convertTupleSequence /@/ [func "v" e1; func "v" e2; d] 
               str "key"; str "value"; str "" ] // TODO: We don't have any info - that sucks
     | Generic("seq", [|ty|]) ->
         let elTy, emitter = getTypeAndEmitter lookupNamed ty
@@ -270,7 +269,7 @@ module RestProvider =
         // This is over async, but the child `emitter` is not over async
         fun d -> 
           ident("_series")?series?ordinal /@/ 
-            [ ident("_restruntime")?convertSequence /@/ [func "v" emitter; d] 
+            [ ident("_runtime")?convertSequence /@/ [func "v" emitter; d] 
               str "key"; str "value"; str "" ]
     | Record(membs) ->
         let membs = 
@@ -313,7 +312,7 @@ module RestProvider =
                       | Some parameters ->
                           let args = [ for p in parameters -> p.name, false, Type.Primitive (mapParamType p.``type``)] // TODO: Check this is OK type
                           let argNames = [ for p in parameters -> p.name ]
-                          Member.Method(m.name, args, retTyp, parseDoc m.documentation, methCall m.trace)
+                          Member.Method(m.name, args, retTyp, parseDoc m.documentation, methCall argNames m.trace)
                       | None -> 
                           Member.Property(m.name, retTyp, schema, parseDoc m.documentation, propAccess m.trace) 
                   | "primitive" ->  
@@ -327,7 +326,7 @@ module RestProvider =
       ty
 
   let rec provideRestType lookupNamed name root cookies = 
-    let ctx = ident("_restruntime")?RuntimeContext
+    let ctx = ident("_runtime")?RuntimeContext
     ProvidedType.GlobalValue
       ( name, 
         NewExpression(ctx, [str root; str cookies; str ""], None),

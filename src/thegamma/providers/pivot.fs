@@ -160,7 +160,7 @@ let propertyEmitter =
 
 let makeMethodEmitter callid pars =
   { Emit = fun (this, args) -> 
-      let args = arr [ for _, v in args -> v ]
+      let args = arr [ for v in args -> v ]
       this?addCall /@/ [str callid; args] }
 
 let makeDataEmitter isSeries tfs = 
@@ -389,7 +389,7 @@ and makePivotType ctx tfs =
 let providePivotType root name lookupNamed fields =
   let fields = [ for f, t in fields -> { Name = f; Type = t }]
   let typ = makePivotType { Fields = fields; InputFields = fields; LookupNamed = lookupNamed; Root = root } []
-  let ctx = ident("_restruntime")?PivotContext
+  let ctx = ident("_runtime")?PivotContext
   ProvidedType.GlobalValue
     ( name, 
       NewExpression(ctx, [str (concatUrl root "data"); ArrayExpression([], None)], None), typ)

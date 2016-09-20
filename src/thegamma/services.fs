@@ -22,8 +22,7 @@ type EditorService(article, checker:string -> Async<bool * (Range * Entity)[] * 
     let! _, _, prg = checker text 
         
     Log.trace("service", "Collecting editors")
-    //let! eds = Async.collect collectCmdEditors prg.Body 
-    let eds = []
+    let! eds = Async.collect collectCmdEditors prg.Body.Node
     let eds = eds |> List.mapi (fun i v -> i, v)
     let filteredEds = 
       eds 

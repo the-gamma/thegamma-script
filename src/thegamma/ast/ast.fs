@@ -71,7 +71,7 @@ type Token =
 // ------------------------------------------------------------------------------------------------
 
 type Emitter = 
-  { Emit : Babel.Expression * (string * Babel.Expression) list -> Babel.Expression }
+  { Emit : Babel.Expression * Babel.Expression list -> Babel.Expression }
 
 type Schema = 
   { Type : string; JSON : obj }

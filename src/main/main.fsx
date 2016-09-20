@@ -142,22 +142,21 @@ let cannotShareSnippet () = failwith "JS"
 
 let callShowMethod outId cmd = async {
   match cmd.Node with
-  | Command.Expr(e) ->
-      (*let! m = getObjectMembers e.Type
-      match m with 
-      | ObjectMembers.Members(members) ->
+  | Command.Expr({ Entity = Some { Type = Some typ } } as inst) ->
+      match TypeChecker.reduceType typ with
+      | Type.Object { Members = members } ->
           let hasShow = members |> Array.exists (function 
-            | Member.Method("show", [], [_, _, Type.Primitive "string"], _, _, _) -> true
+            | Member.Method(name="show"; arguments=[_, _, Type.Primitive PrimitiveType.String]) -> true
             | _ -> false)
           if hasShow then
-            let rng = { Range.Start = e.Range.End; End = e.Range.End }
-            let outExpr = { Expr = ExprKind.String(outId); Range = rng; Type = Type.Primitive("string") }
+            let rng = { Range.Start = cmd.Range.End; End = cmd.Range.End }
+            let outExpr = Ast.node rng (Expr.String(outId))
             let args = [{ Argument.Name = None; Argument.Value = outExpr }]
-            let newE = { e with Expr = ExprKind.Call(e, { Name = "show"; Range = rng }, args) }
-            return { cmd with Command = CommandKind.Expr(newE) }
+            let expr = Ast.node rng (Expr.Call(Some inst, Ast.node rng { Name = "show" }, Ast.node rng args))
+            return Ast.node cmd.Range (Command.Expr(expr))
           else 
             return cmd
-      | _ -> *)return cmd
+      | _ -> return cmd
   | _ -> return cmd }
 
 let renderErrors article el (source, errors) = 
@@ -264,9 +263,9 @@ let setupEditor (parent:HTMLElement) =
 
   showOptionsBtn |> FsOption.iter (fun btn -> 
     editorService.EditorsUpdated.Add (fun eds ->
-      [] //eds
-      //|> List.sortBy (fun ed -> ed.Range.Start)
-      //|> List.map (Editors.renderEditor checkingService.IsWellTyped setText (getText())) 
+      eds
+      |> List.sortBy (fun ed -> ed.Range.Start)
+      |> List.map (Editors.renderEditor checkingService.IsWellTyped setText (getText())) 
       |> h?div ["class" => "ia-editor-panel"]
       |> renderTo optionsEl )
   

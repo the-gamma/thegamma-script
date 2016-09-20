@@ -10,19 +10,19 @@ open TheGamma.Common
 // ------------------------------------------------------------------------------------------------
 // Finding editor components in code
 // ------------------------------------------------------------------------------------------------
-(*
+
 type Property = 
   | Property of string * Schema option * Type
 
 type Editor = 
-  | SingleChoice of Documentation * Name * Property[]
-  | NestedChoice of Documentation * Documentation * Name * Name * (Property * Property[])[]
-  | CreateList of Documentation * Name * Name[] * Property[]
+  | SingleChoice of Documentation * Node<Name> * Property[]
+  | NestedChoice of Documentation * Documentation * Node<Name> * Node<Name> * (Property * Property[])[]
+  | CreateList of Documentation * Node<Name> * Node<Name>[] * Property[]
   member x.Range = 
     match x with
     | SingleChoice(_, n, _) -> n.Range
-    | NestedChoice(_, _, n1, n2, _) -> Ranges.unionRanges n1.Range n2.Range
-    | CreateList(_, n, n2, _) -> n2 |> Array.fold (fun r n -> Ranges.unionRanges r n.Range) { n.Range with Start = n.Range.End }
+    | NestedChoice(_, _, n1, n2, _) -> Ast.unionRanges n1.Range n2.Range
+    | CreateList(_, n, n2, _) -> n2 |> Array.fold (fun r n -> Ast.unionRanges r n.Range) { n.Range with Start = n.Range.End }
 
 let rec getMembers typ = async {
   match typ with
@@ -51,9 +51,9 @@ let dominant all subset =
   let nsub = Seq.length subset
   nsub >= 2 && nsub >= nall * 2 / 3
 
-let chooseableProperty equalTyp (name:Name) typ = async {
+let chooseableProperty equalTyp (name:Node<Name>) typ = async {
   let! members = getMembers typ
-  match getProperty name members with
+  match getProperty name.Node members with
   | Some(Some propSchema, propTyp, _) ->
       let alts = members |> filterProperties (function
         | _, Some s, t -> s.Type = propSchema.Type && (not equalTyp || TypeChecker.typesEqual t propTyp)
@@ -66,12 +66,12 @@ let chooseableProperty equalTyp (name:Name) typ = async {
 /// Given `a.b.c`, it will be called with [c], [b;c], [a;b;c].
 let pickChainSuffixes f expr = 
   let rec loop res suffix expr = async {
-    match expr.Expr with
-    | ExprKind.Property(inst, name) ->
-        let! members = getMembers inst.Type
-        match getProperty name members with
+    match expr.Node with
+    | Expr.Property(inst, name) ->
+        let! members = getMembers inst.Entity.Value.Type.Value
+        match getProperty name.Node members with
         | Some(propSch, propTy, propDoc) ->
-            let suffix = (inst.Type, name, propSch, propTy, propDoc)::suffix
+            let suffix = (inst.Entity.Value.Type.Value, name, propSch, propTy, propDoc)::suffix
             let! picked = f suffix
             match picked with 
             | Some newRes -> return! loop (newRes::res) suffix inst
@@ -95,7 +95,7 @@ let collectNestedChoiceEditors =
     match chain with
     | (catParentTy, catName, catSch, catTy, catDoc)::
           (valParentTy, valName, (Some valSch), valTy, valDoc)::_ ->
-        Log.trace("editors", "checking %s.%s", catName.Name, valName.Name)
+        Log.trace("editors", "checking %s.%s", catName.Node.Name, valName.Node.Name)
         let! catp = chooseableProperty false catName catParentTy
         let! valp = chooseableProperty true valName valParentTy
         match catp, valp with
@@ -135,7 +135,7 @@ let collectItemListEditors =
         /// Collect all AddActions in the rest of the chain and return
         /// the added options together with the type of the last member 
         let rec collectAdds added lastTy = function
-          | (addParentTy, addName, Some addSch, addTy, _)::addActions when 
+          | (addParentTy, addName, Some (addSch:Schema), addTy, _)::addActions when 
                 addSch.Type = "AddAction" &&
                 listName = (unbox<AddActionSchema> addSch.JSON).targetCollection.name ->
               collectAdds (addName::added) addTy addActions
@@ -151,10 +151,10 @@ let collectItemListEditors =
         return Some(CreateList(catDoc, caName, Array.ofList adds, availableAdds))
     | _ -> return None })
 
-let collectCmdEditors (cmd:Command<_>) = async {
-  match cmd.Command with 
-  | CommandKind.Let(_, e)
-  | CommandKind.Expr e -> 
+let collectCmdEditors (cmd:Node<Command>) = async {
+  match cmd.Node with 
+  | Command.Let(_, e)
+  | Command.Expr e -> 
       Log.trace("editors", "single choice")
       let! single = collectSingleChoiceEditors e
       Log.trace("editors", "item list")
@@ -173,14 +173,21 @@ open TheGamma.Html
 open TheGamma.TypeChecker
 
 let replace (rng:Range) newValue (text:string) = 
-  text.Substring(0, rng.Start) + newValue + text.Substring(rng.End)
+  text.Substring(0, rng.Start) + newValue + text.Substring(rng.End+1)
 
-let replaceNameWithValue (text:string) (n:Name) value =
+let needsEscaping (s:string) = 
+  (s.[0] >= '0' && s.[0] <= '9') ||
+  (s.ToCharArray() |> Array.exists (fun c -> not ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) ))
+
+let escapeIdent s = 
+  if needsEscaping s then "'" + s + "'" else s
+
+let replaceNameWithValue (text:string) (n:Node<Name>) value =
   let newValue = escapeIdent value
   replace n.Range newValue text
 
 /// Replace the second string first, assuming it is later in the text
-let replaceTwoNamesWithValues (text:string) (n1:Name, n2:Name) (s1, s2) =
+let replaceTwoNamesWithValues (text:string) (n1:Node<Name>, n2:Node<Name>) (s1, s2) =
   replace n1.Range (escapeIdent s1) (replace n2.Range (escapeIdent s2) text) 
   
 let removeRangeWithPrecendingDot (text:string) (rng:Range) = 
@@ -216,7 +223,7 @@ let renderEditor typeCheck (setValue:string -> string -> string -> unit) origTex
                 let value = (unbox<Browser.HTMLSelectElement> el).value
                 replaceNameWithValue origText n value |> setValue "single" value ] 
             [ for (Property.Property(name, _, _)) in ms ->
-                let sel = if name = n.Name then ["selected" => "selected"] else []
+                let sel = if name = n.Node.Name then ["selected" => "selected"] else []
                 h?option sel [ text name ] ]
         ]
       ]
@@ -226,7 +233,7 @@ let renderEditor typeCheck (setValue:string -> string -> string -> unit) origTex
       
       edits |> Array.iter (fun (n, edited) -> 
         async { let! safe = typeCheck edited
-                if safe then trigger n.Name } |> Async.StartImmediate)
+                if safe then trigger n.Node.Name } |> Async.StartImmediate)
       
       render <| fun safe ->
         h?div ["class" => "ed-list"] [
@@ -235,12 +242,12 @@ let renderEditor typeCheck (setValue:string -> string -> string -> unit) origTex
             h?ul [] [
               for n, edit in edits -> 
                 h?li [] [ 
-                  let dis = not (Set.contains n.Name safe)
-                  yield text n.Name 
+                  let dis = not (Set.contains n.Node.Name safe)
+                  yield text n.Node.Name 
                   yield text " "
                   yield h?button [
-                    if dis then yield "disabled" => "disabled"
-                    yield "click" =!> fun el e -> setValue "list-delete" n.Name edit ] 
+                    //if dis then yield "disabled" => "disabled"
+                    yield "click" =!> fun el e -> setValue "list-delete" n.Node.Name edit ] 
                     [ h?i ["class" => if dis then "fa fa-ban" else "fa fa-times" ] [] ]
                 ]
             ]
@@ -259,7 +266,7 @@ let renderEditor typeCheck (setValue:string -> string -> string -> unit) origTex
         ]
 
   | NestedChoice(doc1, doc2, n1, n2, props) ->
-      let update, render = h.part (n1.Name, n2.Name) (fun _ n -> n)
+      let update, render = h.part (n1.Node.Name, n2.Node.Name) (fun _ n -> n)
       render <| fun (name1, name2) ->
         let selected = 
           props 
@@ -289,4 +296,3 @@ let renderEditor typeCheck (setValue:string -> string -> string -> unit) origTex
                   h?option sel [ text name ] ]
           ]
         ]
-        *)

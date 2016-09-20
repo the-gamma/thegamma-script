@@ -22,15 +22,16 @@ let rangeToLoc ctx rng =
   Some { start = offsetToLocation 1 rng.Start ctx.LineLengths 
          ``end`` = offsetToLocation 1 rng.Start ctx.LineLengths }
 
-let rec getEmitter name typ = async {
-  match typ with
+let rec getEmitterAndParams name typ = 
+  match TypeChecker.reduceType typ with
   | Type.Object(o) -> 
-      return o.Members |> Seq.pick (function 
-        Member.Method(name=n; emitter=e) | Member.Property(name=n; emitter=e) when n=name -> Some e | _ -> None) 
-  | Type.Delayed(_, f) ->
-      let! typ = Async.AwaitFuture f
-      return! getEmitter name typ 
-  | _ -> return failwith "getEmitter: Not an object" }
+      o.Members |> Seq.pick (function 
+        | Member.Method(name=n; arguments=args; emitter=e) when n = name -> Some(e, args)
+        | Member.Property(name=n; emitter=e) when n=name -> Some(e, []) 
+        | _ -> None) 
+  | t -> 
+    Log.exn("codegen", "getEmitterAndParams: Not an object %O", t)
+    failwith "getEmitterAndParams: Not an object" 
 
 let rec compileExpression ctx (expr:Node<Expr>) = 
   match expr.Node with 
@@ -58,24 +59,29 @@ let rec compileExpression ctx (expr:Node<Expr>) =
         | Operator.Power -> failwith "compileExpression: Power is not a binary operation"
       BinaryExpression(op, l, r, rangeToLoc ctx expr.Range)
       
-  | Expr.Call(inst, n, args) ->
-      Log.trace("codegen", "Entity: %O, args: %O", inst, args) 
-      failwith "compileExpression: Call"
-      (*
-      let! emitter = getEmitter n.Name inst.Type
-      let! inst = compileExpression ctx inst
-      let! args = args.Node |> Array.ofList |> Async.map (fun a -> async {
-        let! r = compileExpression ctx a.Value
-        (match a.Name with Some n -> n.Name | _ -> ""), r })          // TODO: Names ...???
-      emitter.Emit(inst, args)
-      *)
+  | Expr.Call(Some inst, n, args) ->
+      // Split arguments between position & name based
+      let compiledArgs = args.Node |> List.map (fun a -> a.Name, compileExpression ctx a.Value)
+      let positionArgs = compiledArgs |> Seq.takeWhile (fun (n, _) -> n.IsNone) |> Seq.map snd |> Array.ofSeq
+      let namedArgs = compiledArgs |> Seq.choose (function (Some n, a) -> Some(n.Node.Name, a) | _ -> None) |> dict
+
+      // Compile the instance
+      let emitter, pars = getEmitterAndParams n.Node.Name inst.Entity.Value.Type.Value
+      let inst = compileExpression ctx inst
+      let pars = pars |> List.mapi (fun i (name, _, _) ->
+        if i < positionArgs.Length then positionArgs.[i]
+        elif namedArgs.ContainsKey name then namedArgs.[name]
+        else NullLiteral(rangeToLoc ctx args.Range))
+      emitter.Emit(inst, pars)
+
+  | Expr.Call(None, n, args) ->
+      failwith "compileExpression: Call without instance is not supported"
+
   | Expr.Property(inst, n) ->
-      failwith "compileExpression: Property"
-      (*
-      let! emitter = getEmitter n.Name inst.Type
-      let! inst = compileExpression ctx inst
+      let emitter, _ = getEmitterAndParams n.Node.Name inst.Entity.Value.Type.Value
+      let inst = compileExpression ctx inst
       emitter.Emit(inst, [])
-      *)
+      
   //| Expr.Null ->
     //  NullLiteral(rangeToLoc ctx expr.Range)
   | Expr.Number(n) ->
