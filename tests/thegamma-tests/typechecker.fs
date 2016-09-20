@@ -33,12 +33,12 @@ let par n = Type.Parameter(n)
 let list t = Type.List(t)
 let func t1 t2 = Type.Function([t1], t2)
 
-let findEntity name kind (entities:(Range * Entity)[]) =
-  entities |> Seq.find (fun (_, e) -> e.Kind = kind && e.Name.Name = name)
+// Find variable entity
+let isVariable name = function { Kind = EntityKind.Variable(n, _) } when n.Name = name -> true | _ -> false
 
 /// Parse and type check given code, find the specified entity & return its type
 /// together with all the errors produced by type checking of the program
-let check (code:string) ename ekind vars = 
+let check (code:string) cond vars = 
   let ctx = Binder.createContext("script")
   let code = code.Replace("\n    ", "\n")
   let prog, _ = code |> Parser.parseProgram
@@ -48,7 +48,7 @@ let check (code:string) ename ekind vars =
   async { do! TypeChecker.typeCheckProgram globals entities prog
           completed <- true } |> Async.StartImmediate
   if not completed then failwith "Asynchronosu operation did not complete"
-  let _, ent = entities |> findEntity ename ekind
+  let _, ent = entities |> Seq.find (snd >> cond)
   let errors = TypeChecker.collectTypeErrors prog
   ent.Type.Value,
   [ for e in errors -> e.Number, code.Substring(e.Range.Start, e.Range.End - e.Range.Start + 1) ]
@@ -141,7 +141,7 @@ let ``Type check chain consisting of property accesses`` () =
         .three.two.one.then.
       'get the data'
     res"""
-  let actual = check code "res" EntityKind.Variable vars
+  let actual = check code (isVariable "res") vars
   actual |> assertType (Type.Primitive PrimitiveType.Number)
   actual |> assertErrors []
 
@@ -155,7 +155,7 @@ let ``Report errors for list with elements of mismatching types`` () =
       test.'group data'.three.then,
       "evil" ]
     """
-  let actual = check code "res" EntityKind.Variable vars
+  let actual = check code (isVariable "res") vars
   actual |> assertType (Type.List (Type.Primitive PrimitiveType.Number))
   actual |> assertErrors [306, "test.'group data'.three.then"; 306, "\"evil\"" ]
 
@@ -165,7 +165,7 @@ let ``Type check method call and infer result type from argument`` () =
     let res = series.make([1,2,3])
       .add(4).sort(reverse=true).head
   """
-  let actual = check code "res" EntityKind.Variable vars
+  let actual = check code (isVariable "res") vars
   actual |> assertType (Type.Primitive PrimitiveType.Number)
   actual |> assertErrors []
 
@@ -174,7 +174,7 @@ let ``Type check method call and infer result type from object argument`` () =
   let code = """
     let res = table.make(numbers).data.head
   """
-  let actual = check code "res" EntityKind.Variable vars
+  let actual = check code (isVariable "res") vars
   actual |> assertType (Type.Primitive PrimitiveType.Number)
   actual |> assertErrors []
 
@@ -183,26 +183,26 @@ let ``Type check method call with function as an argument`` () =
   let code = """
     let res = series.make([1,2,3]).map(fun x -> true).head
   """
-  let actual = check code "res" EntityKind.Variable vars
+  let actual = check code (isVariable "res") vars
   actual |> assertType (Type.Primitive PrimitiveType.Bool)
   actual |> assertErrors []
 
 [<Test>]
 let ``Report error when property not found`` () = 
   let code = "let res = test.yadda"
-  let actual = check code "res" EntityKind.Variable vars
+  let actual = check code (isVariable "res") vars
   actual |> assertErrors [303, "yadda"]
 
 [<Test>]
 let ``Report error when method not found`` () = 
   let code = "let res = test.yadda()"
-  let actual = check code "res" EntityKind.Variable vars
+  let actual = check code (isVariable "res") vars
   actual |> assertErrors [304, "yadda"]
 
 [<Test>]
 let ``Report error when instance is not an object`` () = 
   let code = """let res = test.'get the data'.bar"""
-  let actual = check code "res" EntityKind.Variable vars
+  let actual = check code (isVariable "res") vars
   actual |> assertErrors [305, "test.'get the data'"]
 
 [<Test>]
@@ -210,7 +210,7 @@ let ``Report error when name based param is not last`` () =
   let code = """
     let res = numbers.sort(fast=true, false).head
   """
-  let actual = check code "res" EntityKind.Variable vars
+  let actual = check code (isVariable "res") vars
   actual |> assertType (Type.Primitive PrimitiveType.Number)
   actual |> assertErrors [307,"false"]
 
@@ -219,7 +219,7 @@ let ``Report error when required parameter is missing value`` () =
   let code = """
     let res = numbers.add().head
   """
-  let actual = check code "res" EntityKind.Variable vars
+  let actual = check code (isVariable "res") vars
   actual |> assertType (Type.Primitive PrimitiveType.Number)
   actual |> assertErrors [308,"()"]
 
@@ -228,7 +228,7 @@ let ``Report error when method parameter is given a wrong value`` () =
   let code = """
     let res = numbers.add("yo").head
   """
-  let actual = check code "res" EntityKind.Variable vars
+  let actual = check code (isVariable "res") vars
   actual |> assertType (Type.Primitive PrimitiveType.Number)
   actual |> assertErrors [309,"\"yo\""]
 
@@ -237,5 +237,5 @@ let ``Report error when generic method type cannot be inferred`` () =
   let code = """
     let res = series.makeTwo(1, true).head
   """
-  let actual = check code "res" EntityKind.Variable vars
+  let actual = check code (isVariable "res") vars
   actual |> assertErrors [310,"(1, true)"]

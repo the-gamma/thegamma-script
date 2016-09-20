@@ -131,54 +131,43 @@ type [<RequireQualifiedAccess>] Constant =
 /// corresponds to all places in code where something has a name.
 type [<RequireQualifiedAccess>] EntityKind = 
 
-  /// Reference to a global symbol; Antecedent is the parent scope
-  | GlobalValue 
-  /// Reference to a local variable; Antecedent is the variable entity
-  | Variable
-  /// Variable binding; Antecedent is the binding scope (for functions) 
-  /// or entity of expression assigned to it (for commands)
-  | Binding
-
-  /// Operator; Antecedents are operands of the operator
-  | Operator of Operator
-  /// List expression; Antecedents are elements of the list
-  | List 
-  /// Constant; Antecedent is the root entity of program
-  | Constant of Constant
-  /// Function declaration; Antecedents are variable entity & body entity
-  | Function
-
-  /// Represents the whole program; Antecedents are commands
-  | Program
-  /// Represents an entity for a command; Antecedents
-  | Command
-  /// Root node of the entity tree with no antecedant
+  // Entities that represent root node, program and commands
   | Root
-  /// Variable scope; Antecedant is the parent scope or root
-  | Scope
+  | Program of commands:Entity list
+  | RunCommand of body:Entity
+  | LetCommand of variable:Entity * assignment:Entity
+
+  // Standard constructs of the language
+  | Operator of left:Entity * operator:Operator * right:Entity
+  | List of elements:Entity list
+  | Constant of Constant
+  | Function of variable:Entity * body:Entity
+
+  /// Reference to a global symbol
+  | GlobalValue of name:Name 
+  /// Reference to a local variable
+  | Variable of name:Name * value:Entity
+  /// Variable binding in lambda abstraction
+  | Binding of name:Name * callSite:Entity
 
   /// Represents all arguments passed to method; Antecedants are individual arguments
   /// (a mix of named parameter & ordinary expression entities)
-  | ArgumentList
-  /// Call site; Antecedant is the instance on which we're making a call
-  /// (the parameter is the name or the index of the ra)
-  | CallSite of Choice<string, int>
-  /// Named param in a call site; Antecedant is the expression assigned to it
-  | NamedParam
-  /// Named member (property or call); Antecedent is the instance (or Root if no instance)
-  | NamedMember
-  /// Call or property access; Antecedents are `NamedMember`, followed by a scope 
-  /// (for global calls) or instance expression entity (for instance calls), and
-  /// an `ArgumentList` to keep the arguments
-  | ChainElement of hasInstance:bool * isProperty:bool
+  | ArgumentList of arguments:Entity list
+  /// Call site in which a lambda function appears. Marks instance, method name & argument
+  /// (the argument is the name or the index of the parameter in the list)
+  | CallSite of instance:Entity * name:Name * parameter:Choice<string, int>
+  /// Named param in a call site with an expression assigned to it
+  | NamedParam of name:Name * assignment:Entity
+  /// Named member (property or call) with reference to the instance (or Root if no instance)
+  | NamedMember of name:Name * instance:Entity
+  /// Call or property access; `named` is `NamedMember` and `arguments` is `ArgumentList`
+  | ChainElement of isProperty:bool * name:Name * named:Entity * instance:Entity option * arguments:Entity option
 
   
 /// An entity represents a thing in the source code to which we attach additional info.
 /// It is uniquely identified by its `Symbol` (which is also used for lookups)
-type Entity = 
+and Entity = 
   { Kind : EntityKind
-    Antecedents : Entity list
-    Name : Name
     Symbol : Symbol 
     mutable Type : Type option 
     mutable Errors : Error<Range> list }

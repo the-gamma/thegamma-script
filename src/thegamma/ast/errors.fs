@@ -124,3 +124,7 @@ module TypeChecker =
       Message = 
         sprintf "The arguments of the call have conflicting types. The type %s assigned to a variable %s does not match the type %s."
           (formatTypeInfo t1) var (formatTypeInfo t2) }
+
+  let callMissingInstance name rng = 
+    { Number = 311; Range = rng 
+      Message = sprintf "The `%s` property access or call is missing an instance" name }

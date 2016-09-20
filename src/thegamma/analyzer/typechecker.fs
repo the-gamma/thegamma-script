@@ -1,6 +1,7 @@
 ﻿module TheGamma.TypeChecker
 
 open TheGamma
+open TheGamma.Ast
 open TheGamma.Common
 open System.Collections.Generic
 
@@ -190,12 +191,12 @@ let rec checkMethodCall ctx memTy pars argList args =
   // Split arguments into position & name based and report 
   // error if there is non-named argument after named argument
   let positionBased, nameBased = 
-    let pb = args |> List.takeWhile (fun arg -> arg.Kind <> EntityKind.NamedParam) 
-    let nb = args |> List.skipWhile (fun arg -> arg.Kind <> EntityKind.NamedParam)
+    let pb = args |> List.takeWhile (function { Kind = EntityKind.NamedParam _ } -> false | _ -> true)  
+    let nb = args |> List.skipWhile (function { Kind = EntityKind.NamedParam _ } -> false | _ -> true)  
     pb |> Array.ofList,
     nb |> List.choose (fun arg -> 
       match arg.Kind with
-      | EntityKind.NamedParam -> Some(arg.Name.Name, arg.Antecedents.[0])
+      | EntityKind.NamedParam(name, value) -> Some(name.Name, value)
       | _ ->
           Errors.TypeChecker.nameBasedParamMustBeLast |> addError ctx arg
           None ) |> Map.ofList
@@ -250,79 +251,73 @@ and getType ctx (e:Entity) =
 /// have been reduced to non-delayed type before
 and typeCheckEntity ctx (e:Entity) = 
   match e.Kind with
-  | EntityKind.GlobalValue ->
-      if not (ctx.Globals.ContainsKey(e.Name.Name)) then
-        Errors.TypeChecker.variableNotInScope e.Name.Name |> addError ctx e
+  | EntityKind.GlobalValue(name) ->
+      if not (ctx.Globals.ContainsKey(name.Name)) then
+        Errors.TypeChecker.variableNotInScope name.Name |> addError ctx e
         Type.Any
       else
-        getType ctx ctx.Globals.[e.Name.Name]
+        getType ctx ctx.Globals.[name.Name]
 
-  | EntityKind.Variable ->
-      let inst = match e.Antecedents with [a] -> a | _ -> failwith "typeCheckEntity: Variable should have one antecedent"
+  | EntityKind.Variable(_, inst) ->
       getType ctx inst      
 
-  | EntityKind.ChainElement(isProperty = true) ->
-      let name, inst = match e.Antecedents with [name; a] -> name, a | _ -> failwith "typeCheckEntity: Property should have two antecedents"
-      let typ = reduceType (getType ctx inst)
-      match typ with 
-      | Type.Any -> Type.Any
-      | Type.Object(FindProperty e.Name resTyp) -> resTyp
-      | Type.Object { Members = members } ->
-          Errors.TypeChecker.propertyMissing e.Name.Name members |> addError ctx name
-          Type.Any
-      | typ ->
-          Errors.TypeChecker.notAnObject e.Name.Name typ |> addError ctx inst
-          Type.Any
-
-  | EntityKind.ChainElement(isProperty = false; hasInstance = hasInstance) ->
-      if not hasInstance then 
-        Log.error("typechecker", "typeCheckEntity: Method calls without instance are not supported")
-        Type.Any else
-      let name, inst, arglist, ents = 
-        match e.Antecedents with 
-        | [name; inst; arg] -> name, inst, arg, List.tail arg.Antecedents 
-        | _ -> failwith "typeCheckEntity: Method call is missing required antecedent"
+  | EntityKind.ChainElement(true, name, ident, Some inst, _) ->
       match reduceType (getType ctx inst) with 
       | Type.Any -> Type.Any
-      | Type.Object(FindMethod e.Name (args, resTyp)) -> checkMethodCall ctx resTyp args arglist ents
+      | Type.Object(FindProperty name resTyp) -> resTyp
       | Type.Object { Members = members } ->
-          Errors.TypeChecker.methodMissing e.Name.Name members |> addError ctx name
+          Errors.TypeChecker.propertyMissing name.Name members |> addError ctx ident
           Type.Any
       | typ ->
-          Errors.TypeChecker.notAnObject e.Name.Name typ |> addError ctx inst
+          Errors.TypeChecker.notAnObject name.Name typ |> addError ctx inst
           Type.Any
 
-  | EntityKind.Operator operator ->      
-      e.Antecedents |> List.iteri (fun idx operand ->
+  | EntityKind.ChainElement(false, name, ident, Some inst, Some ({ Kind = EntityKind.ArgumentList(ents) } as arglist)) ->
+      match reduceType (getType ctx inst) with 
+      | Type.Any -> Type.Any
+      | Type.Object(FindMethod name (args, resTyp)) -> checkMethodCall ctx resTyp args arglist ents
+      | Type.Object { Members = members } ->
+          Errors.TypeChecker.methodMissing name.Name members |> addError ctx ident
+          Type.Any
+      | typ ->
+          Errors.TypeChecker.notAnObject name.Name typ |> addError ctx inst
+          Type.Any
+
+  | EntityKind.ChainElement(_, name, ident, None, _) ->
+      Errors.TypeChecker.callMissingInstance name.Name |> addError ctx ident
+      Type.Any
+
+  | EntityKind.ChainElement(false, name, _, _, _) ->
+      failwith (sprintf "typeCheckEntity: Call to %s is missing argument list!" name.Name)
+      
+  | EntityKind.Operator(l, operator, r) ->      
+      [l; r] |> List.iteri (fun idx operand ->
         let typ = getType ctx operand 
         if not (typesEqual typ (Type.Primitive PrimitiveType.Number)) then
           Errors.TypeChecker.numericOperatorExpectsNumbers operator idx typ |> addError ctx operand )
       Type.Primitive PrimitiveType.Number
 
-  | EntityKind.List ->      
-      let typs = e.Antecedents |> List.map (getType ctx)
+  | EntityKind.List(elems) ->      
+      let typs = elems |> List.map (getType ctx)
       let typ = inferListType typs 
-      for a in e.Antecedents do 
+      for a in elems do 
         let elty = getType ctx a
         if not (typesEqual typ elty) then
           Errors.TypeChecker.listElementTypeDoesNotMatch typ elty |> addError ctx a
       Type.List typ
 
-  | EntityKind.Binding ->
-      // Binding node is used to resolve type of a lambda function variable. Its
-      // antecedent is `Scope` (in which case we cannot type check it) or 
-      // `EntityKind.CallSite` containing reference to the method around it - 
+  | EntityKind.Binding(name, { Kind = EntityKind.CallSite(inst, methName, parSpec) }) ->
+      // Binding node is used to resolve type of a lambda function variable. 
+      // Its antecedent is `EntityKind.CallSite` containing reference to the method around it - 
       // assuming lambda appears in something like: `foo(10, fun x -> ...)`
-      let inst, methName, parSpec = 
-        match e.Antecedents with 
-        | [ { Kind=EntityKind.CallSite p; Name = name } as v ] -> List.head v.Antecedents, name, p
-        | _ -> failwith "typeCheckEntity: Binding should have call site antecedent"
       match resolveParameterType (reduceType (getType ctx inst)) methName parSpec with
       | Type.Function([tin], _) -> tin
       | _ -> failwith "typeCheckEntity: Expected parameter of function type"
 
-  | EntityKind.Function ->
-      let var, body = match e.Antecedents with [v; b] -> v, b | _ -> failwith "typeCheckEntity: Property should have two antecedents"
+  | EntityKind.Binding(name, _) ->
+      failwith (sprintf "typeCheckEntity: Variable binding %s is missing call site!" name.Name)
+
+  | EntityKind.Function(var, body) ->
       Type.Function([getType ctx var], getType ctx body)
 
   // Entities with primitive types
@@ -333,13 +328,13 @@ and typeCheckEntity ctx (e:Entity) =
 
   // Entities that do not have a real type
   | EntityKind.Root -> Type.Any
-  | EntityKind.Command -> Type.Any
-  | EntityKind.ArgumentList -> Type.Any
-  | EntityKind.NamedParam -> Type.Any
-  | EntityKind.NamedMember -> Type.Any
+  | EntityKind.LetCommand _ -> Type.Any
+  | EntityKind.RunCommand _ -> Type.Any
+  | EntityKind.ArgumentList _ -> Type.Any
+  | EntityKind.NamedParam _ -> Type.Any
+  | EntityKind.NamedMember _ -> Type.Any
   | EntityKind.CallSite _ -> Type.Any
-  | EntityKind.Scope -> Type.Any
-  | EntityKind.Program -> Type.Any
+  | EntityKind.Program _ -> Type.Any
 
 
 /// Perform type applications & evaluate delayed types
@@ -385,9 +380,9 @@ let typeCheckEntityAsync ctx (e:Entity) = async {
       visited.[e.Symbol] <- true
       for a in e.Antecedents do
         do! loop a 
-      Log.trace("typechecker", "Checking entity '%s' (%O)", e.Name.Name, e.Kind)
+      Log.trace("typechecker", "Checking entity '%s' (%O)", e.Name, e.Kind)
       let! t = evaluateDelayedType true (getType ctx e)
-      Log.trace("typechecker", "Type of entity '%s' (%O) is: %O", e.Name.Name, e.Kind, t)
+      Log.trace("typechecker", "Type of entity '%s' (%O) is: %O", e.Name, e.Kind, t)
       e.Type <- Some t }
 
   do! loop e
@@ -399,9 +394,7 @@ let typeCheckEntityAsync ctx (e:Entity) = async {
 // ------------------------------------------------------------------------------------------------
 
 let globalEntity name typ root =           
-  { Kind = EntityKind.GlobalValue
-    Antecedents = [root]
-    Name = { Name = name }
+  { Kind = EntityKind.GlobalValue({ Name = name })
     Symbol = createSymbol()
     Type = Some typ 
     Errors = [] }
@@ -421,7 +414,7 @@ let typeCheckProgram (globals:Entity list) bound prog = async {
   Log.trace("typechecker", "Type checking program")
   try
     let rangeLookup = dict [ for r, e in bound -> e.Symbol, r ]
-    let vars = dict [ for e in globals -> e.Name.Name, e ]
+    let vars = dict [ for e in globals -> e.Name, e ]
     let ctx = { Globals = vars; Errors = ResizeArray<_>(); Ranges = rangeLookup }
     let! _ = typeCheckEntityAsync ctx prog 
     Log.trace("typechecker", "Completed type checking")

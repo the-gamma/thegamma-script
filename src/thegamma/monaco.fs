@@ -69,8 +69,8 @@ let createCompletionProvider (getService:string -> CheckingService) =
             let! _, ents, _ = svc.TypeCheck(input)
             let optMembers = 
               ents |> Seq.tryPick (fun (rng, ent) ->
-                match ent.Kind, ent.Antecedents with 
-                | EntityKind.NamedMember, [{ Type = Some t }] when loc >= rng.Start && loc <= rng.End + 1 -> 
+                match ent.Kind with 
+                | EntityKind.NamedMember(_, { Type = Some t }) when loc >= rng.Start && loc <= rng.End + 1 -> 
                     Log.trace("completions", "Antecedant at current location: %O", t)
                     match TypeChecker.reduceType t with
                     | Type.Object { Members = mems } -> Some(rng, mems)

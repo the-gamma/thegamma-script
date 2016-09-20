@@ -101,26 +101,57 @@ let formatTokens (tokens:seq<Token>) =
 
 /// Format entity kind into something readable
 let formatEntityKind = function
-  | EntityKind.GlobalValue -> "global value"
-  | EntityKind.Variable -> "variable"
-  | EntityKind.Binding -> "binding"
-  | EntityKind.Operator(op) -> (formatToken (TokenKind.Operator op)) + " operator"
-  | EntityKind.List -> "list"
+  | EntityKind.GlobalValue _ -> "global value"
+  | EntityKind.Variable _ -> "variable"
+  | EntityKind.Binding _ -> "binding"
+  | EntityKind.Operator(_, op, _) -> (formatToken (TokenKind.Operator op)) + " operator"
+  | EntityKind.List _ -> "list"
   | EntityKind.Constant(Constant.Empty) -> "empty value"
   | EntityKind.Constant(Constant.Number n) -> sprintf "number `%f`" n 
   | EntityKind.Constant(Constant.String n) -> sprintf "string `%s`" n 
   | EntityKind.Constant(Constant.Boolean true) -> "`true` value" 
   | EntityKind.Constant(Constant.Boolean false) -> "`false` value" 
-  | EntityKind.Function -> "function"
-  | EntityKind.Command -> "command"
-  | EntityKind.Program -> "program"
-  | EntityKind.Root -> "root"
-  | EntityKind.Scope -> "scope"
+  | EntityKind.Function _ -> "function"
+  | EntityKind.LetCommand _ -> "let command"
+  | EntityKind.RunCommand _ -> "run command"
+  | EntityKind.Program _ -> "program"
+  | EntityKind.Root _ -> "root"
   | EntityKind.CallSite _ -> "call site"
-  | EntityKind.NamedParam -> "named param"
+  | EntityKind.NamedParam _ -> "named param"
   | EntityKind.ChainElement _ -> "chain element"
-  | EntityKind.ArgumentList -> "argument list"
-  | EntityKind.NamedMember -> "property or method"
+  | EntityKind.ArgumentList _ -> "argument list"
+  | EntityKind.NamedMember _ -> "property or method"
+
+/// Used for entities with no name
+let anonymous = ""
+
+/// Return entity name (or anonymous) and all its antecedants
+let entityCodeNameAndAntecedents = function
+  | EntityKind.Root -> 0, [], anonymous
+  | EntityKind.Program(ans) -> 1, ans, anonymous
+  | EntityKind.RunCommand(an) -> 2, [an], anonymous
+  | EntityKind.LetCommand(an1, an2) -> 3, [an1; an2], anonymous
+  | EntityKind.Operator(an1, op, an2) -> 4, [an1; an2], (formatToken (TokenKind.Operator op))
+  | EntityKind.List(ans) -> 5, ans, anonymous
+  | EntityKind.Constant(Constant.String s) -> 6, [], s
+  | EntityKind.Constant(Constant.Number n) -> 7, [], (string n)
+  | EntityKind.Constant(Constant.Boolean b) -> 8, [], (string b)
+  | EntityKind.Constant(Constant.Empty) -> 9, [], anonymous
+  | EntityKind.Function(an1, an2) -> 10, [an1; an2], anonymous
+  | EntityKind.GlobalValue(n) -> 11, [], n.Name
+  | EntityKind.Variable(n, an) -> 12, [an], n.Name
+  | EntityKind.Binding(n, an) -> 13, [an], n.Name
+  | EntityKind.ArgumentList(ans) -> 14, ans, anonymous
+  | EntityKind.CallSite(an1, n, Choice1Of2 s) -> 15, [an1], (n.Name + "." + s)
+  | EntityKind.CallSite(an1, n, Choice2Of2 m) -> 16, [an1], (n.Name + "." + string m)
+  | EntityKind.NamedParam(n, an) -> 17, [an], n.Name
+  | EntityKind.NamedMember(n, an) -> 18, [an], n.Name
+  | EntityKind.ChainElement(b, n, an1, an2, an3) -> 19, List.choose id [Some an1; an2; an3], (n.Name + "." + string b)
+
+// Provide easy access to entity's antecedents
+type Entity with
+  member x.Antecedents = let _, ans, _ = entityCodeNameAndAntecedents x.Kind in ans
+  member x.Name = let _, _, name = entityCodeNameAndAntecedents x.Kind in name
 
 /// Return full name of the type
 let rec formatType = function
