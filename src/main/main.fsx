@@ -230,6 +230,7 @@ let tryCreatePivotPreview globals loc bound =
               for sec in sections do
                 let selected = sec.Entities |> List.exists (fun secEnt -> ent.Symbol = secEnt.Symbol)
                 yield h?li ["class" => if selected then "selected" else ""] [ text (transformName sec.Transformation) ]
+              yield h?li ["class" => "add"] [ h?i ["class" => "fa fa-plus"] [] ]
             ]
             h?div ["class" => "preview-body"] [
               h.delayed preview

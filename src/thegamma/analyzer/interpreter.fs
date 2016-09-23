@@ -6,12 +6,6 @@ open TheGamma.Common
 open TheGamma.Babel
 open System.Collections.Generic
 
-Fable.Import.Node.require.Invoke("./../providers/runtime") |> ignore
-
-//[<Emit("_runtime()")>]
-//let hack () = failwith "JS"
-//let foo a b =  hack (); a + b
-
 // ------------------------------------------------------------------------------------------------
 // 
 // ------------------------------------------------------------------------------------------------
