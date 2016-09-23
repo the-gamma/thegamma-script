@@ -51,6 +51,7 @@
   </Choose>
   <Import Project="$(FSharpTargetsPath)" />
   <ItemGroup>
+    <Compile Include="common.fs" />
     <Compile Include="series.fs" />
     <Compile Include="tables.fs" />
     <Compile Include="maps.fs" />

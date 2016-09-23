@@ -3,6 +3,7 @@
 // --------------------------------------------------------------------------------------------------------------------
 namespace TheGamma.GoogleCharts
 
+open TheGamma.Common
 open TheGamma.Series
 open Fable.Core
 open Fable.Import
@@ -72,7 +73,7 @@ module ChartDataOperations =
     let data = GoogleCharts.createTable()
     data.addColumn(keyType, v.keyName) |> ignore
     data.addColumn("number", v.seriesName) |> ignore
-    let! vals = v.mapPairs(fun k v -> [| box k; box v |]).data
+    let! vals = v.mapPairs(fun k v -> [| box k; box v |]).data |> Async.AwaitFuture
     vals |> Array.map snd |> data.addRows |> ignore
     return data } }
 
@@ -81,7 +82,7 @@ module ChartDataOperations =
     data.addColumn(keyType, v.keyName) |> ignore
     data.addColumn("number", v.seriesName) |> ignore
     data.addColumn("number", v.seriesName) |> ignore
-    let! vals = v.mapPairs(fun k (v1, v2) -> [| box k; box v1; box v2 |]).data
+    let! vals = v.mapPairs(fun k (v1, v2) -> [| box k; box v1; box v2 |]).data |> Async.AwaitFuture
     vals |> Array.map snd |> data.addRows |> ignore
     return data } }
 
@@ -91,7 +92,7 @@ module ChartDataOperations =
     data.addColumn("number", vs.[0].valueName) |> ignore
     JsInterop.(?) data "addColumn" (JsInterop.createObj [ "type", box "string"; "role", box "style" ]) |> ignore    
     let! all = Array.zip vs colors |> List.ofArray |> collect (fun (v, clr) -> async {
-      let! res = v.mapPairs(fun k v -> k, v, clr).data 
+      let! res = v.mapPairs(fun k v -> k, v, clr).data |> Async.AwaitFuture
       return res |> Array.map snd |> List.ofArray })
 
     all 
@@ -125,7 +126,7 @@ module ChartDataOperations =
 *)
   let oneKeyNValues keyType (v:series<'a, series<'k, float>>) = { data = async {
     let data = GoogleCharts.createTable()
-    let! v = v.data
+    let! v = v.data |> Async.AwaitFuture
     let v = Array.map snd v
     data.addColumn(keyType, v.[0].keyName) |> ignore
     for i in 0 .. v.Length - 1 do
@@ -141,7 +142,7 @@ module ChartDataOperations =
 
     let! vals = all.mapPairs(fun k vals ->
       let data = Array.init v.Length (fun i -> box (defaultArg (Map.tryFind i vals) (Helpers.undefined<_>())))
-      Array.append [| box k |] data).data
+      Array.append [| box k |] data).data |> Async.AwaitFuture
     vals |> Array.map snd |> data.addRows |> ignore
     return data } }
 
@@ -149,6 +150,6 @@ module ChartDataOperations =
     let data = GoogleCharts.createTable()
     data.addColumn("number", v1.seriesName) |> ignore
     data.addColumn("number", v2.seriesName) |> ignore
-    let! vals = v1.joinInner(v2).map(fun (v1,v2) -> [| box v1; box v2 |]).data
+    let! vals = v1.joinInner(v2).map(fun (v1,v2) -> [| box v1; box v2 |]).data |> Async.AwaitFuture
     vals |> Array.map snd |> data.addRows |> ignore
     return data } }

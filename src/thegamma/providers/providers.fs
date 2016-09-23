@@ -13,6 +13,14 @@ type ProvidedType =
 // F# provider
 // ------------------------------------------------------------------------------------------------
 
+module ProviderHelpers = 
+  let docMeta doc = 
+    { Context = "http://thegamma.net"
+      Type = "Documentation"
+      Data = box doc }
+
+open ProviderHelpers
+
 module FSharpProvider = 
   type AnyType = 
     { kind : string }
@@ -111,14 +119,14 @@ module FSharpProvider =
               | [] -> mapType m.returns
               | pars -> Type.Forall(pars, mapType m.returns)
 
-            Some(Member.Method(m.name, args, typ, Documentation.Text "", emitter))
+            Some(Member.Method(m.name, args, typ, [docMeta (Documentation.Text "")], emitter))
           else None)
 
       match getTypeParameters exp.typepars with
       | [] -> return Type.Object { Members = mems }
       | typars ->
           let obj = Type.Object { Members = mems }
-          return Type.Forall(typars, obj) } |> Async.AsFuture exp.name
+          return Type.Forall(typars, obj) } |> Async.CreateNamedFuture exp.name
             
     async {
       let! json = Http.Request("GET", url)
@@ -276,7 +284,7 @@ module RestProvider =
           membs |> Array.map (fun (name, ty) ->
             let memTy, memConv = getTypeAndEmitter lookupNamed ty
             let emitter = { Emit = fun (inst, _) -> memConv <| inst?(name) }
-            Member.Property(name, memTy, None, Documentation.Text "", emitter))
+            Member.Property(name, memTy, [docMeta(Documentation.Text "")], emitter))
         let obj = TheGamma.Type.Object { Members = membs }
         obj, id
     | _ -> 
@@ -303,7 +311,10 @@ module RestProvider =
           Type.Object
             { Members = 
                 members |> Array.map (fun m ->
-                  let schema = m.schema |> Option.map (fun s -> { Type = getProperty s "@type"; JSON = s })
+                  let schema = 
+                    match m.schema with
+                    | Some s -> [{ Type = getProperty s "@type"; Context = "http://schema.org"; Data = s }]
+                    | _ -> []
                   match m.returns.kind with
                   | "nested" ->
                       let returns = unbox<TypeNested> m.returns 
@@ -312,16 +323,16 @@ module RestProvider =
                       | Some parameters ->
                           let args = [ for p in parameters -> p.name, false, Type.Primitive (mapParamType p.``type``)] // TODO: Check this is OK type
                           let argNames = [ for p in parameters -> p.name ]
-                          Member.Method(m.name, args, retTyp, parseDoc m.documentation, methCall argNames m.trace)
+                          Member.Method(m.name, args, retTyp, [docMeta (parseDoc m.documentation)], methCall argNames m.trace)
                       | None -> 
-                          Member.Property(m.name, retTyp, schema, parseDoc m.documentation, propAccess m.trace) 
+                          Member.Property(m.name, retTyp, (docMeta (parseDoc m.documentation))::schema, propAccess m.trace) 
                   | "primitive" ->  
                       let returns = unbox<TypePrimitive> m.returns                      
                       let ty = fromRawType returns.``type``
                       let typ, parser = getTypeAndEmitter lookupNamed ty
-                      Member.Property(m.name, typ, schema, parseDoc m.documentation, dataCall parser m.trace returns.endpoint)
+                      Member.Property(m.name, typ, (docMeta (parseDoc m.documentation))::schema, dataCall parser m.trace returns.endpoint)
                   | _ -> failwith "?" ) } }
-      let ty = Type.Delayed(guid, Async.AsFuture guid future)
+      let ty = Type.Delayed(guid, Async.CreateNamedFuture guid future)
       restTypeCache.[guid] <- ty
       ty
 

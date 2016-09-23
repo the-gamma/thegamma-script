@@ -101,6 +101,11 @@
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Numerics" />
+    <ProjectReference Include="..\..\src\libraries\libraries.fsproj">
+      <Name>libraries</Name>
+      <Project>{c103641d-9755-4de4-bda9-fdcfc022c80e}</Project>
+      <Private>True</Private>
+    </ProjectReference>
     <ProjectReference Include="..\..\src\thegamma\thegamma.fsproj">
       <Name>thegamma</Name>
       <Project>{ae8310c8-1f2b-4f9c-83f6-5d188b7517b2}</Project>

@@ -4,6 +4,7 @@ open Fable.Core
 open Fable.Import.JS
 open Fable.Import.Browser
 open System.Collections.Generic
+module FsOption = Microsoft.FSharp.Core.Option
 
 [<Emit("JSON.stringify($0)")>]
 let jsonStringify json : string = failwith "JS Only"
@@ -45,8 +46,8 @@ let isLocalHost() =
 
 let mutable enabledCategories = 
   if not (isLocalHost ()) then set []
-  else set [ "SYSTEM"; "PARSING"; "BINDER"; "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "PROVIDERS"; "SERVICE"; "CODEGEN"; "RUNTIME" ]
-
+  else set [ "SYSTEM"; "PARSING";"BINDER"; "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "PROVIDERS"; "SERVICE"; "CODEGEN"; "INTERPRETER"; "RUNTIME" ]
+  //else set ["INTERPRETER"]
 type Log =
   static member setEnabled(cats) = enabledCategories <- cats
 
@@ -104,7 +105,7 @@ type Microsoft.FSharp.Control.Async with
   static member AwaitFuture (f:Future<'T>) = Async.FromContinuations(fun (cont, _, _) ->
     f.Then(cont))
 
-  static member Future (n:string) op start = 
+  static member Future (n:string option) op start = 
     let mutable res = Choice1Of3()
     let mutable handlers = []
     let mutable running = false
@@ -117,11 +118,11 @@ type Microsoft.FSharp.Control.Async with
 
     let ensureStarted() = 
       if not running then 
-        Log.trace("system", "Starting future '%s'....", n)
+        n |> FsOption.iter (fun n -> Log.trace("system", "Starting future '%s'....", n))
         running <- true
         async { try 
                   let! r = op
-                  Log.trace("system", "Future '%s' evaluated to: %O", n, r)
+                  n |> FsOption.iter (fun n -> Log.trace("system", "Future '%s' evaluated to: %O", n, r))
                   res <- Choice2Of3 r                  
                 with e ->
                   Log.exn("system", "Evaluating future failed: %O", e)
@@ -134,8 +135,10 @@ type Microsoft.FSharp.Control.Async with
           ensureStarted()
           trigger f }
 
-  static member AsFuture n op = Async.Future n op false
-  static member StartAsFuture n op = Async.Future n op true
+  static member CreateFuture(op) = Async.Future None op false
+  static member StartAsFuture(op) = Async.Future None op true
+  static member CreateNamedFuture name op = Async.Future (Some name) op false
+  static member StartAsNamedFuture name op = Async.Future (Some name) op true
 
 module Async = 
   module Array =
@@ -247,3 +250,6 @@ module List =
       if not added then 
         groups.Add(e, ResizeArray<_>([e]))
     groups |> Seq.map (snd >> List.ofSeq) |> List.ofSeq
+
+  let unreduce f s = s |> Seq.unfold (fun s -> 
+    f s |> Microsoft.FSharp.Core.Option.map (fun v -> v, v)) |> List.ofSeq

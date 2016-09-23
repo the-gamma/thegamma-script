@@ -22,6 +22,22 @@ type BindingContext =
     /// Collects all bound entities and their ranges
     Bound : ResizeArray<Range * Entity> }
 
+/// Represents result of binding syntax tree to entities 
+/// (provides access to all bound entities & children lookup function)
+type BindingResult(ents:(Range * Entity)[]) = 
+  let childrenLookup = 
+    let res = System.Collections.Generic.Dictionary<Symbol, ResizeArray<Entity>>()
+    let add a e = 
+      if not (res.ContainsKey(a)) then res.Add(a, ResizeArray())
+      res.[a].Add(e)
+    for _, e in ents do
+      for a in e.Antecedents do
+        add a.Symbol e
+    res 
+  member x.Entities = ents
+  member x.GetChildren(ent) = 
+    match childrenLookup.TryGetValue(ent.Symbol) with true, res -> res.ToArray() | _ -> [||]
+
 /// Lookup entity (if it can be reused) or create & cache a new one
 let bindEntity ctx kind =
   let code, antecedents, name = entityCodeNameAndAntecedents kind
@@ -36,7 +52,7 @@ let bindEntity ctx kind =
   else
     Log.trace("binder", "New: binding %s %s", formatEntityKind kind, name)
     let symbol = createSymbol ()
-    let entity = { Kind = kind; Symbol = symbol; Type = None; Errors = [] }
+    let entity = { Kind = kind; Symbol = symbol; Type = None; Errors = []; Meta = []; Value = None }
     ListDictionary.set symbols (Map.add (code, name) entity nestedDict) ctx.Table
     entity    
 
@@ -121,12 +137,12 @@ let bindProgram ctx (program:Program) =
       let ctx, node = bindCommand ctx cmd
       ctx, node::nodes) (ctx, [])  
   bindEntity ctx (EntityKind.Program(ents)),
-  ctx.Bound.ToArray()
+  BindingResult(ctx.Bound.ToArray())
   
 /// Create a new binding context - this stores cached entities
 let createContext name =
   let root = 
-    { Kind = EntityKind.Root; Errors = []; Symbol = createSymbol(); Type = None }
+    { Kind = EntityKind.Root; Errors = []; Symbol = createSymbol(); Type = None; Meta = []; Value = None }
   { Table = System.Collections.Generic.Dictionary<_, _>(); 
     Bound = ResizeArray<_>(); Variables = Map.empty; 
     Root = root }

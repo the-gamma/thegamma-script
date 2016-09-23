@@ -18,13 +18,22 @@ type DomAttribute =
 
 type DomNode = 
   | Text of string
+  | Delayed of (string -> unit)
   | Element of tag:string * attributes:(string * DomAttribute)[] * children : DomNode[] * onRender : (HTMLElement -> unit) option
   | Part of func:(HTMLElement -> unit)
+
+let mutable counter = 0
 
 let rec render node = 
   match node with
   | Text(s) -> 
       document.createTextNode(s) :> Node, ignore
+
+  | Delayed(func) ->
+      counter <- counter + 1
+      let el = document.createElement("div")
+      el.id <- sprintf "delayed_%d" counter
+      el :> Node, (fun () -> func el.id)
 
   | Part(func) ->
       let el = document.createElement("div")
@@ -66,6 +75,9 @@ type El() =
           | _ -> ()
       )
     Element(n, Array.ofList a, Array.ofList b, f)
+
+  member x.delayed(f) =
+    Delayed(f)
 
   member x.part (initial:'State) (fold:'State -> 'Event -> 'State) = 
     let evt = Control.Event<_>()

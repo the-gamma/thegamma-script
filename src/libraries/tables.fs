@@ -2,6 +2,7 @@ namespace TheGamma
 
 open System
 open TheGamma
+open TheGamma.Common
 open TheGamma.Series
 open TheGamma.Html
 open Fable.Import.Browser
@@ -92,15 +93,13 @@ type table<'k,'v> =
           ["data"; "keyName"; "valueName"; "seriesName"]
       if isSeries then
         let mutable result = unbox null
-        Async.StartWithContinuations
-          ( (unbox<series<int, DomNode>> o).data,
-            (fun r -> result <- r), ignore, ignore )
+        (unbox<series<int, DomNode>> o).data.Then(fun r -> result <- r)
         h?span [] (List.ofArray (Array.map snd result))
       else text (o.ToString())
 
     async {
       try
-        let! vs = t.data.data
+        let! vs = t.data.data |> Async.AwaitFuture
 
         let filteredProperties o =
           properties o |> Array.filter (fun kv -> not (t.hiddenColumns.Contains kv.key))

@@ -64,18 +64,19 @@
   -->
   <ItemGroup>
     <Compile Include="common/babel.fs" />
-    <Compile Include="common/common.fs" />
     <Compile Include="ast/ast.fs" />
     <Compile Include="ast/astops.fs" />
+    <Compile Include="ast/typeops.fs" />
     <Compile Include="ast/errors.fs" />
     <Compile Include="parser/tokenizer.fs" />
     <Compile Include="parser/parser.fs" />
+    <Compile Include="codegen/runtime.fs" />
+    <Compile Include="codegen/codegen.fs" />
     <Compile Include="analyzer/binder.fs" />
     <Compile Include="analyzer/typechecker.fs" />
-    <Compile Include="providers/runtime.fs" />
+    <Compile Include="analyzer/interpreter.fs" />
     <Compile Include="providers/providers.fs" />
     <Compile Include="providers/pivot.fs" />
-    <Compile Include="codegen.fs" />
     <Compile Include="editors.fs" />
     <Compile Include="services.fs" />
     <Compile Include="monaco.fs" />

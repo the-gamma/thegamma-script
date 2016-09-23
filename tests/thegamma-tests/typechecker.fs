@@ -16,10 +16,10 @@ open NUnit.Framework
 
 // Helpers for generating object types
 let noEmitter = { Emit = fun _ -> failwith "mock emitter" }
-let prop n t = Member.Property(n, t, None, Documentation.None, noEmitter)
-let meth n t a = Member.Method(n, a, t, Documentation.None, noEmitter)
+let prop n t = Member.Property(n, t, [], noEmitter)
+let meth n t a = Member.Method(n, a, t, [], noEmitter)
 let obj membrs = Type.Object { Members = Array.ofList membrs; }
-let delay n f = Type.Delayed(n, Async.AsFuture n (async { return f () }))
+let delay n f = Type.Delayed(n, Async.CreateNamedFuture n (async { return f () }))
 
 // Helpers for generating primitive types
 let str = Type.Primitive PrimitiveType.String
@@ -43,12 +43,12 @@ let check (code:string) cond vars =
   let code = code.Replace("\n    ", "\n")
   let prog, _ = code |> Parser.parseProgram
   let prog, entities = Binder.bindProgram ctx prog
-  let globals = [ for n, t in vars -> globalEntity n t ctx.Root ] 
+  let globals = [ for n, t in vars -> Interpreter.globalEntity n t None ] 
   let mutable completed = false
   async { do! TypeChecker.typeCheckProgram globals entities prog
           completed <- true } |> Async.StartImmediate
   if not completed then failwith "Asynchronosu operation did not complete"
-  let _, ent = entities |> Seq.find (snd >> cond)
+  let _, ent = entities.Entities |> Seq.find (snd >> cond)
   let errors = TypeChecker.collectTypeErrors prog
   ent.Type.Value,
   [ for e in errors -> e.Number, code.Substring(e.Range.Start, e.Range.End - e.Range.Start + 1) ]

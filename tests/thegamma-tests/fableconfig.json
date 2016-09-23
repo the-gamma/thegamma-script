@@ -4,6 +4,7 @@
     "projFile": "thegamma-tests.fsproj",
     "plugins": [ "../../node_modules/fable-plugins-nunit/Fable.Plugins.NUnit.dll" ],
     "refs": {
-        "thegamma": "../../src/thegamma"
+        "thegamma": "../../src/thegamma",
+        "libraries": "../../src/libraries"
     }
 }

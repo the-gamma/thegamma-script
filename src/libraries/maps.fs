@@ -4,65 +4,9 @@ open System
 open TheGamma
 open TheGamma.Series
 open TheGamma.Html
+open TheGamma.Common
 open Fable.Import.Browser
 open Fable.Core
-
-// COPY & PASTE FROM EXTENSIONS.FS
-
-type Http =
-  /// Send HTTP request asynchronously
-  /// (does not handle errors properly)
-  static member Request(meth, url, ?data, ?cookies) =
-    Async.FromContinuations(fun (cont, _, _) ->
-      let xhr = XMLHttpRequest.Create()
-      xhr.``open``(meth, url, true)
-      match cookies with 
-      | Some cookies when cookies <> "" -> xhr.setRequestHeader("X-Cookie", cookies)
-      | _ -> ()
-      xhr.onreadystatechange <- fun _ ->
-        if xhr.readyState > 3. && xhr.status = 200. then
-          cont(xhr.responseText)
-        obj()
-      xhr.send(defaultArg data "") )
-
-type Future<'T> = 
-  abstract Then : ('T -> unit) -> unit
-
-module AsyncHelpers = 
-  type Microsoft.FSharp.Control.Async with
-    static member AwaitFuture (f:Future<'T>) = Async.FromContinuations(fun (cont, _, _) ->
-      f.Then(cont))
-    static member Future (n:string) op start = 
-      let mutable res = Choice1Of3()
-      let mutable handlers = []
-      let mutable running = false
-
-      let trigger h = 
-        match res with
-        | Choice1Of3 () -> handlers <- h::handlers 
-        | Choice2Of3 v -> h v
-        | Choice3Of3 e -> raise e
-
-      let ensureStarted() = 
-        if not running then 
-          running <- true
-          async { try 
-                    let! r = op
-                    res <- Choice2Of3 r                  
-                  with e ->
-                    res <- Choice3Of3 e
-                  for h in handlers do trigger h } |> Async.StartImmediate
-      if start = true then ensureStarted()
-
-      { new Future<_> with
-          member x.Then(f) = 
-            ensureStarted()
-            trigger f }
-
-    static member AsFuture n op = Async.Future n op false
-    static member StartAsFuture n op = Async.Future n op true
-
-open AsyncHelpers
 
 type GeographyConfig = 
   { popupOnHover : bool
@@ -87,12 +31,6 @@ module JsDatamap =
   let create(config:DatamapConfig) : IDatamap = failwith "JS"
 
 module JsHelpers = 
-  [<Emit("JSON.parse($0)")>]
-  let jsonParse<'R> (str:string) : 'R = failwith "JS Only"
-
-  [<Emit("JSON.stringify($0)")>]
-  let jsonStringify json : string = failwith "JS Only"
-
   [<Emit("$0[$1]")>]
   let getProp (o:obj) (prop:string) : 'T = failwith "JS"
 
@@ -193,7 +131,7 @@ module GeoGlobals =
         jsonParse<Locations[]> json 
         |> Array.map (fun l -> l.country, l.coordinates)
         |> Map.ofArray
-      return lookup } |> Async.StartAsFuture "locations"
+      return lookup } |> Async.CreateNamedFuture "locations"
 
 type geo =
   static member lookup (country:string) = async {
@@ -289,7 +227,7 @@ type timeline<'k,'v> =
 
     async { 
       // Get data and calculate locations
-      let! data = t.data.data 
+      let! data = t.data.data |> Async.AwaitFuture
       let locs = Array.zeroCreate data.Length
       for i in 0 .. data.Length - 1 do
         let! loc = t.locSelector (snd data.[i])

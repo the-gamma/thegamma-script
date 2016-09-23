@@ -15,7 +15,7 @@ type EditorWorkerMessage =
   | UpdateNow of string
   | Refersh of string
 
-type EditorService(article, checker:string -> Async<bool * (Range * Entity)[] * Program>, delay) = 
+type EditorService(article, checker:string -> Async<bool * Binder.BindingResult * Program>, delay) = 
   let renderEditors = Control.Event<_>()
   let update text = async {
     Log.event("options", "update", article, text)
@@ -68,10 +68,8 @@ type EditorService(article, checker:string -> Async<bool * (Range * Entity)[] * 
 // Type checker
 // ------------------------------------------------------------------------------------------------
 
-type Entities = (Range * Entity)[]
-
 type CheckingMessage = 
-  | TypeCheck of code:string * AsyncReplyChannel<bool * Entities * Program>
+  | TypeCheck of code:string * AsyncReplyChannel<bool * Binder.BindingResult * Program>
   | IsWellTyped of code:string * AsyncReplyChannel<bool>
 
 type Position = { Line:int; Column:int }
@@ -87,13 +85,10 @@ let rangeToLoc lengths (rng:Range) =
   { Start = offsetToLocation 1 rng.Start lengths
     End = offsetToLocation 1 rng.Start lengths }
 
-type CheckingService(article, globals:Future<(string * Type) list>) =
+type CheckingService(article, globals:Future<Entity list>) =
   let errorsReported = Control.Event<_>()
   let emptyProg = { Body = Ast.node { Start = 0; End = 0 } [] }
   let bindingContext = Binder.createContext article
-  let globals = async { 
-    let! globals = Async.AwaitFuture globals
-    return globals |> List.map (fun (n, t) -> TypeChecker.globalEntity n t bindingContext.Root ) } |> Async.AsFuture "globals"
   let errorsToLineCol (code:string) errors = 
     let lengths = code.Split('\n') |> Array.toList |> List.map (fun l -> l.Length)
     errors |> Array.map (fun e -> 
@@ -139,10 +134,10 @@ type CheckingService(article, globals:Future<(string * Type) list>) =
               repl.Reply(result)
               return! loop code result
           | None -> 
-              repl.Reply((false, [||], emptyProg))
+              repl.Reply((false, Binder.BindingResult [||], emptyProg))
               return! loop lastCode lastResult }
     
-    loop "" (false, [||], emptyProg))
+    loop "" (false, Binder.BindingResult [||], emptyProg))
 
   member x.ErrorsReported = errorsReported.Publish
   member x.TypeCheck(code) = agent.PostAndAsyncReply(fun ch -> TypeCheck(code, ch))

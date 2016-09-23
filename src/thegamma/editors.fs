@@ -12,7 +12,7 @@ open TheGamma.Common
 // ------------------------------------------------------------------------------------------------
 
 type Property = 
-  | Property of string * Schema option * Type
+  | Property of string * Metadata option * Type
 
 type Editor = 
   | SingleChoice of Documentation * Node<Name> * Property[]
@@ -35,14 +35,27 @@ let rec getMembers typ = async {
     Log.error("editors", "getMembers: Type %O is not an object", typ)
     return failwith "getMembers: Not an object" }
 
+let extractMetadata m = 
+  let doc = m |> Seq.tryPick (fun m -> 
+    if m.Context = "http://thegamma.net" && m.Type = "Documentation" 
+      then Some(unbox<Documentation> m.Data) else None)
+  let schema = m |> Seq.tryPick (fun m -> 
+    if m.Context = "http://schema.org" then Some(m) else None)
+  schema, defaultArg doc Documentation.None
+
 let getProperty (name:Name) members = 
   members |> Array.tryPick (function 
-    | Member.Property(name=n; schema=s; typ=t; docs=d) when n=name.Name -> Some(s, t, d) 
+    | Member.Property(name=n; meta=m; typ=t) when n=name.Name -> 
+        let schema, doc = extractMetadata m
+        Some(schema, t,  doc)
     | _ -> None)
 
 let filterProperties f members = 
   let filtered = members |> Array.choose (function 
-    | Member.Property(name=n; schema=s; typ=t) when f (n, s, t) -> Some(Property.Property(n, s, t))
+    | Member.Property(name=n; meta=m; typ=t) ->
+        let schema, doc = extractMetadata m
+        if f (n, schema, t) then Some(Property.Property(n, schema, t))
+        else None
     | _ -> None)
   filtered 
 
@@ -56,7 +69,7 @@ let chooseableProperty equalTyp (name:Node<Name>) typ = async {
   match getProperty name.Node members with
   | Some(Some propSchema, propTyp, _) ->
       let alts = members |> filterProperties (function
-        | _, Some s, t -> s.Type = propSchema.Type && (not equalTyp || TypeChecker.typesEqual t propTyp)
+        | _, Some s, t -> s.Type = propSchema.Type && (not equalTyp || Types.typesEqual t propTyp)
         | _ -> false )
       if dominant members alts then return Some(name, alts)
       else return None 
@@ -105,7 +118,7 @@ let collectNestedChoiceEditors =
               catMembers |> trunc |> Async.Array.map (fun (Property(n, _, t) as p) -> async {
               let! members = getMembers t
               let filtered = members |> filterProperties (function
-                | (n, Some s, t) -> s.Type = valSch.Type && TypeChecker.typesEqual t valTy
+                | (n, Some s, t) -> s.Type = valSch.Type && Types.typesEqual t valTy
                 | _ -> false )
               return p, (members, filtered) })
             let! checkMembers = nestedMembers (Seq.truncate 5 >> Array.ofSeq) (* take at most 5...  - Array.truncate TBD *) 
@@ -130,14 +143,14 @@ let collectItemListEditors =
         return None
 
     | (caParentTy, caName, Some caSch, caTy, catDoc)::addActions when caSch.Type = "CreateAction" ->
-        let listName = (unbox<CreateActionSchema> caSch.JSON).result.name
+        let listName = (unbox<CreateActionSchema> caSch.Data).result.name
 
         /// Collect all AddActions in the rest of the chain and return
         /// the added options together with the type of the last member 
         let rec collectAdds added lastTy = function
-          | (addParentTy, addName, Some (addSch:Schema), addTy, _)::addActions when 
+          | (addParentTy, addName, Some (addSch:Metadata), addTy, _)::addActions when 
                 addSch.Type = "AddAction" &&
-                listName = (unbox<AddActionSchema> addSch.JSON).targetCollection.name ->
+                listName = (unbox<AddActionSchema> addSch.Data).targetCollection.name ->
               collectAdds (addName::added) addTy addActions
           | _ -> List.rev added, lastTy
 
@@ -146,7 +159,7 @@ let collectItemListEditors =
         let adds, lastTy = collectAdds [] caTy addActions
         let! members = getMembers lastTy
         let availableAdds = members |> filterProperties (function
-          | (n, Some s, t) when s.Type = "AddAction" -> (unbox<AddActionSchema> s.JSON).targetCollection.name = listName
+          | (n, Some s, t) when s.Type = "AddAction" -> (unbox<AddActionSchema> s.Data).targetCollection.name = listName
           | _ -> false )
         return Some(CreateList(catDoc, caName, Array.ofList adds, availableAdds))
     | _ -> return None })

@@ -72,7 +72,7 @@ let ``Binder binds all names in a sample program`` () =
   let ctx = Binder.createContext("script1")
   let code, p1 = parse (olympicSample true)
   let _, e1 = Binder.bindProgram ctx p1
-  let bound = [ for rng, e in e1 -> code.Substring(rng.Start, rng.End - rng.Start + 1) ]
+  let bound = [ for rng, e in e1.Entities -> code.Substring(rng.Start, rng.End - rng.Start + 1) ]
   let names = 
     [ "data1"; "olympics"; "data"; "'group data'"; "'by Athlete'"; "'sum Gold'"; 
       "'sort data'"; "'by Gold descending'"; "paging"; "take"; "10"; "then"

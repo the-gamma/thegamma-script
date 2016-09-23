@@ -23,7 +23,7 @@ let rangeToLoc ctx rng =
          ``end`` = offsetToLocation 1 rng.Start ctx.LineLengths }
 
 let rec getEmitterAndParams name typ = 
-  match TypeChecker.reduceType typ with
+  match Types.reduceType typ with
   | Type.Object(o) -> 
       o.Members |> Seq.pick (function 
         | Member.Method(name=n; arguments=args; emitter=e) when n = name -> Some(e, args)

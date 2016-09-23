@@ -73,8 +73,10 @@ type Token =
 type Emitter = 
   { Emit : Babel.Expression * Babel.Expression list -> Babel.Expression }
 
-type Schema = 
-  { Type : string; JSON : obj }
+type Metadata = 
+  { Context : string
+    Type : string
+    Data : obj }
 
 type [<RequireQualifiedAccess>] Documentation = 
   | Text of string
@@ -82,8 +84,8 @@ type [<RequireQualifiedAccess>] Documentation =
   | None 
 
 type [<RequireQualifiedAccess>] Member = 
-  | Property of name:string * typ:Type * schema:Schema option * docs:Documentation * emitter:Emitter
-  | Method of name:string * arguments:(string * bool * Type) list * typ:Type * docs:Documentation * emitter:Emitter
+  | Property of name:string * typ:Type * meta:Metadata list * emitter:Emitter
+  | Method of name:string * arguments:(string * bool * Type) list * typ:Type * meta:Metadata list * emitter:Emitter
   member x.Name = 
     match x with Property(name=s) | Method(name=s) -> s
 
@@ -169,8 +171,16 @@ type [<RequireQualifiedAccess>] EntityKind =
 and Entity = 
   { Kind : EntityKind
     Symbol : Symbol 
+    mutable Value : EntityValue option
+    mutable Meta : Metadata list
     mutable Type : Type option 
     mutable Errors : Error<Range> list }
+
+and RuntimeValue = interface end
+
+and EntityValue =
+  { Value : RuntimeValue
+    Preview : RuntimeValue option }
 
 // ------------------------------------------------------------------------------------------------
 // Parsed AST 

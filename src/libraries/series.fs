@@ -1,6 +1,7 @@
 ﻿namespace TheGamma.Series
 
 open Fable.Core
+open TheGamma.Common
 
 // --------------------------------------------------------------------------------------------------------------------
 // Series helpers - various JavaScript functions needed for simple series implementation
@@ -89,16 +90,16 @@ open SeriesInternals
 type internal helpers = 
   static member inline lift (f:('a*'b)[] -> ('c*'d)[]) (s:series<_, _>) =
     let nd = async {
-      let! vs = s.data
-      return f vs }
+      let! vs = s.data |> Async.AwaitFuture
+      return f vs } |> Async.StartAsFuture
     { data = nd
       keyName = s.keyName
       valueName = s.valueName
-      seriesName = s.seriesName }
+      seriesName = s.seriesName } 
   static member inline asyncLift (f:('a*'b)[] -> Async<('c*'d)[]>) (s:series<_, _>) =
     let nd = async {
-      let! vs = s.data
-      return! f vs }
+      let! vs = s.data |> Async.AwaitFuture
+      return! f vs } |> Async.StartAsFuture
     { data = nd
       keyName = s.keyName
       valueName = s.valueName
@@ -112,7 +113,7 @@ type internal helpers =
 
 and series<'k, 'v> = 
   internal 
-    { data : Async<('k * 'v)[]> 
+    { data : Future<('k * 'v)[]> 
       keyName : string
       valueName : string
       seriesName : string }
@@ -130,12 +131,12 @@ and series<'k, 'v> =
 
 //type series =
   static member create(data, keyName, valueName, seriesName) = 
-    { data = data; keyName = keyName; valueName = valueName; seriesName = seriesName }
+    { data = data |> Async.StartAsFuture; keyName = keyName; valueName = valueName; seriesName = seriesName }
 
   // TODO: This is where the naming starts to suck
   static member values(values) = 
     let data = async {
-      return values |> Array.mapi (fun i v -> i, v) }
+      return values |> Array.mapi (fun i v -> i, v) } |> Async.StartAsFuture
     { data = data; keyName = "key"; valueName = "value"; seriesName = "" }
 
   static member range(from, ``to``) = 
@@ -147,7 +148,7 @@ and series<'k, 'v> =
   static member ordinal(data, keyName, valueName, seriesName) = 
     let data = async {
       let! values = data
-      return values |> Array.mapi (fun i v -> i, v) }
+      return values |> Array.mapi (fun i v -> i, v) } |> Async.StartAsFuture
     { data = data; keyName = keyName; valueName = valueName; seriesName = seriesName }
 
   member s.sortKeys(?reverse) =
@@ -201,8 +202,8 @@ and series<'k, 'v> =
 
   member s.joinOuter<'v2>(s2:series<'k, 'v2>) : series<'k, 'v option * 'v2 option>=
     let data = async {
-      let! v1 = s.data
-      let! v2 = s2.data
+      let! v1 = s.data |> Async.AwaitFuture
+      let! v2 = s2.data |> Async.AwaitFuture
       return zipAny v1 v2 }
     series<obj,obj>.create(data, s.keyName, "Values", s.seriesName + " and " + s2.seriesName)
 
@@ -220,9 +221,9 @@ and series<'k, 'v> =
 *)
   member s.append(s2:series<'k, 'v>) =
     s.set(async {
-      let! arr1 = s.data
-      let! arr2 = s2.data
-      return Array.append arr1 arr2 })
+      let! arr1 = s.data |> Async.AwaitFuture
+      let! arr2 = s2.data |> Async.AwaitFuture
+      return Array.append arr1 arr2 } |> Async.StartAsFuture)
 (*
   member s.last() =
     s |> helpers.liftAggregation (fun arr -> snd arr.[arr.Length - 1])
@@ -238,7 +239,7 @@ and series<'k, 'v> =
 *)
   member s.realign(newKeys:series<'k, 'v>, defaultValue) = 
     s |> helpers.asyncLift (fun arr -> async {
-      let! newKeys = newKeys.data 
+      let! newKeys = newKeys.data |> Async.AwaitFuture
       let newKeys = newKeys |> Array.map (fun (k, v) -> unbox<System.IComparable> v)
       let lookup = Map.ofArray (unbox<(System.IComparable * 'v)[]> arr)
       return newKeys |> Array.map (fun k ->

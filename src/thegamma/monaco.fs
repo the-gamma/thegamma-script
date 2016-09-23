@@ -8,6 +8,25 @@ open TheGamma.Common
 open TheGamma.Services
 open TheGamma.TypeChecker
 
+type LocationMapper(code:string) = 
+  let lengths = code.Split('\n') |> Array.map (fun s -> s.Length)
+
+  /// Convert absolute 0-based location to 1-based line and 1-based column location
+  member x.AbsoluteToLineCol(offs) = 
+    let mutable line = 0
+    let mutable col = 0
+    let mutable offs = offs
+    while line <= lengths.Length && offs > lengths.[line] do
+      offs <- offs - lengths.[line] - 1
+      line <- line + 1
+    line + 1, offs + 1
+
+  /// Convert 1-based line and 1-based column location to an absolute 0-based location
+  member x.LineColToAbsolute(line, col) = 
+    let mutable offs = 0
+    for l in 1 .. line-1 do offs <- offs + lengths.[l-1] + 1
+    offs + col - 1
+
 [<Emit("_monaco = monaco;")>]
 let hack : unit = ()
 hack
@@ -43,13 +62,6 @@ let tokensProvider =
         tokens
       member this.getInitialState() = noState }
 
-let needsEscaping (s:string) = 
-  (s.[0] >= '0' && s.[0] <= '9') ||
-  (s.ToCharArray() |> Array.exists (fun c -> not ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) ))
-
-let escapeIdent s = 
-  if needsEscaping s then "'" + s + "'" else s
-
 let createCompletionProvider (getService:string -> CheckingService) = 
   { new languages.CompletionItemProvider with 
       member this.triggerCharacters = Some(ResizeArray [ "." ])
@@ -61,30 +73,28 @@ let createCompletionProvider (getService:string -> CheckingService) =
             let input = model.getValue(editor.EndOfLinePreference.LF, false)
             Log.event("editor", "completions", "", JsInterop.createObj ["source", box input; "position", box position])
 
-            let lengths = input.Split('\n') |> Array.map (fun s -> s.Length)
-            let loc = 
-              int position.column - 1 +
-                List.fold (+) 0 [ for i in 1 .. int position.lineNumber-1 -> lengths.[i-1] + 1 ]
+            let conv = LocationMapper(input)
+            let loc = conv.LineColToAbsolute(int position.lineNumber, int position.column)
             
             let! _, ents, _ = svc.TypeCheck(input)
             let optMembers = 
-              ents |> Seq.tryPick (fun (rng, ent) ->
+              ents.Entities |> Seq.tryPick (fun (rng, ent) ->
                 match ent.Kind with 
                 | EntityKind.NamedMember(_, { Type = Some t }) when loc >= rng.Start && loc <= rng.End + 1 -> 
                     Log.trace("completions", "Antecedant at current location: %O", t)
-                    match TypeChecker.reduceType t with
+                    match Types.reduceType t with
                     | Type.Object { Members = mems } -> Some(rng, mems)
                     | _ -> None
                 | _ -> None)
 
             let convertRange (rng:TheGamma.Range) = 
-              let s = CodeGenerator.offsetToLocation 1 rng.Start (List.ofArray lengths)
-              let e = CodeGenerator.offsetToLocation 1 rng.End (List.ofArray lengths)
+              let sl, sc = conv.AbsoluteToLineCol(rng.Start)
+              let el, ec = conv.AbsoluteToLineCol(rng.End)
               let res = JsInterop.createEmpty<IRange>
-              res.startColumn <- float s.column+1.0
-              res.startLineNumber <- float s.line
-              res.endColumn <- float e.column+2.0
-              res.endLineNumber <- float e.line
+              res.startColumn <- float sc
+              res.startLineNumber <- float sl
+              res.endColumn <- float ec + 1.0
+              res.endLineNumber <- float el
               res
 
             match optMembers with 
@@ -103,7 +113,7 @@ let createCompletionProvider (getService:string -> CheckingService) =
                         | Member.Property(name=n) -> n, languages.CompletionItemKind.Property
                       ci.kind <- k
                       ci.label <- n
-                      ci.insertText <- Some(escapeIdent n)
+                      ci.insertText <- Some(Ast.escapeIdent n)
                       ci.filterText <- Some(n)
                       match m with
                       | Member.Method(arguments=args) -> 
@@ -117,7 +127,7 @@ let createCompletionProvider (getService:string -> CheckingService) =
                       | _ -> ()
 
                       let eo = JsInterop.createEmpty<editor.ISingleEditOperation>
-                      eo.text <- if needsEscaping n then "'" + n + "'" else n
+                      eo.text <- Ast.escapeIdent n
                       eo.range <- nameRange
                       ci.textEdit <- Some eo
                       ci ] 
@@ -136,6 +146,7 @@ let setupMonacoServices (getService : string -> CheckingService) =
   languages.Globals.registerCompletionItemProvider("thegamma", createCompletionProvider getService) |> ignore
   languages.Globals.register(lang)
 
+
 let createMonacoEditor id code customize = 
   let services = JsInterop.createEmpty<editor.IEditorOverrideServices>
   let options = JsInterop.createEmpty<editor.IEditorConstructionOptions>
@@ -151,5 +162,6 @@ let createMonacoEditor id code customize =
   options.overviewRulerLanes <- Some 0.0
   customize options
   editor.Globals.create(document.getElementById(id), options, services)
+
 
 

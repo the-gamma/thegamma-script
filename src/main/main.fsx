@@ -86,16 +86,16 @@ let types = async {
     allTys 
     |> List.choose (function TypePoviders.GlobalValue(s, e, t) -> Some(s, e, t) | _ -> None)
   
-  return { Globals = globals; LookupNamed = lookupNamed } } |> Async.StartAsFuture "types"
+  return { Globals = globals; LookupNamed = lookupNamed } } |> Async.StartAsNamedFuture "types"
 
 let globalTypes = async { 
   let! ty = types |> Async.AwaitFuture
   Log.trace("typechecker", "Global values: %O", Array.ofList ty.Globals)
-  return ty.Globals |> List.map (fun (n, _, t) -> n, t) } |> Async.StartAsFuture "global types"
+  return ty.Globals |> List.map (fun (n, e, t) -> Interpreter.globalEntity n t (Some e)) } |> Async.StartAsNamedFuture "global types"
 
 let globalExprs = async { 
   let! ty = types |> Async.AwaitFuture
-  return ty.Globals |> List.map (fun (n, e, _) -> n, e) |> Map.ofList } |> Async.StartAsFuture "global exps"
+  return ty.Globals |> List.map (fun (n, e, _) -> n, e) |> Map.ofList } |> Async.StartAsNamedFuture "global exps"
 
 // ------------------------------------------------------------------------------------------------
 // HTML helpers
@@ -126,10 +126,172 @@ let findChildElement f e = tryFindChildElement f e |> FsOption.get
 let withClass cls (el:Element) = el.classList.contains cls
 
 // ------------------------------------------------------------------------------------------------
+// More experiments
+// ------------------------------------------------------------------------------------------------
+
+open TheGamma.Ast
+open TheGamma.Services
+open TheGamma.Common
+open monaco
+
+let pickMetaByType ctx typ metas = 
+  metas |> List.tryPick (fun m -> 
+    if m.Context = ctx && m.Type = typ then Some(m.Data)
+    else None)
+
+let pickPivotChainElement ents = 
+  ents |> Seq.tryPick (function
+    | { Kind = EntityKind.ChainElement _; Meta = m } as e -> 
+        match pickMetaByType "http://thegamma.net" "Pivot" e.Meta with
+        | Some m -> Some(e, unbox<TypeProviders.Pivot.Transformation list> m)
+        | _ -> None
+    | _ -> None)
+
+let tryFindPreview globals (ents:Binder.BindingResult) (ent:Entity) = 
+  let nm = {Name.Name="preview"}
+  match ent.Type with 
+  | Some(Type.Object(TypeChecker.FindProperty nm prev)) ->
+      let res = Interpreter.evaluate globals ent  
+      match res with
+      | Some { Preview = Some p } ->
+          Some(fun id ->
+            table<int, int>.create(unbox<Series.series<string, obj>> p).set(showKey=false).show(id)
+          )
+      | _ -> None
+      //Log.trace("system", "Preview rendered")
+      //Some(sprintf "<ul style='font-size:10pt'>%s</ul>" (String.concat "" s))
+      //Some(sprintf "preview :-) %A" res)
+  | _ ->
+      None //Some("no preview :-(")
+
+let commandAtLocation loc (ents:Binder.BindingResult) = 
+  ents.Entities |> Array.tryFind (fun (rng, ent) ->
+    match ent.Kind with
+    | EntityKind.LetCommand _ | EntityKind.RunCommand _ when rng.Start <= loc && rng.End + 1 >= loc -> true
+    | _ -> false )
+
+let chainElementAtLocation loc (ents:Binder.BindingResult) =
+  let chainElements = 
+    ents.Entities |> Array.choose (fun (rng, ent) ->
+      match ent.Kind with
+      | EntityKind.ChainElement(name=n) when rng.Start <= loc && rng.End >= loc -> Some(rng, ent)
+      | _ -> None)
+  if chainElements.Length > 0 then
+    Some(chainElements |> Array.minBy (fun (rng, _) -> rng.End))
+  else None
+
+let transformName = function
+  | TypeProviders.Pivot.Transformation.DropColumns _ -> "drop columns"
+  | TypeProviders.Pivot.Transformation.Empty _ -> "empty"
+  | TypeProviders.Pivot.Transformation.FilterBy _ -> "filter by"
+  | TypeProviders.Pivot.Transformation.GetSeries _ -> "get series"
+  | TypeProviders.Pivot.Transformation.GroupBy _ -> "group by"
+  | TypeProviders.Pivot.Transformation.Paging _ -> "paging"
+  | TypeProviders.Pivot.Transformation.SortBy _ -> "sort by"
+
+open TheGamma.TypeProviders
+  
+type PivotSection = 
+  { Transformation : Pivot.Transformation   
+    Entities : Entity list }
+
+let createPivotSections tfss = 
+  let rec loop acc (currentTfs, currentEnts, currentLength) = function
+    | (e, tfs)::tfss when 
+          transformName (List.head tfs) = transformName currentTfs && 
+          List.length tfs = currentLength ->
+        loop acc (List.head tfs, e::currentEnts, currentLength) tfss
+    | (e, tfs)::tfss ->
+          let current = { Transformation = currentTfs; Entities = List.rev currentEnts }
+          loop (current::acc) (List.head tfs, [e], List.length tfs) tfss
+    | [] -> 
+          let current = { Transformation = currentTfs; Entities = List.rev currentEnts }
+          List.rev (current::acc)
+    
+  let tfss = tfss |> List.choose (fun (e, tfs) ->
+    let tfs = tfs |> List.filter (function Pivot.Empty -> false | _ -> true)
+    if List.isEmpty tfs then None else Some(e, tfs))
+  match tfss with
+  | (e, tfs)::tfss -> loop [] (List.head tfs, [e], List.length tfs) tfss
+  | [] -> []
+
+
+let tryCreatePivotPreview globals loc bound = 
+  match chainElementAtLocation loc bound with
+  | Some(_, ent) ->
+      match pickPivotChainElement [ent] with
+      | Some current ->
+          let before = (ent, []) |> List.unreduce (fun (e, _) -> pickPivotChainElement e.Antecedents) |> List.rev
+          let after = (ent, []) |> List.unreduce (fun (e, _) -> pickPivotChainElement (bound.GetChildren(e)))
+          let sections = createPivotSections (before @ [current] @ after)
+          let preview = defaultArg (tryFindPreview globals bound ent) ignore
+          h?div ["class" => "pivot-preview"] [
+            h?ul ["class" => "tabs"] [
+              for sec in sections do
+                let selected = sec.Entities |> List.exists (fun secEnt -> ent.Symbol = secEnt.Symbol)
+                yield h?li ["class" => if selected then "selected" else ""] [ text (transformName sec.Transformation) ]
+            ]
+            h?div ["class" => "preview-body"] [
+              h.delayed preview
+            ]
+          ] |> Some
+      | _ -> None
+  | _ -> None
+
+type PreviewService(checker:CheckingService, ed:monaco.editor.ICodeEditor) =
+  let mutable lastZone = None
+  let removeZone () =
+    match lastZone with 
+    | Some id -> ed.changeViewZones(fun accessor -> accessor.removeZone(id))
+    | None -> ()
+
+  let createAndAddZone endLine html =
+    let mutable zoneId = -1.
+    let zone = JsInterop.createEmpty<editor.IViewZone>
+    
+    let node = document.createElement_div()
+    let wrapper = document.createElement_div()
+    node.appendChild(wrapper) |> ignore
+    ed.changeViewZones(fun accessor ->  
+      lastZone |> FsOption.iter (accessor.removeZone)
+      zone.afterLineNumber <- endLine
+      zone.heightInPx <- Some 100.0
+      zone.domNode <- node
+      zoneId <- accessor.addZone(zone) 
+      lastZone <- Some zoneId )
+
+    html |> renderTo wrapper
+    window.setTimeout((fun () -> 
+      zone.heightInPx <- Some wrapper.clientHeight
+      ed.changeViewZones(fun a -> a.layoutZone(zoneId)) ), 1)
+    |> ignore
+
+
+  do
+    ed.onDidChangeCursorPosition(fun ce -> 
+      async {
+        let code = ed.getModel().getValue(editor.EndOfLinePreference.LF, false)
+        let mapper = Monaco.LocationMapper(code)
+        let loc = mapper.LineColToAbsolute(int ce.position.lineNumber, int ce.position.column)
+        let! _, bound, _ = checker.TypeCheck(code)
+        let! glob = globalTypes |> Async.AwaitFuture
+        match commandAtLocation loc bound with
+        | Some(cmdRange, _) ->
+            let line, col = mapper.AbsoluteToLineCol(cmdRange.End + 1)
+            match tryCreatePivotPreview glob loc bound with
+            | Some html ->
+                createAndAddZone (float line + 0.0) html
+            | _ -> removeZone ()
+        | _ ->
+            removeZone ()
+        () } |> Async.StartImmediate ) |> ignore
+
+    ()
+
+// ------------------------------------------------------------------------------------------------
 // Putting everything togeter
 // ------------------------------------------------------------------------------------------------
 
-open TheGamma.Services
 
 [<Emit("setRunner($0, $1)")>]
 let setRunner (article:string) (f:unit -> unit) = failwith "JS"
@@ -143,7 +305,7 @@ let cannotShareSnippet () = failwith "JS"
 let callShowMethod outId cmd = async {
   match cmd.Node with
   | Command.Expr({ Entity = Some { Type = Some typ } } as inst) ->
-      match TypeChecker.reduceType typ with
+      match Types.reduceType typ with
       | Type.Object { Members = members } ->
           let hasShow = members |> Array.exists (function 
             | Member.Method(name="show"; arguments=[_, _, Type.Primitive PrimitiveType.String]) -> true
@@ -220,6 +382,9 @@ let setupEditor (parent:HTMLElement) =
   setRunner article (fun () -> 
     run source |> Async.StartImmediate)
 
+  let mutable optionsVisible = false
+  let mutable editorVisible = false
+
   let ed = Lazy.Create(fun () ->   
     let ed = Monaco.createMonacoEditor monacoEl.id source (fun opts ->
       opts.fontFamily <- Some "Inconsolata"
@@ -235,10 +400,12 @@ let setupEditor (parent:HTMLElement) =
 
     ed.getModel().onDidChangeContent(fun _ ->
       let text = ed.getModel().getValue(monaco.editor.EndOfLinePreference.LF, false)
-      editorService.UpdateSource(text) 
+      if optionsVisible then
+        editorService.UpdateSource(text) 
       resizeEditor text) |> ignore
       
     resizeEditor source
+    PreviewService(checkingService, ed) |> ignore
     ed )
   
   let getText() = 
@@ -248,12 +415,9 @@ let setupEditor (parent:HTMLElement) =
   let setText (edit:string) membr t = 
     Log.event("options", "set-text", article, JsInterop.createObj ["edit", box edit; "member", box membr ])
     ed.Value.getModel().setValue(t)
-    if showOptionsBtn.IsSome then
+    if showOptionsBtn.IsSome && optionsVisible then
       editorService.UpdateSource(t, true)
     run(t) |> Async.StartImmediate
-
-  let mutable optionsVisible = false
-  let mutable editorVisible = false
 
   let showOrHideActions () =
     let vis = if optionsVisible || editorVisible then "inline" else "none"
@@ -282,7 +446,9 @@ let setupEditor (parent:HTMLElement) =
     showOrHideActions()
     editorEl.style.display <- if editorVisible then "block" else "none"
     Log.event("gui", "editor", article, editorVisible)
-    if editorVisible then ed.Force() |> ignore
+    if editorVisible then 
+      ed.Force() |> ignore
+      editorService.UpdateSource(getText()) 
     
   showCodeBtn.onclick <- fun _ -> switchEditor(); box()
   if source.Contains("empty.create") then switchEditor()
