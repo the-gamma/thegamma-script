@@ -108,7 +108,8 @@ and evaluateEntity ctx (e:Entity) =
           Some(evaluateCall e (getValue ctx inst) [])
       | _ -> None
 
-  | EntityKind.ChainElement(isProperty=false; name=name; instance=Some inst; 
+  | EntityKind.ChainElement
+      ( isProperty=false; name=name; instance=Some inst; 
         arguments=Some { Kind = EntityKind.ArgumentList(args) }) ->
       let pb = args |> List.takeWhile (function { Kind = EntityKind.NamedParam _ } -> false | _ -> true)  
       let nb = args |> List.skipWhile (function { Kind = EntityKind.NamedParam _ } -> false | _ -> true)  

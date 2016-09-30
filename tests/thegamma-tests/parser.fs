@@ -520,6 +520,7 @@ let ``Report error when function is missing arrow``() =
 // TESTS: Explicit functions
 // --------------------------------------------------------------------------------------
 
+[<Test>]
 let ``Ranges of identifiers in Olympic sample are correct`` = 
   let actual = parse """
     let phelp =
@@ -538,4 +539,4 @@ let ``Ranges of identifiers in Olympic sample are correct`` =
       .legend(position="none")
   """
   actual |> assertErrors []
-  actual |> assertNamesMatch 
+  actual |> assertNamesMatch

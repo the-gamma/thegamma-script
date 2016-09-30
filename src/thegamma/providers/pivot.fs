@@ -36,6 +36,7 @@ type Transformation =
   | FilterBy of (string * bool * string) list
   | Paging of Paging list
   | GetSeries of string * string
+  | GetTheData
   | Empty
 
 type Field = 
@@ -56,6 +57,7 @@ module Transform =
   let toUrl transforms = 
     [ for t in List.rev transforms ->
         match t with
+        | GetTheData -> ["data"]
         | FilterBy(conds) -> "filter"::(List.collect (fun (f,b,v) -> [f; (if b then "eq" else "neq"); v]) conds)
         | DropColumns(columns) -> "drop"::columns
         | SortBy(columns) -> "sort"::(List.collect (fun (c, o) -> [c; (if o = Ascending then "asc" else "desc")]) columns)
@@ -69,6 +71,7 @@ module Transform =
 
   let singleTransformFields fields = function
     | Empty -> fields
+    | GetTheData -> fields
     | SortBy _ -> fields
     | Paging _ -> fields
     | FilterBy _ -> fields
@@ -190,7 +193,7 @@ and makeDataMember ctx name isPreview tfs =
         let recTyp = Type.Object { Members = membs }
         ctx.LookupNamed "series" [Type.Primitive PrimitiveType.Number; recTyp ], false
 
-  let meta = { Context = "http://thegamma.net"; Type = "Pivot"; Data = box tfs  }
+  let meta = { Context = "http://thegamma.net"; Type = "Pivot"; Data = box (GetTheData::tfs) }
   Member.Property(name, dataTyp, [meta], makeDataEmitter isPreview isSeries tfs)
 
 and handleGetSeriesRequest ctx rest k v = 
@@ -326,7 +329,9 @@ and makePivotTypeImmediate ctx tfs = async {
   | GroupBy(flds, []) ->
       return handleGroupRequest ctx rest flds
   | GroupBy(flds, aggs) ->
-      return handleGroupAggRequest ctx rest flds aggs }
+      return handleGroupAggRequest ctx rest flds aggs 
+  | GetTheData ->
+      return failwith "makePivotTypeImmediate: Get the data shouldn't be of pivot type" }
 
 and adjustForPreview tfs = 
   match tfs with

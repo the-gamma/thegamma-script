@@ -85,6 +85,7 @@
   <ItemGroup>
     <Compile Include="tokenizer.fs" />
     <Compile Include="parser.fs" />
+    <Compile Include="formatter.fs" />
     <Compile Include="binder.fs" />
     <Compile Include="typechecker.fs" />
     <None Include="fableconfig.json" />

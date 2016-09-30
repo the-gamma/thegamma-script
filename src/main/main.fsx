@@ -10,7 +10,7 @@ module FsOption = Microsoft.FSharp.Core.Option
 
 open TheGamma
 open TheGamma.Html
-open TheGamma.Babel
+//open TheGamma.Babel
 open TheGamma.Common
 open TheGamma.TypeChecker
 open Fable.Core
@@ -27,7 +27,7 @@ let services =
 
 type ProvidedTypes = 
   { LookupNamed : string -> Type list -> Type
-    Globals : list<string * Expression * Type> }
+    Globals : list<string * Babel.Expression * Type> }
     
 let types = async {
   let mutable named = Map.empty
@@ -132,22 +132,23 @@ let withClass cls (el:Element) = el.classList.contains cls
 open TheGamma.Ast
 open TheGamma.Services
 open TheGamma.Common
-open monaco
 
 let pickMetaByType ctx typ metas = 
   metas |> List.tryPick (fun m -> 
     if m.Context = ctx && m.Type = typ then Some(m.Data)
     else None)
 
-let pickPivotChainElement ents = 
-  ents |> Seq.tryPick (function
-    | { Kind = EntityKind.ChainElement _; Meta = m } as e -> 
-        match pickMetaByType "http://thegamma.net" "Pivot" e.Meta with
-        | Some m -> Some(e, unbox<TypeProviders.Pivot.Transformation list> m)
-        | _ -> None
-    | _ -> None)
+let pickPivotChainElement expr =
+  match expr.Entity with
+  | Some { Kind = EntityKind.ChainElement _; Meta = m } -> 
+      match pickMetaByType "http://thegamma.net" "Pivot" m with
+      | Some m -> Some(unbox<TypeProviders.Pivot.Transformation list> m)
+      | _ -> None
+  | Some { Kind = EntityKind.GlobalValue _; Meta = m } -> 
+      Some([])
+  | _ -> None
 
-let tryFindPreview globals (ents:Binder.BindingResult) (ent:Entity) = 
+let tryFindPreview globals (ent:Entity) = 
   let nm = {Name.Name="preview"}
   match ent.Type with 
   | Some(Type.Object(TypeChecker.FindProperty nm prev)) ->
@@ -164,12 +165,10 @@ let tryFindPreview globals (ents:Binder.BindingResult) (ent:Entity) =
   | _ ->
       None //Some("no preview :-(")
 
-let commandAtLocation loc (ents:Binder.BindingResult) = 
-  ents.Entities |> Array.tryFind (fun (rng, ent) ->
-    match ent.Kind with
-    | EntityKind.LetCommand _ | EntityKind.RunCommand _ when rng.Start <= loc && rng.End + 1 >= loc -> true
-    | _ -> false )
-
+let commandAtLocation loc (program:Program) =
+  program.Body.Node |> List.tryFind (fun cmd ->
+    cmd.Range.Start <= loc && cmd.Range.End + 1 >= loc)
+(*
 let chainElementAtLocation loc (ents:Binder.BindingResult) =
   let chainElements = 
     ents.Entities |> Array.choose (fun (rng, ent) ->
@@ -179,21 +178,22 @@ let chainElementAtLocation loc (ents:Binder.BindingResult) =
   if chainElements.Length > 0 then
     Some(chainElements |> Array.minBy (fun (rng, _) -> rng.End))
   else None
-
+*)
 let transformName = function
   | TypeProviders.Pivot.Transformation.DropColumns _ -> "drop columns"
   | TypeProviders.Pivot.Transformation.Empty _ -> "empty"
   | TypeProviders.Pivot.Transformation.FilterBy _ -> "filter by"
   | TypeProviders.Pivot.Transformation.GetSeries _ -> "get series"
+  | TypeProviders.Pivot.Transformation.GetTheData _ -> "get the data"
   | TypeProviders.Pivot.Transformation.GroupBy _ -> "group by"
   | TypeProviders.Pivot.Transformation.Paging _ -> "paging"
   | TypeProviders.Pivot.Transformation.SortBy _ -> "sort by"
 
 open TheGamma.TypeProviders
-  
+
 type PivotSection = 
   { Transformation : Pivot.Transformation   
-    Entities : Entity list }
+    Nodes : Node<Expr> list }
 
 let createPivotSections tfss = 
   let rec loop acc (currentTfs, currentEnts, currentLength) = function
@@ -202,91 +202,270 @@ let createPivotSections tfss =
           List.length tfs = currentLength ->
         loop acc (List.head tfs, e::currentEnts, currentLength) tfss
     | (e, tfs)::tfss ->
-          let current = { Transformation = currentTfs; Entities = List.rev currentEnts }
+          let current = { Transformation = currentTfs; Nodes = List.rev currentEnts }
           loop (current::acc) (List.head tfs, [e], List.length tfs) tfss
     | [] -> 
-          let current = { Transformation = currentTfs; Entities = List.rev currentEnts }
+          let current = { Transformation = currentTfs; Nodes = List.rev currentEnts }
           List.rev (current::acc)
     
-  let tfss = tfss |> List.choose (fun (e, tfs) ->
-    let tfs = tfs |> List.filter (function Pivot.Empty -> false | _ -> true)
-    if List.isEmpty tfs then None else Some(e, tfs))
+  let tfss = tfss |> List.choose (fun node ->
+    match pickPivotChainElement node with
+    | Some(tfs) ->
+        let tfs = tfs |> List.filter (function Pivot.Empty -> false | _ -> true)
+        if List.isEmpty tfs then None else Some(node, tfs)
+    | None -> None )
   match tfss with
   | (e, tfs)::tfss -> loop [] (List.head tfs, [e], List.length tfs) tfss
   | [] -> []
 
+let rec collectChain acc node =
+  match node.Node with
+  | Expr.Call(Some e, n, _) 
+  | Expr.Property(e, n) -> collectChain ((n.Range.Start, node)::acc) e
+  | Expr.Variable(n) -> (n.Range.Start, node)::acc
+  | _ -> acc
 
-let tryCreatePivotPreview globals loc bound = 
-  match chainElementAtLocation loc bound with
-  | Some(_, ent) ->
-      match pickPivotChainElement [ent] with
-      | Some current ->
-          let before = (ent, []) |> List.unreduce (fun (e, _) -> pickPivotChainElement e.Antecedents) |> List.rev
-          let after = (ent, []) |> List.unreduce (fun (e, _) -> pickPivotChainElement (bound.GetChildren(e)))
-          let sections = createPivotSections (before @ [current] @ after)
-          let preview = defaultArg (tryFindPreview globals bound ent) ignore
-          h?div ["class" => "pivot-preview"] [
-            h?ul ["class" => "tabs"] [
-              for sec in sections do
-                let selected = sec.Entities |> List.exists (fun secEnt -> ent.Symbol = secEnt.Symbol)
-                yield h?li ["class" => if selected then "selected" else ""] [ text (transformName sec.Transformation) ]
-              yield h?li ["class" => "add"] [ h?i ["class" => "fa fa-plus"] [] ]
-            ]
-            h?div ["class" => "preview-body"] [
-              h.delayed preview
-            ]
-          ] |> Some
-      | _ -> None
+let rec collectFirstChain expr = 
+  let chain = collectChain [] expr 
+  if not (List.isEmpty chain) then Some chain else
+  match expr with
+  | { Node = ExprNode(es, _) } -> es |> List.tryPick collectFirstChain
   | _ -> None
 
-type PreviewService(checker:CheckingService, ed:monaco.editor.ICodeEditor) =
-  let mutable lastZone = None
-  let removeZone () =
-    match lastZone with 
-    | Some id -> ed.changeViewZones(fun accessor -> accessor.removeZone(id))
-    | None -> ()
+// ------------------------------------------------------------------------------------------------
+// Elmish pivot editor
+// ------------------------------------------------------------------------------------------------
 
-  let createAndAddZone endLine html =
+type PivotEditorAction = 
+  | InitializeGlobals of seq<Entity>
+  | UpdateSource of string * int * Program * Monaco.LocationMapper
+  | UpdateLocation of int
+  | Select of (int * int) * (int * int)
+  | AddTransform of Pivot.Transformation
+  | OpenAddDropdown
+  | HideAddDropDown
+
+type PivotEditorMenus =
+  | AddDropdownOpen
+  | Hidden
+
+type PivotEditorState = 
+  { // Initialized once - global values
+    Globals : seq<Entity>
+    // Updated when code changes - parsed program
+    Code : string
+    Program : Program
+    Mapper : Monaco.LocationMapper
+    // Updated when cursor moves 
+    Location : int
+
+    // Calculated from the above
+    Body : Node<Expr> option
+    Selection : option<monaco.IRange>
+    Menus : PivotEditorMenus  }
+
+let updateBody state = 
+  match commandAtLocation state.Location state.Program with
+  | Some(cmd) ->
+      let line, col = state.Mapper.AbsoluteToLineCol(cmd.Range.End + 1)
+      let (Command.Expr expr | Command.Let(_, expr)) = cmd.Node 
+      { state with Body = Some expr }
+  | _ -> 
+      { state with Body = None }
+
+let hideMenus state = { state with Menus = Hidden }
+
+let updatePivotState state event = 
+  match event with
+  | InitializeGlobals(globals) ->
+      { state with PivotEditorState.Globals = globals }
+  | UpdateLocation(loc) ->
+      { state with Location = loc } |> updateBody |> hideMenus
+  | UpdateSource(code, loc, program, mapper) ->
+      { state with Location = loc; Program = program; Code = code; Mapper = mapper } |> updateBody |> hideMenus
+  | HideAddDropDown ->
+      hideMenus state
+  | OpenAddDropdown ->
+      { state with Menus = AddDropdownOpen }
+  | AddTransform tfs ->
+      match state.Body with
+      | Some body ->
+          match collectFirstChain body with
+          | Some chain ->
+              for _, n in chain do
+                match pickPivotChainElement n with
+                | Some (Pivot.GetSeries _ :: _) 
+                | Some (Pivot.GetTheData _ :: _) 
+                | None -> ()
+                | Some tfs -> 
+                    Log.trace("live", "Chain element [%s-%s]: %s", n.Range.Start, n.Range.End, n.Entity.Value.Name)
+          | _ -> ()
+      | _ -> ()
+      hideMenus state
+  | Select((sl, sc), (el, ec)) ->        
+      let rng = JsInterop.createEmpty<monaco.IRange>
+      rng.startLineNumber <- float sl
+      rng.startColumn <- float sc
+      rng.endLineNumber <- float el
+      rng.endColumn <- float ec
+      { state with Selection = Some rng } |> hideMenus
+
+let renderPivot trigger state = 
+  let trigger action = fun _ _ -> trigger action
+  match state.Body with
+  | None -> None 
+  | Some body ->
+  match collectFirstChain body with
+  | None -> None
+  | Some(chainNodes) ->
+      let starts = [| for r,n in chainNodes -> sprintf "%d: %s" r n.Entity.Value.Name |]
+      Log.trace("live", "Find chain element at %d in %O", state.Location, starts)
+      match chainNodes |> List.filter (fun (start, node) -> state.Location >= start) |> List.tryLast with
+      | None -> None
+      | Some(_, selNode) ->
+          let selEnt = selNode.Entity.Value
+          let sections = chainNodes |> List.map snd |> createPivotSections 
+          let preview = defaultArg (tryFindPreview state.Globals selEnt) ignore
+          let dom = 
+            h?div [
+                yield "class" => "pivot-preview"
+                if state.Menus = AddDropdownOpen then
+                  yield "click" =!> trigger HideAddDropDown 
+              ] [
+              h?ul ["class" => "tabs"] [
+                for sec in sections ->
+                  let selected = sec.Nodes |> List.exists (fun secEnt -> selEnt.Symbol = secEnt.Entity.Value.Symbol)
+                  let identRange = 
+                    match sec.Nodes with
+                    | { Node = Expr.Variable n | Expr.Call(_, n, _) | Expr.Property(_, n) }::_ -> 
+                        state.Mapper.AbsoluteToLineCol(n.Range.Start),
+                        state.Mapper.AbsoluteToLineCol(n.Range.End+1)
+                    | _ -> failwith "Unexpected node in pivot call chain" 
+
+                  h?li ["class" => if selected then "selected" else ""] [ 
+                    h?a ["click" =!> trigger (Select(identRange)) ] [
+                      text (transformName sec.Transformation) 
+                    ]
+                  ]
+                yield h?li ["class" => if state.Menus = AddDropdownOpen then "add selected" else "add"] [ 
+                  h?a ["click" =!> trigger OpenAddDropdown ] [
+                    h?i ["class" => "fa fa-plus"] [] 
+                  ]
+                ]
+              ]
+              h?div ["class" => "add-menu"] [
+                let clickHandler tfs = "click" =!> trigger (AddTransform(tfs))
+                if state.Menus = AddDropdownOpen then
+                  yield h?ul [] [
+                    h?li [] [ h?a [ clickHandler(Pivot.DropColumns []) ] [ text "drop columns"] ]
+                    h?li [] [ h?a [ clickHandler(Pivot.FilterBy []) ] [ text "filter by"] ]
+                    h?li [] [ h?a [ clickHandler(Pivot.GetSeries("!", "!")) ] [ text "get series"] ]
+                    h?li [] [ h?a [ clickHandler(Pivot.GroupBy([], [])) ] [ text "group by"] ]
+                    h?li [] [ h?a [ clickHandler(Pivot.Paging []) ] [ text "paging"] ]
+                    h?li [] [ h?a [ clickHandler(Pivot.SortBy []) ] [ text "sort by"] ]
+                  ]
+              ]
+              h?div ["class" => "preview-body"] [
+                yield h.delayed preview
+              ] 
+            ]
+          let endLine, _ = state.Mapper.AbsoluteToLineCol(body.Range.End)
+          Some(endLine, dom)
+
+let createPivotPreview updateZones (ed:monaco.editor.ICodeEditor) = 
+  let pivotEvent = new Event<PivotEditorAction>()
+
+  let mutable pivotState = 
+    { Selection = None
+      Mapper = Monaco.LocationMapper("")
+      Code = ""
+      Globals = []
+      Location = 0
+      Body = None
+      Program = { Body = Ast.node { Start = 0; End = 0 } [] }
+      Menus = Hidden }
+
+  pivotEvent.Publish.Add(fun evt ->
+    try
+      Log.trace("live", "Updating state %O with event %O", pivotState, evt)
+      pivotState <- updatePivotState pivotState evt 
+      match pivotState.Selection with
+      | Some rng ->
+          ed.setSelection(rng)
+          ed.focus()
+          pivotState <- { pivotState with Selection = None }
+      | _ -> ()
+      updateZones (renderPivot pivotEvent.Trigger pivotState)
+    with e ->
+      Log.exn("live", "Error when updating state %O with event %O", pivotState, evt) )
+
+  async { let! glob = globalTypes |> Async.AwaitFuture 
+          pivotEvent.Trigger(InitializeGlobals glob) } |> Async.StartImmediate
+
+  pivotEvent.Trigger
+
+// ------------------------------------------------------------------------------------------------
+// Zones infra
+// ------------------------------------------------------------------------------------------------
+
+type PreviewService(checker:CheckingService, ed:monaco.editor.ICodeEditor) =
+  let mutable currentZone : option<_* monaco.editor.IViewZone *_> = None
+
+  let removeZone () =
+    match currentZone with 
+    | Some(id, _, _) -> ed.changeViewZones(fun accessor -> accessor.removeZone(id))
+    | None -> ()
+    currentZone <- None
+
+  let createAndAddZone endLine =
     let mutable zoneId = -1.
-    let zone = JsInterop.createEmpty<editor.IViewZone>
+    let zone = JsInterop.createEmpty<monaco.editor.IViewZone>
     
     let node = document.createElement_div()
     let wrapper = document.createElement_div()
     node.appendChild(wrapper) |> ignore
     ed.changeViewZones(fun accessor ->  
-      lastZone |> FsOption.iter (accessor.removeZone)
+      match currentZone with Some(id, _, _) -> accessor.removeZone(id) | _ -> ()
       zone.afterLineNumber <- endLine
-      zone.heightInPx <- Some 100.0
+      zone.heightInPx <- Some 300.0
       zone.domNode <- node
       zoneId <- accessor.addZone(zone) 
-      lastZone <- Some zoneId )
+      currentZone <- Some (zoneId, zone, wrapper) )
 
-    html |> renderTo wrapper
-    window.setTimeout((fun () -> 
-      zone.heightInPx <- Some wrapper.clientHeight
-      ed.changeViewZones(fun a -> a.layoutZone(zoneId)) ), 1)
-    |> ignore
+  let updateZones dom =
+    match dom with 
+    | None -> removeZone ()
+    | Some(line, dom) ->
+        if currentZone.IsNone then
+          createAndAddZone 0.0
+        Log.trace("live", "Render %O to zone %O", dom, currentZone)
+        match currentZone with
+        | Some(id, zone, wrapper) -> 
+            if zone.afterLineNumber <> float line then
+              zone.afterLineNumber <- float line
+              ed.changeViewZones(fun accessor ->
+                accessor.layoutZone(id)
+              )
+            dom |> renderTo wrapper
+        | _ -> () // Shouldn't happen because we created the zone above 
 
-
+  let trigger = createPivotPreview updateZones ed    
+      
+  let mutable lastCode = ""
+  let mutable lastMapper = Monaco.LocationMapper("")
   do
     ed.onDidChangeCursorPosition(fun ce -> 
       async {
-        let code = ed.getModel().getValue(editor.EndOfLinePreference.LF, false)
-        let mapper = Monaco.LocationMapper(code)
-        let loc = mapper.LineColToAbsolute(int ce.position.lineNumber, int ce.position.column)
-        let! _, bound, _ = checker.TypeCheck(code)
-        let! glob = globalTypes |> Async.AwaitFuture
-        match commandAtLocation loc bound with
-        | Some(cmdRange, _) ->
-            let line, col = mapper.AbsoluteToLineCol(cmdRange.End + 1)
-            match tryCreatePivotPreview glob loc bound with
-            | Some html ->
-                createAndAddZone (float line + 0.0) html
-            | _ -> removeZone ()
-        | _ ->
-            removeZone ()
-        () } |> Async.StartImmediate ) |> ignore
-
+        let code = ed.getModel().getValue(monaco.editor.EndOfLinePreference.LF, false)
+        if code <> lastCode then
+          lastCode <- code
+          lastMapper <- Monaco.LocationMapper(code)
+          let loc = lastMapper.LineColToAbsolute(int ce.position.lineNumber, int ce.position.column)
+          let! _, _, program = checker.TypeCheck(code)
+          trigger (UpdateSource(code, loc, program, lastMapper)) 
+        else 
+          let loc = lastMapper.LineColToAbsolute(int ce.position.lineNumber, int ce.position.column)
+          trigger (UpdateLocation(loc))   } |> Async.StartImmediate ) |> ignore
     ()
 
 // ------------------------------------------------------------------------------------------------

@@ -165,7 +165,7 @@ let lastCallOrPropertyRange expr id =
 let (|Identifier|_|) t = 
   match t with
   | white, { Range = rng; Token = (TokenKind.Ident id | TokenKind.QIdent id) } ->
-      node rng { Name.Name = id } |> whiteAfter white |> Some
+      node rng { Name.Name = id } |> whiteBefore white |> Some
   | _ -> None
 
 /// Pattern matching helper
@@ -228,11 +228,11 @@ let makeCallOrProp optInst prevId prevArgs =
       node fullRng (Expr.Call(optInst, prevId, prevArgs))
 
 /// Property access or method call after '.' in a nested block
-let rec parseChain dotRng optInst prevId prevArgs ctx = 
-  let inst = makeCallOrProp optInst prevId prevArgs
+let rec parseChain dotRng optInst prevId prevArgs prevWhite ctx = 
+  let inst = makeCallOrProp optInst prevId prevArgs |> whiteAfter prevWhite
   let emptyMember = 
     let rng = { Start=dotRng.End + 1; End=dotRng.End + 1 }
-    node rng (Expr.Property(inst, node rng { Name = "" }))
+    node rng (Expr.Property(inst, node rng { Name = "" })) 
 
   match nestedToken ctx with
   | Some (Identifier id) ->
@@ -247,7 +247,7 @@ let rec parseChain dotRng optInst prevId prevArgs ctx =
       else 
         next ctx
         use _silent = usingSilentMode ctx
-        parseChain dotRng optInst prevId prevArgs ctx
+        parseChain dotRng optInst prevId prevArgs prevWhite ctx
       
   | None ->
   match token ctx with
@@ -274,27 +274,25 @@ let rec parseChain dotRng optInst prevId prevArgs ctx =
 
 
 /// Helper used by 'parseMember' - parse '.' or '(...)' after ident in a chain
-and parseDotOrLParen optInst id ctx whiteAndTok = 
-  match whiteAndTok with
-  | white, ({ Token = TokenKind.LParen } as startTok)->
+and parseDotOrLParen optInst id ctx tok = 
+  match tok with
+  | { Token = TokenKind.LParen } ->
       next ctx
       use _top = usingNonTopLevel ctx
-      let optInst = optInst |> Option.map (whiteAfter white)
-      let endRange, white, args = parseCallArgList false startTok.Range [] ctx
-      let args = node (unionRanges startTok.Range endRange) args |> whiteAfter white
+      let endRange, white, args = parseCallArgList false tok.Range [] ctx
+      let args = node (unionRanges tok.Range endRange) args |> whiteAfter white
       
       // Call can be followed by '.' or end of call chain
       match nestedToken ctx with
-      | Some(white, { Token = TokenKind.Dot; Range = dotRng }) ->
+      | Some(whiteAfterArgs, { Token = TokenKind.Dot; Range = dotRng }) ->
           next ctx
-          Some(parseChain dotRng optInst id (Some args) ctx)
+          Some(parseChain dotRng optInst id (Some args) whiteAfterArgs ctx)
       | _ ->
           Some(makeCallOrProp optInst id (Some args))
 
-  | white, { Token = TokenKind.Dot; Range = dotRng } ->
+  | { Token = TokenKind.Dot } ->
       next ctx
-      let optInst = optInst |> Option.map (whiteAfter white)
-      Some(parseChain dotRng optInst id None ctx)
+      Some(parseChain tok.Range optInst id None [] ctx)
 
   | _ -> None
 
@@ -304,13 +302,13 @@ and parseMember (optInst:option<_>) (id:Node<Name>) ctx : Node<_> =
   let parsed = 
     // Token is correctly nested - parse '.' or '('
     match nestedToken ctx with
-    | Some res -> parseDotOrLParen optInst id ctx res
+    | Some(white, res) -> parseDotOrLParen optInst (whiteAfter white id) ctx res
     | _ ->
     // Token is not nested, but it is '.' or '(', so we accept it with erorr
-    let after = token ctx    
-    match (use _silent = usingSilentMode ctx in parseDotOrLParen optInst id ctx after) with
+    let white, after = token ctx    
+    match (use _silent = usingSilentMode ctx in parseDotOrLParen optInst (whiteAfter white id) ctx after) with
     | Some res -> 
-        Errors.Parser.unindentedDotAfterIdentifier id.Range (snd after).Range |> addError ctx 
+        Errors.Parser.unindentedDotAfterIdentifier id.Range after.Range |> addError ctx 
         Some res 
     // Otherwise, we end the call chain
     | _ -> None

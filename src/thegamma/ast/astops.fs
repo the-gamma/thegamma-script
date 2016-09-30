@@ -99,6 +99,84 @@ let formatTokenInfo = function
 let formatTokens (tokens:seq<Token>) = 
   tokens |> Seq.map (fun t -> formatToken t.Token) |> String.concat ""
 
+/// When formatting expression, we append strings and then join them (should be fast in JS)
+type FormattingContext = 
+  { Strings : ResizeArray<string> }
+  member x.Add(tok) = x.Strings.Add(formatToken tok)
+
+let formatNode (ctx:FormattingContext) f node =
+  for t in node.WhiteBefore do ctx.Add(t.Token)
+  f ctx node.Node
+  for t in node.WhiteAfter do ctx.Add(t.Token)
+  
+let formatName (ctx:FormattingContext) (name:Name) = 
+  if name.Name = "" then ()
+  elif needsEscaping name.Name then ctx.Add(TokenKind.QIdent name.Name)
+  else ctx.Add(TokenKind.Ident name.Name)
+
+let rec formatArgument (ctx:FormattingContext) (arg:Argument) =
+  match arg.Name with 
+  | Some name -> 
+      formatNode ctx formatName name
+      ctx.Add(TokenKind.Equals)
+  | _ -> ()
+  formatNode ctx formatExpression arg.Value
+
+/// Format a single parsed expression, preserving the parsed whitespace
+and formatExpression (ctx:FormattingContext) expr = 
+  match expr with
+  | Expr.Variable(n) -> 
+      formatNode ctx formatName n
+  | Expr.Property(inst, n) -> 
+      formatNode ctx formatExpression inst
+      ctx.Add(TokenKind.Dot)
+      formatNode ctx formatName n
+  | Expr.Call(inst, n, args) ->
+      match inst with Some inst -> formatNode ctx formatExpression inst | _ -> ()
+      ctx.Add(TokenKind.Dot)
+      formatNode ctx formatName n
+      ctx.Add(TokenKind.LParen)
+      args |> formatNode ctx (fun ctx args -> 
+        args |> List.iteri (fun i arg ->
+          if i <> 0 then ctx.Add(TokenKind.Comma)
+          formatArgument ctx arg ) )
+      ctx.Add(TokenKind.RParen)
+  | Expr.String s -> ctx.Add(TokenKind.String s)
+  | Expr.Number n -> ctx.Add(TokenKind.Number(string n, n))
+  | Expr.Boolean b -> ctx.Add(TokenKind.Boolean b)
+  | Expr.Binary(l, op, r) ->
+      formatNode ctx formatExpression l
+      op |> formatNode ctx (fun ctx op -> ctx.Add(TokenKind.Operator op))
+      formatNode ctx formatExpression r  
+  | Expr.Function(n, e) ->
+      ctx.Add(TokenKind.Fun)
+      formatNode ctx formatName n
+      ctx.Add(TokenKind.Arrow)
+      formatNode ctx formatExpression e
+  | Expr.List els ->
+      ctx.Add(TokenKind.LSquare)
+      for e in els do formatNode ctx formatExpression e
+      ctx.Add(TokenKind.RSquare)
+  | Expr.Empty -> ()
+
+/// Format a single parsed command, preserving the parsed whitespace
+let formatCommand (ctx:FormattingContext) cmd = 
+  match cmd with
+  | Command.Expr e -> 
+      formatNode ctx formatExpression e
+  | Command.Let(n, e) -> 
+      ctx.Add(TokenKind.Let)
+      formatNode ctx formatName n
+      ctx.Add(TokenKind.Equals)
+      formatNode ctx formatExpression e
+
+/// Format parsed program, preserving the parsed whitespace
+let formatProgram (prog:Program) = 
+  let ctx = { Strings = ResizeArray<_>() }
+  prog.Body |> formatNode ctx (fun ctx cmds ->
+    for cmd in cmds do formatNode ctx (formatCommand) cmd)
+  System.String.Concat(ctx.Strings)
+
 /// Format entity kind into something readable
 let formatEntityKind = function
   | EntityKind.GlobalValue _ -> "global value"
