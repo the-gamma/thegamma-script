@@ -87,8 +87,8 @@ let rec checkMethodCall ctx memTy pars argList args =
       assigns )
 
   // Report errors if we inferred conflicting assignments for one variable
-  for _, group in List.groupBy fst assigns do
-    match group with
+  for _, group in Seq.groupBy fst assigns do
+    match List.ofSeq group with
     | (v, t1)::(_::_ as ts) ->
         for _, t in ts do
           Errors.TypeChecker.inferenceConflict v t1 t |> addError ctx argList
