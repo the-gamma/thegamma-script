@@ -170,12 +170,27 @@ let formatCommand (ctx:FormattingContext) cmd =
       ctx.Add(TokenKind.Equals)
       formatNode ctx formatExpression e
 
+/// Format single parsed expression, preserving the parsed whitespace
+let formatSingleExpression expr = 
+  let ctx = { Strings = ResizeArray<_>() }
+  formatNode ctx formatExpression expr
+  System.String.Concat(ctx.Strings)
+
 /// Format parsed program, preserving the parsed whitespace
 let formatProgram (prog:Program) = 
   let ctx = { Strings = ResizeArray<_>() }
   prog.Body |> formatNode ctx (fun ctx cmds ->
     for cmd in cmds do formatNode ctx (formatCommand) cmd)
   System.String.Concat(ctx.Strings)
+
+/// Format all white space after the given expression
+let formatWhiteAfterExpr nd = 
+  let wa = 
+    match nd.Node with 
+    | Expr.Variable(n)
+    | Expr.Property(_, n) -> n.WhiteAfter @ nd.WhiteAfter 
+    | _ -> nd.WhiteAfter
+  String.concat "" [ for t in wa -> formatToken t.Token ]
 
 /// Format entity kind into something readable
 let formatEntityKind = function

@@ -179,17 +179,17 @@ let chainElementAtLocation loc (ents:Binder.BindingResult) =
     Some(chainElements |> Array.minBy (fun (rng, _) -> rng.End))
   else None
 *)
-let transformName = function
-  | TypeProviders.Pivot.Transformation.DropColumns _ -> "drop columns"
-  | TypeProviders.Pivot.Transformation.Empty _ -> "empty"
-  | TypeProviders.Pivot.Transformation.FilterBy _ -> "filter by"
-  | TypeProviders.Pivot.Transformation.GetSeries _ -> "get series"
-  | TypeProviders.Pivot.Transformation.GetTheData _ -> "get the data"
-  | TypeProviders.Pivot.Transformation.GroupBy _ -> "group by"
-  | TypeProviders.Pivot.Transformation.Paging _ -> "paging"
-  | TypeProviders.Pivot.Transformation.SortBy _ -> "sort by"
-
 open TheGamma.TypeProviders
+
+let transformName = function
+  | Pivot.DropColumns _ -> "drop columns"
+  | Pivot.Empty _ -> "empty"
+  | Pivot.FilterBy _ -> "filter by"
+  | Pivot.GetSeries _ -> "get series"
+  | Pivot.GetTheData _ -> "get the data"
+  | Pivot.GroupBy _ -> "group by"
+  | Pivot.Paging _ -> "paging"
+  | Pivot.SortBy _ -> "sort by"
 
 type PivotSection = 
   { Transformation : Pivot.Transformation   
@@ -222,14 +222,26 @@ let rec collectChain acc node =
   match node.Node with
   | Expr.Call(Some e, n, _) 
   | Expr.Property(e, n) -> collectChain ((n.Range.Start, node)::acc) e
-  | Expr.Variable(n) -> (n.Range.Start, node)::acc
-  | _ -> acc
+  | Expr.Variable(n) -> Some((n.Range.Start, node)::acc)
+  | _ -> None
 
 let rec collectFirstChain expr = 
-  let chain = collectChain [] expr 
-  if not (List.isEmpty chain) then Some chain else
+  match collectChain [] expr with
+  | Some((_::_) as chain) -> Some(id, chain)
+  | _ ->
   match expr with
-  | { Node = ExprNode(es, _) } -> es |> List.tryPick collectFirstChain
+  | { Node = ExprNode(es, ns) } -> 
+      let rec loop acc es =   
+        match es with 
+        | [] -> None
+        | e::es ->
+            match collectFirstChain e with 
+            | None -> loop (e::acc) es
+            | Some(recreate, chain) ->
+                let recreate newChain =
+                  { expr with Node = rebuildExprNode e.Node (List.rev acc @ [ recreate newChain ] @ es) ns }
+                Some(recreate, chain)
+      loop [] es
   | _ -> None
 
 // ------------------------------------------------------------------------------------------------
@@ -242,6 +254,7 @@ type PivotEditorAction =
   | UpdateLocation of int
   | Select of (int * int) * (int * int)
   | AddTransform of Pivot.Transformation
+  | RemoveSection of Symbol
   | OpenAddDropdown
   | HideAddDropDown
 
@@ -275,6 +288,26 @@ let updateBody state =
 
 let hideMenus state = { state with Menus = Hidden }
 
+let editorLocation (mapper:Monaco.LocationMapper) startIndex endIndex = 
+  let sl, sc = mapper.AbsoluteToLineCol(startIndex)
+  let el, ec = mapper.AbsoluteToLineCol(endIndex)
+  let rng = JsInterop.createEmpty<monaco.IRange>
+  rng.startLineNumber <- float sl
+  rng.startColumn <- float sc
+  rng.endLineNumber <- float el
+  rng.endColumn <- float ec
+  rng
+
+let tryTransformChain f state = 
+  match state.Body with
+  | Some body ->
+      match collectFirstChain body with
+      | Some(recreate, chain) ->
+          let sections = chain |> List.map snd |> createPivotSections 
+          f body recreate chain sections |> hideMenus
+      | _ -> hideMenus state
+  | _ -> hideMenus state
+
 let updatePivotState state event = 
   match event with
   | InitializeGlobals(globals) ->
@@ -287,21 +320,81 @@ let updatePivotState state event =
       hideMenus state
   | OpenAddDropdown ->
       { state with Menus = AddDropdownOpen }
+  | RemoveSection sym ->
+      state |> tryTransformChain (fun body recreate chain sections ->
+        let dropped, newNodes =
+          sections |> List.partition (fun sec -> (List.head sec.Nodes).Entity.Value.Symbol = sym)
+        let newNodes = newNodes |> List.collect (fun sec -> sec.Nodes)
+        let newBody =
+          List.tail newNodes 
+          |> List.fold (fun prev part ->
+            match part.Node with 
+            | Expr.Property(_, n) -> { part with Node = Expr.Property(prev, n) }
+            | Expr.Call(Some inst, n, args) -> { part with Node = Expr.Call(Some prev, n, args) }
+            | _ -> failwith "Unexpected node in call chain") (List.head newNodes)
+
+        let newCode = (Ast.formatSingleExpression newBody).Trim()
+        let newCode = state.Code.Substring(0, body.Range.Start) + newCode + state.Code.Substring(body.Range.End + 1)
+
+        let dropRange = 
+          match dropped with
+          | { Nodes = { Node = Expr.Variable n | Expr.Call(_, n, _) | Expr.Property(_, n) }::_ }::_ -> n.Range
+          | { Nodes = nd::_ }::_ -> nd.Range
+          | _ -> failwith "Could not determine range of dropped node"
+        let rng = editorLocation state.Mapper dropRange.Start dropRange.Start
+        { state with Code = newCode; Selection = Some rng }
+      )
+
   | AddTransform tfs ->
-      match state.Body with
-      | Some body ->
-          match collectFirstChain body with
-          | Some chain ->
-              for _, n in chain do
-                match pickPivotChainElement n with
-                | Some (Pivot.GetSeries _ :: _) 
-                | Some (Pivot.GetTheData _ :: _) 
-                | None -> ()
-                | Some tfs -> 
-                    Log.trace("live", "Chain element [%s-%s]: %s", n.Range.Start, n.Range.End, n.Entity.Value.Name)
-          | _ -> ()
-      | _ -> ()
-      hideMenus state
+      state |> tryTransformChain (fun body recreate chain sections ->
+        let whites =
+          sections 
+          |> List.map (fun sec -> Ast.formatWhiteAfterExpr (List.last sec.Nodes))
+          |> List.countBy id
+        let whiteAfter, _ = whites |> List.maxBy (fun (s, c) -> if s = "" then 0 else c)
+        Log.trace("live", "Whitespace of sections: %O, inserting '%s'", Array.ofList whites, whiteAfter)
+        let node n = Ast.node { Start=0; End=0; } n
+
+        let marker = "InsertPropertyHere"
+        let firstProperty, properties = 
+          match tfs with
+          | Pivot.DropColumns _ -> "drop columns", [marker; "then"]
+          | Pivot.SortBy _ -> "sort data", [marker; "then"]
+          | Pivot.GroupBy _ -> "group data", [marker; "by ???"; "then"] // Wrong - pick group key
+          | Pivot.FilterBy _ -> "filter data", [marker; "then"] // Wrong - add then to pivot
+          | Pivot.Paging _ -> "paging", [marker; "then"] // Wrong - add then to pivot
+          | Pivot.GetSeries _ -> "", [] // Wrong - we need to drop 
+          | Pivot.GetTheData _ | Pivot.Empty -> "", []
+
+        let injectCall expr = 
+          properties |> List.fold (fun expr name ->
+            node (Expr.Property(expr, node { Name = name }))) expr
+          |> Parser.whiteAfter [ { Token = TokenKind.White whiteAfter; Range = {Start=0; End=0} } ]
+
+        let tryInjectBefore prev part =
+          match pickPivotChainElement part with
+          | Some (Pivot.GetSeries _ :: _) 
+          | Some (Pivot.GetTheData _ :: _) -> true, injectCall prev
+          | _ -> false, prev
+
+        let injected, newBody =
+          List.tail chain |> List.fold (fun (injected, prev) (_, part) ->
+            let injected, prev = tryInjectBefore prev part
+            match part.Node with 
+            | Expr.Property(_, n) -> injected, { part with Node = Expr.Property(prev, n) }
+            | Expr.Call(Some inst, n, args) -> injected, { part with Node = Expr.Call(Some prev, n, args) }
+            | _ -> failwith "Unexpected node in call chain") (false, snd (List.head chain))
+
+        let newBody = recreate (if injected then newBody else injectCall newBody)
+        let newCode = (Ast.formatSingleExpression newBody).Trim()
+        let newCode = state.Code.Substring(0, body.Range.Start) + newCode + state.Code.Substring(body.Range.End + 1)
+        let startIndex = newCode.IndexOf(marker)
+        let newCode = newCode.Replace(marker, Ast.escapeIdent firstProperty)
+
+        let mapper = Monaco.LocationMapper(newCode)
+        let rng = editorLocation mapper startIndex (startIndex + (Ast.escapeIdent firstProperty).Length)
+        { state with Code = newCode; Selection = Some rng })
+
   | Select((sl, sc), (el, ec)) ->        
       let rng = JsInterop.createEmpty<monaco.IRange>
       rng.startLineNumber <- float sl
@@ -317,7 +410,7 @@ let renderPivot trigger state =
   | Some body ->
   match collectFirstChain body with
   | None -> None
-  | Some(chainNodes) ->
+  | Some(_, chainNodes) ->
       let starts = [| for r,n in chainNodes -> sprintf "%d: %s" r n.Entity.Value.Name |]
       Log.trace("live", "Find chain element at %d in %O", state.Location, starts)
       match chainNodes |> List.filter (fun (start, node) -> state.Location >= start) |> List.tryLast with
@@ -335,6 +428,7 @@ let renderPivot trigger state =
               h?ul ["class" => "tabs"] [
                 for sec in sections ->
                   let selected = sec.Nodes |> List.exists (fun secEnt -> selEnt.Symbol = secEnt.Entity.Value.Symbol)
+                  let secSymbol = (sec.Nodes |> List.head).Entity.Value.Symbol
                   let identRange = 
                     match sec.Nodes with
                     | { Node = Expr.Variable n | Expr.Call(_, n, _) | Expr.Property(_, n) }::_ -> 
@@ -345,6 +439,9 @@ let renderPivot trigger state =
                   h?li ["class" => if selected then "selected" else ""] [ 
                     h?a ["click" =!> trigger (Select(identRange)) ] [
                       text (transformName sec.Transformation) 
+                    ]
+                    h?a ["click" =!> trigger (RemoveSection(secSymbol))] [
+                      h?i ["class" => "fa fa-times"] [] 
                     ]
                   ]
                 yield h?li ["class" => if state.Menus = AddDropdownOpen then "add selected" else "add"] [ 
@@ -388,7 +485,11 @@ let createPivotPreview updateZones (ed:monaco.editor.ICodeEditor) =
   pivotEvent.Publish.Add(fun evt ->
     try
       Log.trace("live", "Updating state %O with event %O", pivotState, evt)
+      let oldState = pivotState 
       pivotState <- updatePivotState pivotState evt 
+      if (match evt with UpdateSource _ -> false | _ -> true) &&
+         (oldState.Code <> pivotState.Code) then
+        ed.getModel().setValue(pivotState.Code)
       match pivotState.Selection with
       | Some rng ->
           ed.setSelection(rng)

@@ -1,6 +1,9 @@
 ﻿#if INTERACTIVE
-#r "../../src/thegamma/bin/Debug/thegamma.dll"
 #r "../../packages/NUnit/lib/net45/nunit.framework.dll"
+#I "../../src/libraries/bin/Debug"
+#I "../../src/thegamma/bin/Debug"
+#r "libraries.dll"
+#r "thegamma.dll"
 #else
 [<NUnit.Framework.TestFixture>]
 module TheGamma.Tests.TypeChecker
