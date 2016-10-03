@@ -17,6 +17,9 @@ open Fable.Core
  
 Fable.Import.Node.require.Invoke("core-js") |> ignore
 
+[<Emit("$0.setCustomValidity($1)")>]
+let setCustomValidity (el:obj) (msg:string) : unit = failwith "JS"
+
 // ------------------------------------------------------------------------------------------------
 // Global provided types
 // ------------------------------------------------------------------------------------------------
@@ -266,6 +269,8 @@ type PivotEditorAction =
   | ReplaceRange of Range * string
   | AddElement of Symbol * string * option<list<Expr>>
   | SwitchMenu of PivotEditorMenus
+  | SetFocus of string * int option
+  | Multiplex of PivotEditorAction list
 
 type PivotEditorState = 
   { // Initialized once - global values
@@ -279,8 +284,10 @@ type PivotEditorState =
 
     // Calculated from the above
     Body : Node<Expr> option
+    Menus : PivotEditorMenus
+    // Instructing the event loop to do things to the editor  
     Selection : option<monaco.IRange>
-    Menus : PivotEditorMenus  }
+    Focus : option<string * int option> }
 
 let updateBody state = 
   match commandAtLocation state.Location state.Program with
@@ -351,7 +358,7 @@ let createChainNode args =
       let args = args |> List.map (fun a -> { Name = None; Value = node a })
       node (Expr.Call(None, node {Name=marker}, node args))
 
-let updatePivotState state event = 
+let rec updatePivotState state event = 
   match event with
   | InitializeGlobals(globals) ->
       { state with PivotEditorState.Globals = globals }
@@ -361,6 +368,10 @@ let updatePivotState state event =
       { state with Location = loc; Program = program; Code = code; Mapper = mapper } |> updateBody |> hideMenus
   | SwitchMenu menu ->
       { state with Menus = menu }
+  | SetFocus(focus, sel) ->
+      { state with Focus = Some(focus, sel) }
+  | Multiplex events ->
+      events |> List.fold updatePivotState state
 
   | SelectChainElement(dir) ->
       state |> tryTransformChain (fun body recreate chain sections ->
@@ -378,9 +389,10 @@ let updatePivotState state event =
       { state with Selection = Some (editorLocation state.Mapper rng.Start (rng.End+1)) }
 
   | ReplaceRange(rng, value) ->    
-      { state with
-          Code = state.Code.Substring(0, rng.Start) + value + state.Code.Substring(rng.End + 1)
-          Selection = Some (editorLocation state.Mapper rng.Start (rng.Start+value.Length)) }
+      Log.trace("live", "Replace '%s' with '%s'", state.Code.Substring(rng.Start, rng.End - rng.Start + 1), value)
+      let newCode = state.Code.Substring(0, rng.Start) + value + state.Code.Substring(rng.End + 1)
+      let location = editorLocation (Monaco.LocationMapper(newCode)) rng.Start (rng.Start+value.Length)
+      { state with Code = newCode; Selection = Some location }
 
   | AddElement(sym, name, args) ->
       state |> tryTransformChain (fun body recreate chain sections ->
@@ -418,7 +430,7 @@ let updatePivotState state event =
           |> List.takeWhile (fun nd -> nd.Entity.Value.Symbol <> sym) |> List.tryLast
         let beforeDropped = defaultArg beforeDropped (List.head chain)
         let newNodes = sections |> List.filter (fun sec -> (List.head sec.Nodes).Entity.Value.Symbol <> sym)
-        let newNodes = newNodes |> List.collect (fun sec -> sec.Nodes)
+        let newNodes = List.head chain :: (newNodes |> List.collect (fun sec -> sec.Nodes))
         reconstructChain state body newNodes
         |> selectName beforeDropped 
       )
@@ -544,8 +556,16 @@ let renderPivot triggerEvent state =
                           yield h?span [] [
                               h?a ["click" =!> trigger (SelectRange(n.Range)) ] [ text n.Node.Name ]
                               h?input [ 
+                                "id" => "input-pg-" + n.Node.Name
                                 "input" =!> fun el _ -> 
-                                  triggerEvent (ReplaceRange(arg.Value.Range, (unbox<HTMLInputElement> el).value))
+                                  let input = unbox<HTMLInputElement> el
+                                  let parsed, errors = Parser.parseProgram input.value
+                                  if errors.Length = 0 && parsed.Body.Node.Length = 1 then
+                                    setCustomValidity el ""
+                                    Multiplex
+                                      [ SetFocus("input-pg-" + n.Node.Name, Some(int input.selectionStart));
+                                        ReplaceRange(arg.Value.Range, input.value) ] |> triggerEvent
+                                  else setCustomValidity el "Cannot parse expression"
                                 "value" => Ast.formatSingleExpression arg.Value ] []
                               h?a ["click" =!> trigger (removeOp)] [
                                 h?i ["class" => "fa fa-times"] [] 
@@ -556,22 +576,42 @@ let renderPivot triggerEvent state =
                       yield h?a ["class" => "right"; "click" =!> trigger (SwitchMenu ContextualDropdownOpen) ] [
                           h?i ["class" => "fa fa-plus"] [] 
                         ]
+
+                | Some { Nodes = nodes; Transformation = Pivot.SortBy _ } ->
+                    let props = nodes |> List.choose (function
+                      | { Node = Expr.Property(_, n); Entity = Some { Symbol = sym} }
+                          when n.Node.Name <> "then" && n.Node.Name <> "sort data" -> Some(sym, n) | _ -> None)
+                    let last = List.tryLast props
+                    for sym, n in props ->
+                      h?span [] [
+                        yield h?a ["click" =!> trigger (SelectRange(n.Range)) ] [
+                          text n.Node.Name 
+                        ]
+                        if n.Node.Name = (snd last.Value).Node.Name then
+                          yield h?a ["click" =!> trigger (RemoveElement(sym))] [
+                            h?i ["class" => "fa fa-times"] [] 
+                          ]
+                      ]
+                    yield h?a ["class" => "right"; "click" =!> trigger (SwitchMenu ContextualDropdownOpen) ] [
+                      h?i ["class" => "fa fa-plus"] [] 
+                    ]
+
                 | Some { Nodes = nodes; Transformation = Pivot.DropColumns _ } ->
                     for nd in nodes do
                       match nd.Node with
                       | Expr.Property(_, n) when n.Node.Name <> "then" && n.Node.Name <> "drop columns" -> 
                           yield h?span [] [
-                              h?a ["click" =!> trigger (SelectRange(n.Range)) ] [
-                                text n.Node.Name 
-                              ]
-                              h?a ["click" =!> trigger (RemoveElement(nd.Entity.Value.Symbol))] [
-                                h?i ["class" => "fa fa-times"] [] 
-                              ]
+                            h?a ["click" =!> trigger (SelectRange(n.Range)) ] [
+                              text n.Node.Name 
                             ]
+                            h?a ["click" =!> trigger (RemoveElement(nd.Entity.Value.Symbol))] [
+                              h?i ["class" => "fa fa-times"] [] 
+                            ]
+                          ]
                       | _ -> ()
                     yield h?a ["class" => "right"; "click" =!> trigger (SwitchMenu ContextualDropdownOpen) ] [
-                        h?i ["class" => "fa fa-plus"] [] 
-                      ]
+                      h?i ["class" => "fa fa-plus"] [] 
+                    ]
                 | _ -> ()
               ]
 
@@ -593,6 +633,8 @@ let renderPivot triggerEvent state =
                         let op = AddElement(firstSym, "skip", Some [Expr.Number 10.])
                         yield h?li [] [ h?a [ "click" =!> trigger op ] [ text "skip"] ]
                     ]
+
+                | ContextualDropdownOpen, Some { Nodes = nodes; Transformation = Pivot.SortBy _ } 
                 | ContextualDropdownOpen, Some { Nodes = nodes; Transformation = Pivot.DropColumns _ } ->
                     let lastNode = nodes |> List.rev |> List.find (function { Node = Expr.Property(_, n) } -> n.Node.Name <> "then" | _ -> true) 
                     match lastNode.Entity.Value.Type with
@@ -600,7 +642,7 @@ let renderPivot triggerEvent state =
                         yield h?ul [] [
                           for m in obj.Members do
                             match m with
-                            | Member.Property(name=n) when n.StartsWith("drop") ->
+                            | Member.Property(name=n) when n.StartsWith("drop") || n.StartsWith("by") || n.StartsWith("and") ->
                                 yield h?li [] [ 
                                   h?a [ "click" =!> trigger (AddElement(lastNode.Entity.Value.Symbol, n, None)) ] [ text n] 
                                 ]
@@ -615,42 +657,6 @@ let renderPivot triggerEvent state =
             ]
           let endLine, _ = state.Mapper.AbsoluteToLineCol(body.Range.End)
           Some(endLine, dom)
-
-let createPivotPreview updateZones (ed:monaco.editor.ICodeEditor) = 
-  let pivotEvent = new Event<PivotEditorAction>()
-
-  let mutable pivotState = 
-    { Selection = None
-      Mapper = Monaco.LocationMapper("")
-      Code = ""
-      Globals = []
-      Location = 0
-      Body = None
-      Program = { Body = Ast.node { Start = 0; End = 0 } [] }
-      Menus = Hidden }
-
-  pivotEvent.Publish.Add(fun evt ->
-    try
-      Log.trace("live", "Updating state %O with event %O", pivotState, evt)
-      let oldState = pivotState 
-      pivotState <- updatePivotState pivotState evt 
-      if (match evt with UpdateSource _ -> false | _ -> true) &&
-         (oldState.Code <> pivotState.Code) then
-        ed.getModel().setValue(pivotState.Code)
-      match pivotState.Selection with
-      | Some rng ->
-          ed.setSelection(rng)
-          ed.focus()
-          pivotState <- { pivotState with Selection = None }
-      | _ -> ()
-      updateZones (renderPivot pivotEvent.Trigger pivotState)
-    with e ->
-      Log.exn("live", "Error when updating state %O with event %O: %O", pivotState, evt, e) )
-
-  async { let! glob = globalTypes |> Async.AwaitFuture 
-          pivotEvent.Trigger(InitializeGlobals glob) } |> Async.StartImmediate
-
-  pivotEvent.Trigger
 
 // ------------------------------------------------------------------------------------------------
 // Zones infra
@@ -697,24 +703,88 @@ type PreviewService(checker:CheckingService, ed:monaco.editor.ICodeEditor) =
             dom |> renderTo wrapper
         | _ -> () // Shouldn't happen because we created the zone above 
 
-  let trigger = createPivotPreview updateZones ed    
-      
   let mutable lastCode = ""
   let mutable lastMapper = Monaco.LocationMapper("")
+  let mutable changingEditor = false
+
+  let getUpdateEventAfterChange () = async {
+    let code = ed.getModel().getValue(monaco.editor.EndOfLinePreference.LF, false)
+    let position = ed.getPosition()
+    if code <> lastCode then
+      lastCode <- code
+      lastMapper <- Monaco.LocationMapper(code)
+      let loc = lastMapper.LineColToAbsolute(int position.lineNumber, int position.column)
+      let! _, _, program = checker.TypeCheck(code)
+      return (UpdateSource(code, loc, program, lastMapper)) 
+    else 
+      let loc = lastMapper.LineColToAbsolute(int position.lineNumber, int position.column)
+      return (UpdateLocation(loc)) }
+
+  let createPivotPreview (ed:monaco.editor.ICodeEditor) = 
+    let pivotEvent = new Event<PivotEditorAction>()
+
+    let mutable pivotState = 
+      { Selection = None
+        Focus = None
+        Mapper = Monaco.LocationMapper("")
+        Code = ""
+        Globals = []
+        Location = 0
+        Body = None
+        Program = { Body = Ast.node { Start = 0; End = 0 } [] }
+        Menus = Hidden }
+
+    pivotEvent.Publish.Add(fun evt ->
+      try
+        Log.trace("live", "Updating state %O with event %O", pivotState, evt)
+        let oldState = pivotState 
+        pivotState <- updatePivotState pivotState evt 
+        if (match evt with UpdateSource _ -> false | _ -> true) &&
+           (oldState.Code <> pivotState.Code) then
+          changingEditor <- true
+          ed.getModel().setValue(pivotState.Code)
+        match pivotState.Selection with
+        | Some rng ->
+            changingEditor <- true
+            ed.setSelection(rng)
+            pivotState <- { pivotState with Selection = None }
+        | _ -> ()
+
+        if changingEditor = true then
+          changingEditor <- false
+          async { 
+            Log.trace("live", "Editor changed. Getting after change event...")
+            let! evt = getUpdateEventAfterChange ()
+            Log.trace("live", "Editor changed. Updating state %O with event %O", pivotState, evt)
+            pivotState <- updatePivotState pivotState evt
+            updateZones (renderPivot pivotEvent.Trigger pivotState)
+            match pivotState.Focus with 
+            | Some(focus, sel) ->
+                Log.trace("live", "Set focus to element #%s", focus)
+                pivotState <- { pivotState with Focus = None }
+                let element = document.getElementById(focus) |> unbox<HTMLInputElement>
+                element.focus()
+                sel |> FsOption.iter (fun s -> element.selectionStart <- float s; element.selectionEnd <- float s)
+            | _ -> () } |> Async.StartImmediate
+        else
+          updateZones (renderPivot pivotEvent.Trigger pivotState)
+      with e ->
+        Log.exn("live", "Error when updating state %O with event %O: %O", pivotState, evt, e) )
+
+    async { let! glob = globalTypes |> Async.AwaitFuture 
+            pivotEvent.Trigger(InitializeGlobals glob) } |> Async.StartImmediate
+
+    pivotEvent.Trigger
+
+  let trigger = createPivotPreview ed    
+      
   do
     ed.onDidChangeCursorPosition(fun ce -> 
-      async {
+      if not changingEditor then
         let code = ed.getModel().getValue(monaco.editor.EndOfLinePreference.LF, false)
-        if code <> lastCode then
-          lastCode <- code
-          lastMapper <- Monaco.LocationMapper(code)
-          let loc = lastMapper.LineColToAbsolute(int ce.position.lineNumber, int ce.position.column)
-          let! _, _, program = checker.TypeCheck(code)
-          trigger (UpdateSource(code, loc, program, lastMapper)) 
-        else 
-          let loc = lastMapper.LineColToAbsolute(int ce.position.lineNumber, int ce.position.column)
-          trigger (UpdateLocation(loc))   } |> Async.StartImmediate ) |> ignore
-    ()
+        Log.trace("live", "Cursor position changed: code <> lastCode = %s", code <> lastCode)
+        async { let! evt = getUpdateEventAfterChange ()
+                trigger evt } |> Async.StartImmediate ) |> ignore
 
 // ------------------------------------------------------------------------------------------------
 // Putting everything togeter

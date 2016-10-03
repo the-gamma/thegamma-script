@@ -69,6 +69,10 @@ let evaluateExpression (_stored:RuntimeValue[]) (expr:Expression) =
     Log.exn("interpreter", "Evaluation failed: %O", e)
     reraise()
 
+let evaluateExpr args exprBuilder =
+  let _stored, args = storeArguments args
+  evaluateExpression _stored (exprBuilder args)
+
 let evaluateCall emitter inst args =
   let _stored, args = storeArguments (inst::args)
   evaluateExpression _stored (emitter.Emit(List.head args, List.tail args))
@@ -128,9 +132,35 @@ and evaluateEntity ctx (e:Entity) =
           Some(evaluateCall e (getValue ctx inst) args)
       | _ -> None
 
+  | EntityKind.Operator(l, Operator.Power, r) ->
+      evaluateExpr [getValue ctx l; getValue ctx r] (function 
+        | [l; r] -> 
+            let pow = MemberExpression(IdentifierExpression("pow", None), IdentifierExpression("Math", None), false, None)
+            CallExpression(pow, [l; r], None)
+        | _ -> failwith "evaluateEntity: Expected two arguments") |> Some      
+
+  | EntityKind.Operator(l, op, r) ->
+      evaluateExpr [getValue ctx l; getValue ctx r] (function 
+        | [l; r] -> 
+            let op = 
+              match op with
+              | Operator.Equals -> BinaryEqualStrict
+              | Operator.Plus -> BinaryPlus
+              | Operator.Minus -> BinaryMinus
+              | Operator.Multiply -> BinaryMultiply
+              | Operator.Divide -> BinaryDivide
+              | Operator.GreaterThan -> BinaryGreater
+              | Operator.LessThan -> BinaryLess
+              | Operator.GreaterThanOrEqual -> BinaryGreaterOrEqual
+              | Operator.LessThanOrEqual -> BinaryLessOrEqual
+              | Operator.Power -> failwith "evaluateEntity: Power is not a binary operation"
+            BinaryExpression(op, l, r, None)
+        | _ -> failwith "evaluateEntity: Expected two arguments") |> Some            
+
   | EntityKind.Variable(_, value) ->
       value.Value |> Option.map (fun v -> v.Value)
 
+  | EntityKind.ArgumentList _
   | EntityKind.NamedMember _ ->
       Some(unbox null)
 
