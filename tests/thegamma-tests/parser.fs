@@ -235,6 +235,23 @@ let ``Error reported on unindented token in call chain``() =
   actual |> assertSubExpr (isVariable "yadda")
   actual |> assertErrors [203, "yadda"]
 
+[<Test>]
+let ``Empty property parsed after incomplete '.' followed by identifier``() =
+  let actual = parse """
+    let a = foo.
+      'bar zoo'.
+    yadda"""
+  actual |> assertSubExpr (isProperty "")
+
+[<Test>]
+let ``Empty property parsed after incomplete '.' followed by another '.'``() = 
+  // (this models the case when we start typing .something after 'bar zoo')
+  let actual = parse """
+    let a = foo.
+      'bar zoo'.
+      .foo"""
+  actual |> assertSubExpr (isProperty "")
+
 // --------------------------------------------------------------------------------------
 // TESTS: Call chains with arguments
 // --------------------------------------------------------------------------------------

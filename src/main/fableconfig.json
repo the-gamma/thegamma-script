@@ -1,5 +1,6 @@
 {
     "outDir": "../../out/src/main",
+    "module":  "umd",
     "sourceMaps": true,
     "projFile": "main.fsx",
     "refs": {

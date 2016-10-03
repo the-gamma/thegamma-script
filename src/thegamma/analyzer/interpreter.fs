@@ -128,7 +128,15 @@ and evaluateEntity ctx (e:Entity) =
           Some(evaluateCall e (getValue ctx inst) args)
       | _ -> None
 
-  | _ -> None
+  | EntityKind.Variable(_, value) ->
+      value.Value |> Option.map (fun v -> v.Value)
+
+  | EntityKind.NamedMember _ ->
+      Some(unbox null)
+
+  | _ -> 
+    Log.error("interpreter", "Cannot evaluate entity: %O", e)
+    None
 
 let evaluateEntityTree ctx (e:Entity) = 
   let visited = Dictionary<Symbol, bool>()

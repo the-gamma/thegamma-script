@@ -248,19 +248,24 @@ let rec collectFirstChain expr =
 // Elmish pivot editor
 // ------------------------------------------------------------------------------------------------
 
+type PivotEditorMenus =
+  | AddDropdownOpen
+  | ContextualDropdownOpen
+  | Hidden
+
 type PivotEditorAction = 
   | InitializeGlobals of seq<Entity>
   | UpdateSource of string * int * Program * Monaco.LocationMapper
   | UpdateLocation of int
-  | Select of (int * int) * (int * int)
+  | SelectRange of Range
+  | SelectChainElement of int
   | AddTransform of Pivot.Transformation
   | RemoveSection of Symbol
-  | OpenAddDropdown
-  | HideAddDropDown
-
-type PivotEditorMenus =
-  | AddDropdownOpen
-  | Hidden
+  | RemoveElement of Symbol
+  | ReplaceElement of Symbol * string * option<list<Expr>>
+  | ReplaceRange of Range * string
+  | AddElement of Symbol * string * option<list<Expr>>
+  | SwitchMenu of PivotEditorMenus
 
 type PivotEditorState = 
   { // Initialized once - global values
@@ -298,15 +303,53 @@ let editorLocation (mapper:Monaco.LocationMapper) startIndex endIndex =
   rng.endColumn <- float ec
   rng
 
+let selectName nd state = 
+  let rng =
+    match nd with
+    | { Node = Expr.Call(_, n, _) | Expr.Property(_, n) } -> n.Range
+    | _ -> nd.Range
+  let loc = editorLocation state.Mapper rng.Start (rng.End+1)
+  { state with Selection = Some loc }
+
 let tryTransformChain f state = 
   match state.Body with
   | Some body ->
       match collectFirstChain body with
       | Some(recreate, chain) ->
           let sections = chain |> List.map snd |> createPivotSections 
-          f body recreate chain sections |> hideMenus
+          f body recreate (List.map snd chain) sections |> hideMenus
       | _ -> hideMenus state
   | _ -> hideMenus state
+
+let marker = "InsertPropertyHere"
+
+let replaceAndSelectMarker newName state = 
+  let startIndex = state.Code.IndexOf(marker)
+  let newCode = state.Code.Replace(marker, Ast.escapeIdent newName)
+  let mapper = Monaco.LocationMapper(state.Code)
+  let rng = editorLocation mapper startIndex (startIndex + (Ast.escapeIdent newName).Length)
+  { state with Code = newCode; Selection = Some rng }
+
+let reconstructChain state (body:Node<_>) newNodes = 
+  let newBody =
+    List.tail newNodes 
+    |> List.fold (fun prev part ->
+      match part.Node with 
+      | Expr.Property(_, n) -> { part with Node = Expr.Property(prev, n) }
+      | Expr.Call(_, n, args) -> { part with Node = Expr.Call(Some prev, n, args) }
+      | _ -> failwith "Unexpected node in call chain") (List.head newNodes)
+
+  let newCode = (Ast.formatSingleExpression newBody).Trim()
+  let newCode = state.Code.Substring(0, body.Range.Start) + newCode + state.Code.Substring(body.Range.End + 1)
+  { state with Code = newCode }
+
+let createChainNode args = 
+  let node nd = Ast.node {Start=0; End=0} nd
+  match args with
+  | None -> node (Expr.Property(node Expr.Empty, node {Name=marker}))
+  | Some args -> 
+      let args = args |> List.map (fun a -> { Name = None; Value = node a })
+      node (Expr.Call(None, node {Name=marker}, node args))
 
 let updatePivotState state event = 
   match event with
@@ -316,33 +359,68 @@ let updatePivotState state event =
       { state with Location = loc } |> updateBody |> hideMenus
   | UpdateSource(code, loc, program, mapper) ->
       { state with Location = loc; Program = program; Code = code; Mapper = mapper } |> updateBody |> hideMenus
-  | HideAddDropDown ->
-      hideMenus state
-  | OpenAddDropdown ->
-      { state with Menus = AddDropdownOpen }
+  | SwitchMenu menu ->
+      { state with Menus = menu }
+
+  | SelectChainElement(dir) ->
+      state |> tryTransformChain (fun body recreate chain sections ->
+        let rec loop before (chain:Node<_> list) = 
+          match chain with
+          | c::chain when c.Range.End + 1 < state.Location -> loop c chain
+          | c::after::_ -> before, c, after
+          | [c] -> before, c, c
+          | [] -> before, before, before
+        let before, it, after = loop (List.head chain) (List.tail chain)
+        state |> selectName (if dir < 0 then before elif dir > 0 then after else it)
+      )
+          
+  | SelectRange(rng) ->    
+      { state with Selection = Some (editorLocation state.Mapper rng.Start (rng.End+1)) }
+
+  | ReplaceRange(rng, value) ->    
+      { state with
+          Code = state.Code.Substring(0, rng.Start) + value + state.Code.Substring(rng.End + 1)
+          Selection = Some (editorLocation state.Mapper rng.Start (rng.Start+value.Length)) }
+
+  | AddElement(sym, name, args) ->
+      state |> tryTransformChain (fun body recreate chain sections ->
+        let newNodes =
+          chain |> List.collect (fun nd -> 
+            if nd.Entity.Value.Symbol <> sym then [nd]
+            else [nd; createChainNode args] )        
+        reconstructChain state body newNodes
+        |> replaceAndSelectMarker name
+      )
+
+  | ReplaceElement(sym, name, args) ->
+      state |> tryTransformChain (fun body recreate chain sections ->
+        let newNodes =
+          chain |> List.map (fun nd -> 
+            if nd.Entity.Value.Symbol <> sym then nd
+            else createChainNode args )
+        reconstructChain state body newNodes
+        |> replaceAndSelectMarker name
+      )
+
+  | RemoveElement sym ->
+      state |> tryTransformChain (fun body recreate chain sections ->
+        let beforeDropped = chain |> List.takeWhile (fun nd -> nd.Entity.Value.Symbol <> sym) |> List.tryLast
+        let beforeDropped = defaultArg beforeDropped (List.head chain)
+        let newNodes = chain |> List.filter (fun nd -> nd.Entity.Value.Symbol <> sym)        
+        reconstructChain state body newNodes
+        |> selectName beforeDropped
+      )
+
   | RemoveSection sym ->
       state |> tryTransformChain (fun body recreate chain sections ->
-        let dropped, newNodes =
-          sections |> List.partition (fun sec -> (List.head sec.Nodes).Entity.Value.Symbol = sym)
+        let beforeDropped = 
+          sections |> List.map (fun sec -> List.head sec.Nodes) 
+          |> List.takeWhile (fun nd -> nd.Entity.Value.Symbol <> sym) |> List.tryLast
+        let beforeDropped = defaultArg beforeDropped (List.head chain)
+        let newNodes = sections |> List.filter (fun sec -> (List.head sec.Nodes).Entity.Value.Symbol <> sym)
         let newNodes = newNodes |> List.collect (fun sec -> sec.Nodes)
-        let newBody =
-          List.tail newNodes 
-          |> List.fold (fun prev part ->
-            match part.Node with 
-            | Expr.Property(_, n) -> { part with Node = Expr.Property(prev, n) }
-            | Expr.Call(Some inst, n, args) -> { part with Node = Expr.Call(Some prev, n, args) }
-            | _ -> failwith "Unexpected node in call chain") (List.head newNodes)
-
-        let newCode = (Ast.formatSingleExpression newBody).Trim()
-        let newCode = state.Code.Substring(0, body.Range.Start) + newCode + state.Code.Substring(body.Range.End + 1)
-
-        let dropRange = 
-          match dropped with
-          | { Nodes = { Node = Expr.Variable n | Expr.Call(_, n, _) | Expr.Property(_, n) }::_ }::_ -> n.Range
-          | { Nodes = nd::_ }::_ -> nd.Range
-          | _ -> failwith "Could not determine range of dropped node"
-        let rng = editorLocation state.Mapper dropRange.Start dropRange.Start
-        { state with Code = newCode; Selection = Some rng }
+        reconstructChain state body newNodes
+        |> selectName beforeDropped 
       )
 
   | AddTransform tfs ->
@@ -351,11 +429,10 @@ let updatePivotState state event =
           sections 
           |> List.map (fun sec -> Ast.formatWhiteAfterExpr (List.last sec.Nodes))
           |> List.countBy id
-        let whiteAfter, _ = whites |> List.maxBy (fun (s, c) -> if s = "" then 0 else c)
+        let whiteAfter, _ = ("",0)::whites |> List.maxBy (fun (s, c) -> if s = "" then 0 else c)
         Log.trace("live", "Whitespace of sections: %O, inserting '%s'", Array.ofList whites, whiteAfter)
         let node n = Ast.node { Start=0; End=0; } n
 
-        let marker = "InsertPropertyHere"
         let firstProperty, properties = 
           match tfs with
           | Pivot.DropColumns _ -> "drop columns", [marker; "then"]
@@ -378,33 +455,21 @@ let updatePivotState state event =
           | _ -> false, prev
 
         let injected, newBody =
-          List.tail chain |> List.fold (fun (injected, prev) (_, part) ->
+          List.tail chain |> List.fold (fun (injected, prev) part ->
             let injected, prev = tryInjectBefore prev part
             match part.Node with 
             | Expr.Property(_, n) -> injected, { part with Node = Expr.Property(prev, n) }
-            | Expr.Call(Some inst, n, args) -> injected, { part with Node = Expr.Call(Some prev, n, args) }
-            | _ -> failwith "Unexpected node in call chain") (false, snd (List.head chain))
+            | Expr.Call(_, n, args) -> injected, { part with Node = Expr.Call(Some prev, n, args) }
+            | _ -> failwith "Unexpected node in call chain") (false, List.head chain)
 
         let newBody = recreate (if injected then newBody else injectCall newBody)
         let newCode = (Ast.formatSingleExpression newBody).Trim()
         let newCode = state.Code.Substring(0, body.Range.Start) + newCode + state.Code.Substring(body.Range.End + 1)
-        let startIndex = newCode.IndexOf(marker)
-        let newCode = newCode.Replace(marker, Ast.escapeIdent firstProperty)
+        { state with Code = newCode } |> replaceAndSelectMarker firstProperty 
+      )
 
-        let mapper = Monaco.LocationMapper(newCode)
-        let rng = editorLocation mapper startIndex (startIndex + (Ast.escapeIdent firstProperty).Length)
-        { state with Code = newCode; Selection = Some rng })
-
-  | Select((sl, sc), (el, ec)) ->        
-      let rng = JsInterop.createEmpty<monaco.IRange>
-      rng.startLineNumber <- float sl
-      rng.startColumn <- float sc
-      rng.endLineNumber <- float el
-      rng.endColumn <- float ec
-      { state with Selection = Some rng } |> hideMenus
-
-let renderPivot trigger state = 
-  let trigger action = fun _ _ -> trigger action
+let renderPivot triggerEvent state = 
+  let trigger action = fun _ (e:Event) -> e.cancelBubble <- true; triggerEvent action
   match state.Body with
   | None -> None 
   | Some body ->
@@ -418,12 +483,13 @@ let renderPivot trigger state =
       | Some(_, selNode) ->
           let selEnt = selNode.Entity.Value
           let sections = chainNodes |> List.map snd |> createPivotSections 
+          let selSec = sections |> List.tryFind (fun sec -> 
+            sec.Nodes |> List.exists (fun secEnt -> selEnt.Symbol = secEnt.Entity.Value.Symbol) )
           let preview = defaultArg (tryFindPreview state.Globals selEnt) ignore
           let dom = 
             h?div [
                 yield "class" => "pivot-preview"
-                if state.Menus = AddDropdownOpen then
-                  yield "click" =!> trigger HideAddDropDown 
+                if state.Menus <> Hidden then yield "click" =!> trigger (SwitchMenu Hidden)
               ] [
               h?ul ["class" => "tabs"] [
                 for sec in sections ->
@@ -431,13 +497,11 @@ let renderPivot trigger state =
                   let secSymbol = (sec.Nodes |> List.head).Entity.Value.Symbol
                   let identRange = 
                     match sec.Nodes with
-                    | { Node = Expr.Variable n | Expr.Call(_, n, _) | Expr.Property(_, n) }::_ -> 
-                        state.Mapper.AbsoluteToLineCol(n.Range.Start),
-                        state.Mapper.AbsoluteToLineCol(n.Range.End+1)
+                    | { Node = Expr.Variable n | Expr.Call(_, n, _) | Expr.Property(_, n) }::_ -> n.Range
                     | _ -> failwith "Unexpected node in pivot call chain" 
 
                   h?li ["class" => if selected then "selected" else ""] [ 
-                    h?a ["click" =!> trigger (Select(identRange)) ] [
+                    h?a ["click" =!> trigger (SelectRange(identRange)) ] [
                       text (transformName sec.Transformation) 
                     ]
                     h?a ["click" =!> trigger (RemoveSection(secSymbol))] [
@@ -445,7 +509,7 @@ let renderPivot trigger state =
                     ]
                   ]
                 yield h?li ["class" => if state.Menus = AddDropdownOpen then "add selected" else "add"] [ 
-                  h?a ["click" =!> trigger OpenAddDropdown ] [
+                  h?a ["click" =!> trigger (SwitchMenu AddDropdownOpen) ] [
                     h?i ["class" => "fa fa-plus"] [] 
                   ]
                 ]
@@ -461,6 +525,89 @@ let renderPivot trigger state =
                     h?li [] [ h?a [ clickHandler(Pivot.Paging []) ] [ text "paging"] ]
                     h?li [] [ h?a [ clickHandler(Pivot.SortBy []) ] [ text "sort by"] ]
                   ]
+              ]
+              h?div ["class" => "toolbar"] [
+                yield h?span ["class"=>"navig"] [
+                  h?a [] [ h?i ["click" =!> trigger (SelectChainElement -1); "class" => "fa fa-chevron-left"] [] ]
+                  h?a [] [ h?i ["click" =!> trigger (SelectChainElement 0); "class" => "fa fa-circle"] [] ]
+                  h?a [] [ h?i ["click" =!> trigger (SelectChainElement +1); "class" => "fa fa-chevron-right"] [] ]
+                ]
+                match selSec with
+                | Some { Nodes = nodes; Transformation = Pivot.Paging _ } ->                    
+                    let methods = nodes |> List.map (function { Node = Expr.Call(_, n, _) } -> n.Node.Name | _ -> "") |> set
+                    for nd in nodes do
+                      match nd.Node with
+                      | Expr.Call(_, n, { Node = [arg] }) ->
+                          let removeOp =
+                            if n.Node.Name = "take" then ReplaceElement(nd.Entity.Value.Symbol, "then", None)
+                            else RemoveElement(nd.Entity.Value.Symbol)
+                          yield h?span [] [
+                              h?a ["click" =!> trigger (SelectRange(n.Range)) ] [ text n.Node.Name ]
+                              h?input [ 
+                                "input" =!> fun el _ -> 
+                                  triggerEvent (ReplaceRange(arg.Value.Range, (unbox<HTMLInputElement> el).value))
+                                "value" => Ast.formatSingleExpression arg.Value ] []
+                              h?a ["click" =!> trigger (removeOp)] [
+                                h?i ["class" => "fa fa-times"] [] 
+                              ]
+                            ]
+                      | _ -> ()
+                    if not (methods.Contains "take" && methods.Contains "skip") then
+                      yield h?a ["class" => "right"; "click" =!> trigger (SwitchMenu ContextualDropdownOpen) ] [
+                          h?i ["class" => "fa fa-plus"] [] 
+                        ]
+                | Some { Nodes = nodes; Transformation = Pivot.DropColumns _ } ->
+                    for nd in nodes do
+                      match nd.Node with
+                      | Expr.Property(_, n) when n.Node.Name <> "then" && n.Node.Name <> "drop columns" -> 
+                          yield h?span [] [
+                              h?a ["click" =!> trigger (SelectRange(n.Range)) ] [
+                                text n.Node.Name 
+                              ]
+                              h?a ["click" =!> trigger (RemoveElement(nd.Entity.Value.Symbol))] [
+                                h?i ["class" => "fa fa-times"] [] 
+                              ]
+                            ]
+                      | _ -> ()
+                    yield h?a ["class" => "right"; "click" =!> trigger (SwitchMenu ContextualDropdownOpen) ] [
+                        h?i ["class" => "fa fa-plus"] [] 
+                      ]
+                | _ -> ()
+              ]
+
+              h?div ["class" => "add-menu"] [
+                match state.Menus, selSec with
+                | ContextualDropdownOpen, Some { Nodes = nodes; Transformation = Pivot.Paging _ } ->
+                    let methods = nodes |> List.choose (function 
+                      | { Node = Expr.Property(_, n) | Expr.Call(_, n, _); Entity = e } -> 
+                          Some(n.Node.Name, e.Value.Symbol) | _ -> None) |> dict
+                    let lastSym = (List.last nodes).Entity.Value.Symbol
+                    let firstSym = (List.head nodes).Entity.Value.Symbol
+                    yield h?ul [] [
+                      if not (methods.ContainsKey "take") then
+                        let op = 
+                          if methods.ContainsKey "then" then ReplaceElement(methods.["then"], "take", Some [Expr.Number 10.])
+                          else AddElement(lastSym, "take", Some [Expr.Number 10.])
+                        yield h?li [] [ h?a [ "click" =!> trigger op ] [ text "take"] ]
+                      if not (methods.ContainsKey "skip") then
+                        let op = AddElement(firstSym, "skip", Some [Expr.Number 10.])
+                        yield h?li [] [ h?a [ "click" =!> trigger op ] [ text "skip"] ]
+                    ]
+                | ContextualDropdownOpen, Some { Nodes = nodes; Transformation = Pivot.DropColumns _ } ->
+                    let lastNode = nodes |> List.rev |> List.find (function { Node = Expr.Property(_, n) } -> n.Node.Name <> "then" | _ -> true) 
+                    match lastNode.Entity.Value.Type with
+                    | Some(Type.Object obj) ->
+                        yield h?ul [] [
+                          for m in obj.Members do
+                            match m with
+                            | Member.Property(name=n) when n.StartsWith("drop") ->
+                                yield h?li [] [ 
+                                  h?a [ "click" =!> trigger (AddElement(lastNode.Entity.Value.Symbol, n, None)) ] [ text n] 
+                                ]
+                            | _ -> ()
+                        ]
+                    | _ -> ()
+                | _ -> ()
               ]
               h?div ["class" => "preview-body"] [
                 yield h.delayed preview
@@ -498,7 +645,7 @@ let createPivotPreview updateZones (ed:monaco.editor.ICodeEditor) =
       | _ -> ()
       updateZones (renderPivot pivotEvent.Trigger pivotState)
     with e ->
-      Log.exn("live", "Error when updating state %O with event %O", pivotState, evt) )
+      Log.exn("live", "Error when updating state %O with event %O: %O", pivotState, evt, e) )
 
   async { let! glob = globalTypes |> Async.AwaitFuture 
           pivotEvent.Trigger(InitializeGlobals glob) } |> Async.StartImmediate

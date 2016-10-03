@@ -1,5 +1,6 @@
 {
     "outDir": "../../out/src/thegamma",
+    "module":  "umd",
     "sourceMaps": true,
     "projFile": "thegamma.fsproj",
     "refs": {

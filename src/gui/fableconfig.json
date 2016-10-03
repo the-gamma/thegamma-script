@@ -1,5 +1,6 @@
 {
     "outDir": "../../out/src/gui",
+    "module":  "umd",
     "sourceMaps": true,
     "projFile": "gui.fsproj",
     "refs": {

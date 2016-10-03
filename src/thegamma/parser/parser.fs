@@ -230,9 +230,8 @@ let makeCallOrProp optInst prevId prevArgs =
 /// Property access or method call after '.' in a nested block
 let rec parseChain dotRng optInst prevId prevArgs prevWhite ctx = 
   let inst = makeCallOrProp optInst prevId prevArgs |> whiteAfter prevWhite
-  let emptyMember = 
-    let rng = { Start=dotRng.End + 1; End=dotRng.End + 1 }
-    node rng (Expr.Property(inst, node rng { Name = "" })) 
+  let emptyRng = { Start=dotRng.End + 1; End=dotRng.End + 1 }
+  let emptyMember = node emptyRng (Expr.Property(inst, node emptyRng { Name = "" })) 
 
   match nestedToken ctx with
   | Some (Identifier id) ->
@@ -247,7 +246,7 @@ let rec parseChain dotRng optInst prevId prevArgs prevWhite ctx =
       else 
         next ctx
         use _silent = usingSilentMode ctx
-        parseChain dotRng optInst prevId prevArgs prevWhite ctx
+        parseMember (Some inst) (node emptyRng { Name = "" }) ctx
       
   | None ->
   match token ctx with

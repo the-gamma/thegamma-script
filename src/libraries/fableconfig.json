@@ -1,5 +1,6 @@
 {
     "outDir": "../../out/src/libraries",
+    "module":  "umd",
     "sourceMaps": true,
     "projFile": "libraries.fsproj",
     "refs": {

@@ -85,6 +85,9 @@ let createCompletionProvider (getService:string -> CheckingService) =
                     match Types.reduceType t with
                     | Type.Object { Members = mems } -> Some(rng, mems)
                     | _ -> None
+                | EntityKind.NamedMember(n, { Type = Some t })  ->
+                    Log.trace("completions", "Ignoring '%s' at location %s-%s (current=%s)", n.Name, rng.Start, rng.End, loc)
+                    None
                 | _ -> None)
 
             let convertRange (rng:TheGamma.Range) = 

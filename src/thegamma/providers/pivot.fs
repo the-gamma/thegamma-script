@@ -217,7 +217,7 @@ and handlePagingRequest ctx rest pgid ops =
   let thenMemb = 
     makeProperty ctx "then" (Empty::Paging(List.rev ops)::rest)
   ( match ops with
-    | [] -> [skipMemb; takeMemb]
+    | [] -> [skipMemb; takeMemb; thenMemb]
     | [Skip _] -> [takeMemb; thenMemb]
     | _ -> failwith "handlePagingRequest: Shold not happen" ) |> makeObjectType
 
