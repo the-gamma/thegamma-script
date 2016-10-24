@@ -112,7 +112,7 @@ and getType ctx (e:Entity) =
 /// have been reduced to non-delayed type before
 and typeCheckEntity ctx (e:Entity) = 
   match e.Kind with
-  | EntityKind.GlobalValue(name) ->
+  | EntityKind.GlobalValue(name, _) ->
       if not (ctx.Globals.ContainsKey(name.Name)) then
         Errors.TypeChecker.variableNotInScope name.Name |> addError ctx e
         Type.Any
@@ -241,12 +241,14 @@ let typeCheckEntityAsync ctx (e:Entity) = async {
   let visited = Dictionary<Symbol, bool>()
 
   let rec loop e = async {
-    if not (visited.ContainsKey(e.Symbol)) && e.Type.IsNone then
+    let isGlobal = match e.Kind with EntityKind.GlobalValue _ -> true | _ -> false
+    if not (visited.ContainsKey(e.Symbol)) && (isGlobal || e.Type.IsNone) then
       visited.[e.Symbol] <- true
       for a in e.Antecedents do
         do! loop a 
+      Log.trace("typechecker", "Type of entity '%s' (%O) is: %O", e.Name, e.Kind, getType ctx e)
       let! t = evaluateDelayedType true (getType ctx e)
-      Log.trace("typechecker", "Type of entity '%s' (%O) is: %O", e.Name, e.Kind, t)
+      Log.trace("typechecker", "Type of entity '%s' (%O) reduced to: %O", e.Name, e.Kind, t)
       e.Type <- Some t }
 
   do! loop e

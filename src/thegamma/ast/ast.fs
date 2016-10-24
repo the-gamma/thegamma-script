@@ -146,7 +146,7 @@ type [<RequireQualifiedAccess>] EntityKind =
   | Function of variable:Entity * body:Entity
 
   /// Reference to a global symbol
-  | GlobalValue of name:Name 
+  | GlobalValue of name:Name * Babel.Expression option 
   /// Reference to a local variable
   | Variable of name:Name * value:Entity
   /// Variable binding in lambda abstraction

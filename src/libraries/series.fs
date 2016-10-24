@@ -247,6 +247,8 @@ and series<'k, 'v> =
         | Some res -> unbox<'k> k, res
         | None -> unbox<'k> k, defaultValue) })
 
+  member s.preview() = s.take(10)
+      
 (*
 open System.Runtime.CompilerServices
 

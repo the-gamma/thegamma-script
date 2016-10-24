@@ -7,7 +7,7 @@ open Fable.Import
 
 type ProvidedType = 
   | NamedType of name:string * typars:string list * typ:Type
-  | GlobalValue of string * Expression * Type
+  | GlobalValue of string * Metadata list * Expression * Type
 
 // ------------------------------------------------------------------------------------------------
 // F# provider
@@ -144,7 +144,7 @@ module FSharpProvider =
                 match getTypeParameters exp.typepars with 
                 | [] -> ty
                 | tya -> Type.App(ty, [for v in tya -> Type.Any])
-              ProvidedType.GlobalValue(exp.name, e, ty)
+              ProvidedType.GlobalValue(exp.name, [], e, ty)
             else
               ProvidedType.NamedType(exp.name, getTypeParameters exp.typepars, ty) ] }
     
@@ -339,7 +339,7 @@ module RestProvider =
   let rec provideRestType lookupNamed name root cookies = 
     let ctx = ident("_runtime")?RuntimeContext
     ProvidedType.GlobalValue
-      ( name, 
+      ( name, [],
         NewExpression(ctx, [str root; str cookies; str ""], None),
         createRestType lookupNamed root cookies "/")
 

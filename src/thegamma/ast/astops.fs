@@ -231,7 +231,7 @@ let entityCodeNameAndAntecedents = function
   | EntityKind.Constant(Constant.Boolean b) -> 8, [], (string b)
   | EntityKind.Constant(Constant.Empty) -> 9, [], anonymous
   | EntityKind.Function(an1, an2) -> 10, [an1; an2], anonymous
-  | EntityKind.GlobalValue(n) -> 11, [], n.Name
+  | EntityKind.GlobalValue(n, _) -> 11, [], n.Name
   | EntityKind.Variable(n, an) -> 12, [an], n.Name
   | EntityKind.Binding(n, an) -> 13, [an], n.Name
   | EntityKind.ArgumentList(ans) -> 14, ans, anonymous

@@ -65,9 +65,9 @@ let (=!>) k f = k, Event(f)
 
 type El() = 
   static member (?) (_:El, n:string) = fun a b ->
-    let f = 
-      if n <> "select" then None
-      else Some (fun el ->
+    let n, f = 
+      if n <> "chosen" then n, None
+      else "select", Some (fun el ->
         chosen el
         for k, v in a do
           match v with

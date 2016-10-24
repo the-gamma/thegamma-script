@@ -81,6 +81,7 @@ let evaluatePreview typ value =
   let previewName = {Name.Name="preview"}
   match typ with
   | Some(Type.Object(FindProperty previewName e)) -> Some(evaluateCall e value [])
+  | Some(Type.Object(FindMethod previewName (_, e))) -> Some(evaluateCall e value [])
   | _ -> None
 
 let rec ensureValue ctx (e:Entity) = 
@@ -101,9 +102,9 @@ and evaluateEntity ctx (e:Entity) =
   | EntityKind.Constant(Constant.String s) -> Some(unbox s)
   | EntityKind.Constant(Constant.Empty) -> Some(unbox null)
 
-  | EntityKind.GlobalValue(name) ->
-      match ctx.Globals.TryGetValue name.Name with
-      | true, { Value = Some value } -> Some value.Value
+  | EntityKind.GlobalValue(name, expr) ->
+      match expr with
+      | Some expr -> Some(evaluateExpression [| |] expr)
       | _ -> None
       
   | EntityKind.ChainElement(isProperty=true; name=name; instance=Some inst) ->
@@ -182,20 +183,12 @@ let evaluateEntityTree ctx (e:Entity) =
 // 
 // ------------------------------------------------------------------------------------------------
 
-let globalEntity name typ expr =
-  let value = 
-    match expr with
-    | Some expr -> 
-        let value = evaluateExpression [| |] expr
-        Some { Value = value; Preview = evaluatePreview (Some typ) value }
-    | _ -> None
-
-  Log.trace("interpreter", "Initializing global value '%s' = %O", name, value)
-  { Kind = EntityKind.GlobalValue({ Name = name })
+let globalEntity name meta typ expr = 
+  { Kind = EntityKind.GlobalValue({ Name = name }, expr)
     Symbol = createSymbol()
     Type = Some typ
-    Meta = []
-    Value = value
+    Meta = meta
+    Value = None
     Errors = [] }
 
 let evaluate (globals:seq<Entity>) (e:Entity) = 

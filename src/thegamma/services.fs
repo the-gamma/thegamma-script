@@ -88,7 +88,11 @@ let rangeToLoc lengths (rng:Range) =
 type CheckingService(article, globals:Future<Entity list>) =
   let errorsReported = Control.Event<_>()
   let emptyProg = { Body = Ast.node { Start = 0; End = 0 } [] }
-  let bindingContext = Binder.createContext article
+  let bindingContext =  
+    async { 
+      let! globals = globals |> Async.AwaitFuture
+      return Binder.createContext globals article } |> Async.StartAsFuture
+
   let errorsToLineCol (code:string) errors = 
     let lengths = code.Split('\n') |> Array.toList |> List.map (fun l -> l.Length)
     errors |> Array.map (fun e -> 
@@ -98,6 +102,7 @@ type CheckingService(article, globals:Future<Entity list>) =
     let! globals = Async.AwaitFuture globals
     try
       let progSyntax, parseErrors = Parser.parseProgram code
+      let! bindingContext = bindingContext |> Async.AwaitFuture
       let progEntity, boundEntities = Binder.bindProgram bindingContext progSyntax
       do! TypeChecker.typeCheckProgram globals boundEntities progEntity
       let typeErrors = TypeChecker.collectTypeErrors progEntity

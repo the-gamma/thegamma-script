@@ -42,11 +42,11 @@ let isVariable name = function { Kind = EntityKind.Variable(n, _) } when n.Name 
 /// Parse and type check given code, find the specified entity & return its type
 /// together with all the errors produced by type checking of the program
 let check (code:string) cond vars = 
-  let ctx = Binder.createContext("script")
+  let ctx = Binder.createContext [] "script"
   let code = code.Replace("\n    ", "\n")
   let prog, _ = code |> Parser.parseProgram
   let prog, entities = Binder.bindProgram ctx prog
-  let globals = [ for n, t in vars -> Interpreter.globalEntity n t None ] 
+  let globals = [ for n, t in vars -> Interpreter.globalEntity n [] t None ] 
   let mutable completed = false
   async { do! TypeChecker.typeCheckProgram globals entities prog
           completed <- true } |> Async.StartImmediate

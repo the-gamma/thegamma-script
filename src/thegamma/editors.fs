@@ -224,7 +224,7 @@ let renderEditor typeCheck (setValue:string -> string -> string -> unit) origTex
       h?div ["class" => "ed-single"] [
         renderDoc doc
         h?div ["class" => "control"] [ 
-          h?select 
+          h?chosen 
             [ "change" =!> fun el e -> 
                 let value = (unbox<Browser.HTMLSelectElement> el).value
                 replaceNameWithValue origText n value |> setValue "single" value ] 
@@ -257,7 +257,7 @@ let renderEditor typeCheck (setValue:string -> string -> string -> unit) origTex
                     [ h?i ["class" => if dis then "fa fa-ban" else "fa fa-times" ] [] ]
                 ]
             ]
-            h?select 
+            h?chosen
               [ "data-placeholder" => "add another item..."
                 "change" =!> fun el e -> 
                   let sel = (el :?> Browser.HTMLSelectElement).value
@@ -285,12 +285,12 @@ let renderEditor typeCheck (setValue:string -> string -> string -> unit) origTex
           heading
           p
           h?div ["class" => "control"] [ 
-            h?select 
+            h?chosen 
               [ "change" =!> fun el e -> update ((unbox<Browser.HTMLSelectElement> el).value, "") ] 
               [ for (Property.Property(name, _, _), nested) in props ->
                   let sel = if name = name1 then ["selected" => "selected"] else []
                   h?option sel [ text name ] ]
-            h?select 
+            h?chosen 
               [ "data-placeholder" => "choose an item..." 
                 "change" =!> fun el e -> 
                     let name2 = (unbox<Browser.HTMLSelectElement> el).value

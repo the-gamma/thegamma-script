@@ -110,7 +110,7 @@ let exportType ctx (typ:System.Type) kind =
 
   let methods = 
     [ for m in typ.GetMethods(BindingFlags.DeclaredOnly ||| kind ||| BindingFlags.Public) do
-        if not m.IsSpecialName then
+        if not m.IsSpecialName && m.Name <> "Equals" && m.Name <> "GetHashCode" then
           let typArgsSrc = if m.IsGenericMethod then m.GetGenericArguments() else [||]
           let typArgsNew = typArgsSrc |> Array.fold (fun typArgs t -> Map.add t.Name (GenericParameterType.Create(t.Name)) typArgs) typArgs
 
@@ -164,6 +164,7 @@ let knownTypes =
   [ yield! 
       [ "IEnumerable`1", "seq" // wishful thinking
         "FSharpAsync`1", "async" // dtto
+        "IEqualityComparer", "object"
         "table`2", "table"
         "empty", "empty"
         "timeline`2", "timeline"

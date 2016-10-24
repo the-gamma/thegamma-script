@@ -30,7 +30,7 @@ let services =
 
 type ProvidedTypes = 
   { LookupNamed : string -> Type list -> Type
-    Globals : list<string * Babel.Expression * Type> }
+    Globals : list<string * Metadata list * Babel.Expression * Type> }
     
 let types = async {
   let mutable named = Map.empty
@@ -51,7 +51,7 @@ let types = async {
     [ TypePoviders.RestProvider.provideRestType lookupNamed 
         "olympics1" (services + "olympics") ""
       TypePoviders.RestProvider.provideRestType lookupNamed 
-        "olympics" (services + "pivot") ("source=" + services + "olympics")
+        "olympics3" (services + "pivot") ("source=" + services + "olympics")
       TypePoviders.RestProvider.provideRestType lookupNamed 
         "smlouvy1" (services + "smlouvy") ""
       TypePoviders.RestProvider.provideRestType lookupNamed 
@@ -61,7 +61,7 @@ let types = async {
       TypePoviders.RestProvider.provideRestType lookupNamed 
         "world" (services + "worldbank") ""
       
-      TypeProviders.Pivot.providePivotType (services + "pdata/olympics") "olympics2" lookupNamed
+      TypeProviders.Pivot.providePivotType (services + "pdata/olympics") "olympics" lookupNamed
         [ "Games", PrimitiveType.String; "Year", PrimitiveType.Number;  "Sport", PrimitiveType.String; "Discipline", PrimitiveType.String 
           "Athlete", PrimitiveType.String; "Team", PrimitiveType.String; "Gender", PrimitiveType.String; "Event", PrimitiveType.String 
           "Medal", PrimitiveType.String; "Gold", PrimitiveType.Number; "Silver", PrimitiveType.Number; "Bronze", PrimitiveType.Number ]
@@ -74,6 +74,7 @@ let types = async {
 
       // TODO: some more types 
       TypePoviders.NamedType("value", ["a"], Type.Any)
+      TypePoviders.NamedType("object", [], Type.Any)
       TypePoviders.NamedType("seq", ["a"], Type.Any) 
       TypePoviders.NamedType("async", ["a"], Type.Any) ]
 
@@ -87,18 +88,18 @@ let types = async {
 
   let globals = 
     allTys 
-    |> List.choose (function TypePoviders.GlobalValue(s, e, t) -> Some(s, e, t) | _ -> None)
+    |> List.choose (function TypePoviders.GlobalValue(s, m, e, t) -> Some(s, m, e, t) | _ -> None)
   
   return { Globals = globals; LookupNamed = lookupNamed } } |> Async.StartAsNamedFuture "types"
 
 let globalTypes = async { 
   let! ty = types |> Async.AwaitFuture
   Log.trace("typechecker", "Global values: %O", Array.ofList ty.Globals)
-  return ty.Globals |> List.map (fun (n, e, t) -> Interpreter.globalEntity n t (Some e)) } |> Async.StartAsNamedFuture "global types"
+  return ty.Globals |> List.map (fun (n, m, e, t) -> Interpreter.globalEntity n m t (Some e)) } |> Async.StartAsNamedFuture "global types"
 
 let globalExprs = async { 
   let! ty = types |> Async.AwaitFuture
-  return ty.Globals |> List.map (fun (n, e, _) -> n, e) |> Map.ofList } |> Async.StartAsNamedFuture "global exps"
+  return ty.Globals |> List.map (fun (n, _, e, _) -> n, e) |> Map.ofList } |> Async.StartAsNamedFuture "global exps"
 
 // ------------------------------------------------------------------------------------------------
 // HTML helpers
@@ -141,10 +142,20 @@ let pickMetaByType ctx typ metas =
     if m.Context = ctx && m.Type = typ then Some(m.Data)
     else None)
 
-let pickPivotChainElement expr =
+let pickPivotFields expr =
+  match expr.Entity with
+  | Some { Kind = EntityKind.ChainElement _; Meta = m } 
+  | Some { Kind = EntityKind.GlobalValue _; Meta = m } 
+  | Some { Kind = EntityKind.Variable(_, { Meta = m }) } -> 
+      match pickMetaByType "http://schema.thegamma.net/pivot" "Fields" m with
+      | Some m -> Some(unbox<TypeProviders.Pivot.Field list> m)
+      | _ -> None
+  | _ -> None
+
+let pickPivotTransformations expr =
   match expr.Entity with
   | Some { Kind = EntityKind.ChainElement _; Meta = m } -> 
-      match pickMetaByType "http://thegamma.net" "Pivot" m with
+      match pickMetaByType "http://schema.thegamma.net/pivot" "Transformations" m with
       | Some m -> Some(unbox<TypeProviders.Pivot.Transformation list> m)
       | _ -> None
   | Some { Kind = EntityKind.GlobalValue _; Meta = m } -> 
@@ -153,8 +164,9 @@ let pickPivotChainElement expr =
 
 let tryFindPreview globals (ent:Entity) = 
   let nm = {Name.Name="preview"}
-  match ent.Type with 
-  | Some(Type.Object(TypeChecker.FindProperty nm prev)) ->
+  match FsOption.map Types.reduceType ent.Type with 
+  | Some(Type.Object(TypeChecker.FindMethod nm _))
+  | Some(Type.Object(TypeChecker.FindProperty nm _)) ->
       let res = Interpreter.evaluate globals ent  
       match res with
       | Some { Preview = Some p } ->
@@ -212,7 +224,7 @@ let createPivotSections tfss =
           List.rev (current::acc)
     
   let tfss = tfss |> List.choose (fun node ->
-    match pickPivotChainElement node with
+    match pickPivotTransformations node with
     | Some(tfs) ->
         let tfs = tfs |> List.filter (function Pivot.Empty -> false | _ -> true)
         if List.isEmpty tfs then None else Some(node, tfs)
@@ -445,30 +457,36 @@ let rec updatePivotState state event =
         Log.trace("live", "Whitespace of sections: %O, inserting '%s'", Array.ofList whites, whiteAfter)
         let node n = Ast.node { Start=0; End=0; } n
 
-        let firstProperty, properties = 
+        let firstProperty, getProperties = 
+          let res k l = k, fun _ -> l
           match tfs with
-          | Pivot.DropColumns _ -> "drop columns", [marker; "then"]
-          | Pivot.SortBy _ -> "sort data", [marker; "then"]
-          | Pivot.GroupBy _ -> "group data", [marker; "by ???"; "then"] // Wrong - pick group key
-          | Pivot.FilterBy _ -> "filter data", [marker; "then"] // Wrong - add then to pivot
-          | Pivot.Paging _ -> "paging", [marker; "then"] // Wrong - add then to pivot
-          | Pivot.GetSeries _ -> "", [] // Wrong - we need to drop 
-          | Pivot.GetTheData _ | Pivot.Empty -> "", []
+          | Pivot.DropColumns _ -> res "drop columns" [marker; "then"]
+          | Pivot.SortBy _ -> res "sort data" [marker; "then"]
+          | Pivot.FilterBy _ -> res "filter data" [marker; "then"] // TODO
+          | Pivot.Paging _ -> res "paging" [marker; "then"]
+          | Pivot.GetSeries _ -> res "get series" [marker]
+          | Pivot.GetTheData -> res "get the data" [marker]
+          | Pivot.GroupBy(_, _) -> "group data", fun expr ->
+              Log.trace("live", "Pick fields of %O, got: %O", expr, pickPivotFields expr)
+              match pickPivotFields expr with
+              | Some (f::_) -> [marker; "by " + f.Name; "then"]
+              | _ -> [marker; "by <Property>"; "then"]
+          | Pivot.GroupBy([], _) | Pivot.Empty -> res "" []
 
         let injectCall expr = 
-          properties |> List.fold (fun expr name ->
+          getProperties expr |> List.fold (fun expr name ->
             node (Expr.Property(expr, node { Name = name }))) expr
           |> Parser.whiteAfter [ { Token = TokenKind.White whiteAfter; Range = {Start=0; End=0} } ]
 
         let tryInjectBefore prev part =
-          match pickPivotChainElement part with
+          match pickPivotTransformations part with
           | Some (Pivot.GetSeries _ :: _) 
           | Some (Pivot.GetTheData _ :: _) -> true, injectCall prev
           | _ -> false, prev
 
         let injected, newBody =
           List.tail chain |> List.fold (fun (injected, prev) part ->
-            let injected, prev = tryInjectBefore prev part
+            let injected, prev = if injected then injected, prev else tryInjectBefore prev part
             match part.Node with 
             | Expr.Property(_, n) -> injected, { part with Node = Expr.Property(prev, n) }
             | Expr.Call(_, n, args) -> injected, { part with Node = Expr.Call(Some prev, n, args) }
@@ -480,8 +498,172 @@ let rec updatePivotState state event =
         { state with Code = newCode } |> replaceAndSelectMarker firstProperty 
       )
 
+let renderNodeList trigger nodes =
+  [ for nd in nodes do
+      match nd.Node with
+      | Expr.Property(_, n) when n.Node.Name <> "then" ->
+          yield h?span [] [
+            h?a ["click" =!> trigger (SelectRange(n.Range)) ] [
+              text n.Node.Name 
+            ]
+            h?a ["click" =!> trigger (RemoveElement(nd.Entity.Value.Symbol))] [
+              h?i ["class" => "fa fa-times"] [] 
+            ]
+          ]
+      | _ -> () ]
+
+let renderContextMenu trigger = 
+  h?a ["class" => "right"; "click" =!> trigger (SwitchMenu ContextualDropdownOpen) ] [
+    h?i ["class" => "fa fa-plus"] [] 
+  ]
+
+let renderAddPropertyMenu trigger f nodes =
+  [ let lastNode = nodes |> List.rev |> List.find (function { Node = Expr.Property(_, n) } -> n.Node.Name <> "then" | _ -> true) 
+    match lastNode.Entity.Value.Type with
+    | Some(Type.Object obj) ->
+        let members = 
+          obj.Members 
+          |> Seq.choose (function Member.Property(name=n) when f n -> Some n | _ -> None)
+          |> Seq.sort
+        yield h?ul [] [
+          for n in members ->
+            h?li [] [ 
+              h?a [ "click" =!> trigger (AddElement(lastNode.Entity.Value.Symbol, n, None)) ] [ text n] 
+            ]
+        ]
+    | _ -> () ]
+
+let renderSection triggerEvent section = 
+  let trigger action = fun _ (e:Event) -> e.cancelBubble <- true; triggerEvent action
+  let triggerWith f = fun el (e:Event) -> e.cancelBubble <- true; triggerEvent (f el)
+  let getNodeNameAndSymbol = function
+    | Some { Entity = Some e; Node = Expr.Property(_, n) } -> n.Node.Name, Some e.Symbol
+    | _ -> "", None
+  [ match section with
+    | Some { Nodes = nodes; Transformation = Pivot.GetSeries _ } ->
+        let getSeriesNode, keyNode, valNode = 
+          match nodes with 
+          | gs::gsk::gsv::_ -> gs, Some gsk, Some gsv
+          | gs::gsk::_ -> gs, Some gsk, None
+          | gs::_ -> gs, None, None
+          | _ -> failwith "No get series node in get series transformation"
+        let keyName, keySym = getNodeNameAndSymbol keyNode
+        let valName, valSym = getNodeNameAndSymbol valNode
+        match getSeriesNode.Entity.Value.Type with
+        | Some(Type.Object obj) ->
+            yield h?select ["change" =!> triggerWith(fun el -> 
+                match keySym with
+                | None -> AddElement(getSeriesNode.Entity.Value.Symbol, (unbox<HTMLSelectElement> el).value, None)
+                | Some selSym -> ReplaceElement(selSym, (unbox<HTMLSelectElement> el).value, None)) ] [
+              if keyName = "" then yield h?option [ "value" => ""; "selected" => "selected" ] [ text "" ]
+              for m in obj.Members do
+                match m with
+                | Member.Property(name=n) when n.StartsWith("with key") ->
+                    yield h?option [  
+                      yield "value" => n
+                      if keyName = n then yield "selected" => "selected" ] [ text n ] 
+                | _ -> ()
+            ]
+        | _ -> ()
+        match keyNode with
+        | Some({ Entity = Some ({ Type = Some (Type.Object obj) } as keyEnt)}) ->
+            yield h?select ["change" =!> triggerWith(fun el -> 
+                match valSym with
+                | None -> AddElement(keyEnt.Symbol, (unbox<HTMLSelectElement> el).value, None)
+                | Some selSym -> ReplaceElement(selSym, (unbox<HTMLSelectElement> el).value, None)) ] [
+              if valName = "" then yield h?option [ "value" => ""; "selected" => "selected" ] [ text "" ]
+              for m in obj.Members do
+                match m with
+                | Member.Property(name=n) when n.StartsWith("and value") ->
+                    yield h?option [  
+                      yield "value" => n
+                      if keyName = n then yield "selected" => "selected" ] [ text n ] 
+                | _ -> ()
+            ]
+        | _ -> ()
+
+    | Some { Nodes = nodes; Transformation = Pivot.GroupBy _ } ->
+        let firstNode, selNode, aggNodes = 
+          match nodes with 
+          | gby::sel::aggs -> gby, Some sel, aggs
+          | gby::_ -> gby, None, []
+          | _ -> failwith "No group by node in group by transformation"
+        let selName, selSym = getNodeNameAndSymbol selNode
+        match firstNode.Entity.Value.Type with
+        | Some(Type.Object obj) ->
+            yield h?select ["change" =!> triggerWith(fun el -> 
+                match selSym with
+                | None -> AddElement(firstNode.Entity.Value.Symbol, (unbox<HTMLSelectElement> el).value, None)
+                | Some selSym -> ReplaceElement(selSym, (unbox<HTMLSelectElement> el).value, None)) ] [
+              if selName = "" then yield h?option [ "value" => ""; "selected" => "selected" ] [ text "" ]
+              for m in obj.Members do
+                match m with
+                | Member.Property(name=n) when n.StartsWith("by") ->
+                    yield h?option [  
+                      yield "value" => n
+                      if selName = n then yield "selected" => "selected" ] [ text n ] 
+                | _ -> ()
+            ]
+        | _ -> ()
+        yield! renderNodeList trigger aggNodes  
+        yield renderContextMenu trigger
+
+    | Some { Nodes = nodes; Transformation = Pivot.Paging _ } ->                    
+        let methods = nodes |> List.map (function { Node = Expr.Call(_, n, _) } -> n.Node.Name | _ -> "") |> set
+        for nd in nodes do
+          match nd.Node with
+          | Expr.Call(_, n, { Node = [arg] }) ->
+              let removeOp =
+                if n.Node.Name = "take" then ReplaceElement(nd.Entity.Value.Symbol, "then", None)
+                else RemoveElement(nd.Entity.Value.Symbol)
+              yield h?span [] [
+                  h?a ["click" =!> trigger (SelectRange(n.Range)) ] [ text n.Node.Name ]
+                  h?input [ 
+                    "id" => "input-pg-" + n.Node.Name
+                    "input" =!> fun el _ -> 
+                      let input = unbox<HTMLInputElement> el
+                      let parsed, errors = Parser.parseProgram input.value
+                      if errors.Length = 0 && parsed.Body.Node.Length = 1 then
+                        setCustomValidity el ""
+                        Multiplex
+                          [ SetFocus("input-pg-" + n.Node.Name, Some(int input.selectionStart));
+                            ReplaceRange(arg.Value.Range, input.value) ] |> triggerEvent
+                      else setCustomValidity el "Cannot parse expression"
+                    "value" => Ast.formatSingleExpression arg.Value ] []
+                  h?a ["click" =!> trigger (removeOp)] [
+                    h?i ["class" => "fa fa-times"] [] 
+                  ]
+                ]
+          | _ -> ()
+        if not (methods.Contains "take" && methods.Contains "skip") then
+          yield renderContextMenu trigger
+
+    | Some { Nodes = nodes; Transformation = Pivot.SortBy _ } ->
+        let props = nodes |> List.choose (function
+          | { Node = Expr.Property(_, n); Entity = Some { Symbol = sym} }
+              when n.Node.Name <> "then" && n.Node.Name <> "sort data" -> Some(sym, n) | _ -> None)
+        let last = List.tryLast props
+        for sym, n in props ->
+          h?span [] [
+            yield h?a ["click" =!> trigger (SelectRange(n.Range)) ] [
+              text n.Node.Name 
+            ]
+            if n.Node.Name = (snd last.Value).Node.Name then
+              yield h?a ["click" =!> trigger (RemoveElement(sym))] [
+                h?i ["class" => "fa fa-times"] [] 
+              ]
+          ]
+        yield renderContextMenu trigger
+
+    | Some { Nodes = nodes; Transformation = Pivot.DropColumns _ } ->
+        yield! renderNodeList trigger (List.tail nodes)
+        yield renderContextMenu trigger
+
+    | _ -> () ]
+
 let renderPivot triggerEvent state = 
   let trigger action = fun _ (e:Event) -> e.cancelBubble <- true; triggerEvent action
+  let triggerWith f = fun el (e:Event) -> e.cancelBubble <- true; triggerEvent (f el)
   match state.Body with
   | None -> None 
   | Some body ->
@@ -504,6 +686,14 @@ let renderPivot triggerEvent state =
                 if state.Menus <> Hidden then yield "click" =!> trigger (SwitchMenu Hidden)
               ] [
               h?ul ["class" => "tabs"] [
+                let _, firstNode = chainNodes |> List.head
+                yield h?li ["class" => if selNode.Entity.Value.Symbol = firstNode.Entity.Value.Symbol then "selected" else ""] [ 
+                  h?a ["click" =!> trigger (SelectRange(firstNode.Range)) ] [
+                    match firstNode.Node with
+                    | Expr.Variable n -> yield text n.Node.Name
+                    | _ -> yield text "data"
+                  ]
+                ]
                 for sec in sections ->
                   let selected = sec.Nodes |> List.exists (fun secEnt -> selEnt.Symbol = secEnt.Entity.Value.Symbol)
                   let secSymbol = (sec.Nodes |> List.head).Entity.Value.Symbol
@@ -528,14 +718,19 @@ let renderPivot triggerEvent state =
               ]
               h?div ["class" => "add-menu"] [
                 let clickHandler tfs = "click" =!> trigger (AddTransform(tfs))
-                if state.Menus = AddDropdownOpen then
+                if state.Menus = AddDropdownOpen then 
                   yield h?ul [] [
-                    h?li [] [ h?a [ clickHandler(Pivot.DropColumns []) ] [ text "drop columns"] ]
-                    h?li [] [ h?a [ clickHandler(Pivot.FilterBy []) ] [ text "filter by"] ]
-                    h?li [] [ h?a [ clickHandler(Pivot.GetSeries("!", "!")) ] [ text "get series"] ]
-                    h?li [] [ h?a [ clickHandler(Pivot.GroupBy([], [])) ] [ text "group by"] ]
-                    h?li [] [ h?a [ clickHandler(Pivot.Paging []) ] [ text "paging"] ]
-                    h?li [] [ h?a [ clickHandler(Pivot.SortBy []) ] [ text "sort by"] ]
+                    yield h?li [] [ h?a [ clickHandler(Pivot.DropColumns []) ] [ text "drop columns"] ]
+                    yield h?li [] [ h?a [ clickHandler(Pivot.FilterBy []) ] [ text "filter by"] ]
+                    yield h?li [] [ h?a [ clickHandler(Pivot.GroupBy([], [])) ] [ text "group by"] ]
+                    yield h?li [] [ h?a [ clickHandler(Pivot.Paging []) ] [ text "paging"] ]
+                    yield h?li [] [ h?a [ clickHandler(Pivot.SortBy []) ] [ text "sort by"] ]
+                    let getDataCalled = 
+                      sections |> List.exists (function 
+                        | { Transformation = Pivot.GetTheData | Pivot.GetSeries _ } -> true | _ -> false)
+                    if not getDataCalled then
+                      yield h?li [] [ h?a [ clickHandler(Pivot.GetTheData) ] [ text "get the data"] ]
+                      yield h?li [] [ h?a [ clickHandler(Pivot.GetSeries("!", "!")) ] [ text "get series"] ]
                   ]
               ]
               h?div ["class" => "toolbar"] [
@@ -544,75 +739,7 @@ let renderPivot triggerEvent state =
                   h?a [] [ h?i ["click" =!> trigger (SelectChainElement 0); "class" => "fa fa-circle"] [] ]
                   h?a [] [ h?i ["click" =!> trigger (SelectChainElement +1); "class" => "fa fa-chevron-right"] [] ]
                 ]
-                match selSec with
-                | Some { Nodes = nodes; Transformation = Pivot.Paging _ } ->                    
-                    let methods = nodes |> List.map (function { Node = Expr.Call(_, n, _) } -> n.Node.Name | _ -> "") |> set
-                    for nd in nodes do
-                      match nd.Node with
-                      | Expr.Call(_, n, { Node = [arg] }) ->
-                          let removeOp =
-                            if n.Node.Name = "take" then ReplaceElement(nd.Entity.Value.Symbol, "then", None)
-                            else RemoveElement(nd.Entity.Value.Symbol)
-                          yield h?span [] [
-                              h?a ["click" =!> trigger (SelectRange(n.Range)) ] [ text n.Node.Name ]
-                              h?input [ 
-                                "id" => "input-pg-" + n.Node.Name
-                                "input" =!> fun el _ -> 
-                                  let input = unbox<HTMLInputElement> el
-                                  let parsed, errors = Parser.parseProgram input.value
-                                  if errors.Length = 0 && parsed.Body.Node.Length = 1 then
-                                    setCustomValidity el ""
-                                    Multiplex
-                                      [ SetFocus("input-pg-" + n.Node.Name, Some(int input.selectionStart));
-                                        ReplaceRange(arg.Value.Range, input.value) ] |> triggerEvent
-                                  else setCustomValidity el "Cannot parse expression"
-                                "value" => Ast.formatSingleExpression arg.Value ] []
-                              h?a ["click" =!> trigger (removeOp)] [
-                                h?i ["class" => "fa fa-times"] [] 
-                              ]
-                            ]
-                      | _ -> ()
-                    if not (methods.Contains "take" && methods.Contains "skip") then
-                      yield h?a ["class" => "right"; "click" =!> trigger (SwitchMenu ContextualDropdownOpen) ] [
-                          h?i ["class" => "fa fa-plus"] [] 
-                        ]
-
-                | Some { Nodes = nodes; Transformation = Pivot.SortBy _ } ->
-                    let props = nodes |> List.choose (function
-                      | { Node = Expr.Property(_, n); Entity = Some { Symbol = sym} }
-                          when n.Node.Name <> "then" && n.Node.Name <> "sort data" -> Some(sym, n) | _ -> None)
-                    let last = List.tryLast props
-                    for sym, n in props ->
-                      h?span [] [
-                        yield h?a ["click" =!> trigger (SelectRange(n.Range)) ] [
-                          text n.Node.Name 
-                        ]
-                        if n.Node.Name = (snd last.Value).Node.Name then
-                          yield h?a ["click" =!> trigger (RemoveElement(sym))] [
-                            h?i ["class" => "fa fa-times"] [] 
-                          ]
-                      ]
-                    yield h?a ["class" => "right"; "click" =!> trigger (SwitchMenu ContextualDropdownOpen) ] [
-                      h?i ["class" => "fa fa-plus"] [] 
-                    ]
-
-                | Some { Nodes = nodes; Transformation = Pivot.DropColumns _ } ->
-                    for nd in nodes do
-                      match nd.Node with
-                      | Expr.Property(_, n) when n.Node.Name <> "then" && n.Node.Name <> "drop columns" -> 
-                          yield h?span [] [
-                            h?a ["click" =!> trigger (SelectRange(n.Range)) ] [
-                              text n.Node.Name 
-                            ]
-                            h?a ["click" =!> trigger (RemoveElement(nd.Entity.Value.Symbol))] [
-                              h?i ["class" => "fa fa-times"] [] 
-                            ]
-                          ]
-                      | _ -> ()
-                    yield h?a ["class" => "right"; "click" =!> trigger (SwitchMenu ContextualDropdownOpen) ] [
-                      h?i ["class" => "fa fa-plus"] [] 
-                    ]
-                | _ -> ()
+                yield! renderSection triggerEvent selSec
               ]
 
               h?div ["class" => "add-menu"] [
@@ -634,21 +761,13 @@ let renderPivot triggerEvent state =
                         yield h?li [] [ h?a [ "click" =!> trigger op ] [ text "skip"] ]
                     ]
 
-                | ContextualDropdownOpen, Some { Nodes = nodes; Transformation = Pivot.SortBy _ } 
+                | ContextualDropdownOpen, Some { Nodes = nodes; Transformation = Pivot.GroupBy _ } ->
+                    yield! nodes |> renderAddPropertyMenu trigger (fun n -> 
+                      n <> "then" && n <> "preview" && not (n.StartsWith("and")) )
+                | ContextualDropdownOpen, Some { Nodes = nodes; Transformation = Pivot.SortBy _ } ->
+                    yield! nodes |> renderAddPropertyMenu trigger (fun n -> n <> "then" && n <> "preview")
                 | ContextualDropdownOpen, Some { Nodes = nodes; Transformation = Pivot.DropColumns _ } ->
-                    let lastNode = nodes |> List.rev |> List.find (function { Node = Expr.Property(_, n) } -> n.Node.Name <> "then" | _ -> true) 
-                    match lastNode.Entity.Value.Type with
-                    | Some(Type.Object obj) ->
-                        yield h?ul [] [
-                          for m in obj.Members do
-                            match m with
-                            | Member.Property(name=n) when n.StartsWith("drop") || n.StartsWith("by") || n.StartsWith("and") ->
-                                yield h?li [] [ 
-                                  h?a [ "click" =!> trigger (AddElement(lastNode.Entity.Value.Symbol, n, None)) ] [ text n] 
-                                ]
-                            | _ -> ()
-                        ]
-                    | _ -> ()
+                    yield! nodes |> renderAddPropertyMenu trigger (fun n -> n <> "then" && n <> "preview")
                 | _ -> ()
               ]
               h?div ["class" => "preview-body"] [

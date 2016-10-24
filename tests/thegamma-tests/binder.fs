@@ -44,7 +44,7 @@ do Log.setEnabled(set [])
 
 [<Test>]
 let ``Binder reuses entities when binding twice`` () =
-  let ctx = Binder.createContext("script1")
+  let ctx = Binder.createContext [] "script1"
   let _, p1 = parse (olympicSample true)
   let e1 = Binder.bindProgram ctx p1
   let c1 = ctx.Table |> ListDictionary.count
@@ -55,7 +55,7 @@ let ``Binder reuses entities when binding twice`` () =
 
 [<Test>]
 let ``Binder reuses some entities when one member is changed`` () =
-  let ctx = Binder.createContext("script1")
+  let ctx = Binder.createContext [] "script1"
   let _, p1 = parse (olympicSample false)
   let e1 = Binder.bindProgram ctx p1
   let c1 = ctx.Table |> ListDictionary.count
@@ -69,7 +69,7 @@ let ``Binder reuses some entities when one member is changed`` () =
 
 [<Test>]
 let ``Binder binds all names in a sample program`` () =
-  let ctx = Binder.createContext("script1")
+  let ctx = Binder.createContext [] "script1"
   let code, p1 = parse (olympicSample true)
   let _, e1 = Binder.bindProgram ctx p1
   let bound = [ for rng, e in e1.Entities -> code.Substring(rng.Start, rng.End - rng.Start + 1) ]

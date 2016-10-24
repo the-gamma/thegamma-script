@@ -57,7 +57,7 @@ module Transform =
   let toUrl transforms = 
     [ for t in List.rev transforms ->
         match t with
-        | GetTheData -> ["data"]
+        | GetTheData -> []
         | FilterBy(conds) -> "filter"::(List.collect (fun (f,b,v) -> [f; (if b then "eq" else "neq"); v]) conds)
         | DropColumns(columns) -> "drop"::columns
         | SortBy(columns) -> "sort"::(List.collect (fun (c, o) -> [c; (if o = Ascending then "asc" else "desc")]) columns)
@@ -65,7 +65,7 @@ module Transform =
         | Paging(ops) -> "page"::(List.collect (function Take k -> ["take"; k] | Skip k -> ["skip"; k]) ops)
         | GetSeries(k, v) -> "series"::k::v::[]
         | Empty -> [] ]
-    |> List.mapi (fun i l -> if i = 0 then l else "then"::l)
+    |> List.mapi (fun i l -> if i = 0 || List.isEmpty l then l else "then"::l)
     |> List.concat
     |> String.concat "/"
 
@@ -94,7 +94,7 @@ module Transform =
            | CountDistinct fld -> [ { Name = oldFields.[fld].Name; Type = PrimitiveType.Number } ])
       
   let transformFields fields tfs = 
-    tfs |> List.fold singleTransformFields (List.ofSeq fields)
+    tfs |> List.fold singleTransformFields (List.ofSeq fields) |> List.ofSeq
 
 // ------------------------------------------------------------------------------------------------
 // Pivot provider
@@ -166,21 +166,24 @@ type Context =
     Fields : Field list }
 
 let rec makeProperty ctx name tfs = 
-  let meta = { Context = "http://thegamma.net"; Type = "Pivot"; Data = box tfs  }
-  Member.Property(name, makePivotType ctx tfs, [meta], propertyEmitter)
+  let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box tfs  }
+  let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box ctx.Fields  }
+  Member.Property(name, makePivotType ctx tfs, [meta1; meta2], propertyEmitter)
   
 and makeMethod ctx name tfs callid args = 
-  let meta = { Context = "http://thegamma.net"; Type = "Pivot"; Data = box tfs  }
+  let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box tfs  }
+  let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box ctx.Fields  }
   Member.Method
     ( name, [ for n, t in args -> n, false, Type.Primitive t ], makePivotType ctx tfs, 
-      [meta], makeMethodEmitter callid args )
+      [meta1; meta2], makeMethodEmitter callid args )
 
 and makeDataMember ctx name isPreview tfs =
   let fields = Transform.transformFields ctx.InputFields (List.rev tfs)
+  Log.trace("providers", "Make data member using transform %O. Got fields: %O", [| box tfs; box fields |])
   let dataTyp, isSeries = 
     match tfs with 
     | (GetSeries _)::_ -> 
-        match ctx.Fields with
+        match fields with
         | [kf; vf] ->  
             ctx.LookupNamed "series" [Type.Primitive kf.Type; Type.Primitive vf.Type], true
         | _ -> failwith "makeDataMember: Series should have key and value"
@@ -193,8 +196,10 @@ and makeDataMember ctx name isPreview tfs =
         let recTyp = Type.Object { Members = membs }
         ctx.LookupNamed "series" [Type.Primitive PrimitiveType.Number; recTyp ], false
 
-  let meta = { Context = "http://thegamma.net"; Type = "Pivot"; Data = box (GetTheData::tfs) }
-  Member.Property(name, dataTyp, [meta], makeDataEmitter isPreview isSeries tfs)
+  let tfs = if isSeries then tfs else GetTheData::tfs
+  let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box tfs }
+  let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box ctx.Fields  }
+  Member.Property(name, dataTyp, [meta1; meta2], makeDataEmitter isPreview isSeries tfs)
 
 and handleGetSeriesRequest ctx rest k v = 
   match k, v with
@@ -337,6 +342,7 @@ and adjustForPreview tfs =
   match tfs with
   | GroupBy([], _)::tfs -> tfs // We do not yet know the grouping key, so return original data
   | GroupBy(k, [])::tfs -> GroupBy(k, [GroupKey])::tfs // We do not have any aggregations yet
+  | GetSeries _::tfs -> tfs // We do not yet know the key/value of the series, so return original data
   | _ -> tfs
 
 and withPreview ctx tfs typ = 
@@ -349,14 +355,20 @@ and withPreview ctx tfs typ =
 and makePivotType ctx tfs = 
   let guid = Transform.toUrl tfs
   let typ = async {
-    let! typ = makePivotTypeImmediate ctx tfs
-    return withPreview ctx tfs typ }
+    try
+      let! typ = makePivotTypeImmediate ctx tfs
+      return withPreview ctx tfs typ 
+    with e ->
+      Log.exn("providers", "Failed when generating type for %O with exception %O", tfs, e)      
+      return raise e }
   Type.Delayed("pivot: " + guid, Async.CreateNamedFuture guid typ)
   
 let providePivotType root name lookupNamed fields =
   let fields = [ for f, t in fields -> { Name = f; Type = t }]
   let typ = makePivotType { Fields = fields; InputFields = fields; LookupNamed = lookupNamed; Root = root } []
   let ctx = ident("_runtime")?PivotContext
+  let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box []  }
+  let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box fields  }
   ProvidedType.GlobalValue
-    ( name, 
+    ( name, [meta1; meta2],
       NewExpression(ctx, [str (concatUrl root "data"); ArrayExpression([], None)], None), typ)

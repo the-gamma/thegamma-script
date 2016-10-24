@@ -13,6 +13,7 @@ type EntityCode = int
 /// As we bind, we keep root entity, current scope & variables in scope
 type BindingContext = 
   { Variables : Map<Name, Entity>  
+    GlobalValues : Map<Name, Entity>
     Root : Entity
     /// Table with previously created entities. This is a mutable mapping from 
     /// list of symbols (antecedent entities) together with entity kind & name
@@ -71,7 +72,10 @@ let rec bindExpression callSite ctx node =
   | Expr.Variable(name) ->
       match ctx.Variables.TryFind name.Node with 
       | Some decl -> bindEntity ctx (EntityKind.Variable(name.Node, decl)) |> setEntity ctx node
-      | None -> bindEntity ctx (EntityKind.GlobalValue(name.Node)) |> setEntity ctx node
+      | _ ->
+      match ctx.GlobalValues.TryFind name.Node with 
+      | Some glob -> glob |> setEntity ctx node
+      | None -> bindEntity ctx (EntityKind.GlobalValue(name.Node, None)) |> setEntity ctx node
 
   | Expr.Call(instExpr, name, argsNode) ->
       // Bind instance & create call site that depends on it
@@ -140,9 +144,10 @@ let bindProgram ctx (program:Program) =
   BindingResult(ctx.Bound.ToArray())
   
 /// Create a new binding context - this stores cached entities
-let createContext name =
+let createContext (globals:list<Entity>) name =
   let root = 
     { Kind = EntityKind.Root; Errors = []; Symbol = createSymbol(); Type = None; Meta = []; Value = None }
   { Table = System.Collections.Generic.Dictionary<_, _>(); 
     Bound = ResizeArray<_>(); Variables = Map.empty; 
+    GlobalValues = Map.ofList [ for e in globals -> { Name = e.Name }, e ]
     Root = root }
