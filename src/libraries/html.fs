@@ -3,6 +3,8 @@
 open Fable.Core
 open Fable.Helpers
 open Fable.Import.Browser
+open Fable.Core.JsInterop
+open TheGamma.Common
 
 module FsOption = FSharp.Core.Option
 
@@ -15,16 +17,20 @@ let private on (el:HTMLElement) (evt:string) (f:unit -> unit) : unit = failwith 
 [<Emit("$0[$1]")>]
 let private getProperty (o:obj) (s:string) = failwith "!"
 
+[<Emit("$0[$1] = $2")>]
+let private setProperty (o:obj) (s:string) (v:obj) = failwith "!"
+
 [<Fable.Core.Emit("event")>]
 let private event () : Event = failwith "JS"
 
 type DomAttribute = 
   | Event of (HTMLElement -> Event -> unit)
   | Attribute of string
+  | Property of obj
 
 type DomNode = 
   | Text of string
-  | Delayed of (string -> unit)
+  | Delayed of string * DomNode * (string -> unit)
   | Element of tag:string * attributes:(string * DomAttribute)[] * children : DomNode[] * onRender : (HTMLElement -> unit) option
   | Part of func:(HTMLElement -> unit)
 
@@ -35,6 +41,8 @@ let createTree tag args children =
       match k, v with 
       | k, Attribute v ->
           attrs.Add (k, box v)
+      | k, Property o ->
+          props.Add(k, o)
       | k, Event f ->
           props.Add ("on" + k, box (fun o -> f (getProperty o "target") (event()) ))
     let attrs = JsInterop.createObj attrs
@@ -50,9 +58,28 @@ let rec renderVirtual node =
       box s
   | Element(tag, attrs, children, None) ->
       createTree tag attrs (Array.map renderVirtual children)
-  | Delayed(func) ->
+  | Delayed(symbol, body, func) ->
       counter <- counter + 1
-      createTree "div" [] [| box "delayed..." |]
+      let id = sprintf "delayed_%d" counter
+
+      // Virtual dom calls our hook when it creates HTML element, but
+      // we still need to wait until it is added to the HTML tree
+      let rec waitForAdded n (el:HTMLElement) = 
+        if el.parentElement <> null then 
+          el?dataset?renderedSymbol <- symbol
+          el?id <- id
+          func id
+        elif n > 0 then window.setTimeout((fun () -> waitForAdded  (n-1) el), 1) |> ignore
+        else Log.error("html", "Delayed element was not created in time")
+
+      // Magic as per https://github.com/Matt-Es`ch/virtual-dom/blob/master/docs/hooks.md
+      let Hook = box(fun () -> ())
+      Hook?prototype?hook <- fun (node:HTMLElement) propertyName previousValue ->
+        if unbox node?dataset?renderedSymbol <> symbol then
+          waitForAdded 10 node
+      let h = createNew Hook ()
+
+      createTree "div" ["renderhk", Property h] [| renderVirtual body |]
   | Element _ ->
       failwith "renderVirtual: Does not support elements with after-render handlers"
   | Part _ ->
@@ -63,7 +90,7 @@ let rec render node =
   | Text(s) -> 
       document.createTextNode(s) :> Node, ignore
 
-  | Delayed(func) ->
+  | Delayed(_, _, func) ->
       counter <- counter + 1
       let el = document.createElement("div")
       el.id <- sprintf "delayed_%d" counter
@@ -79,6 +106,7 @@ let rec render node =
       for c, _ in rc do el.appendChild(c) |> ignore
       for k, a in attrs do 
         match a with
+        | Property(o) -> setProperty el k o
         | Attribute(v) -> el.setAttribute(k, v)
         | Event(f) -> el.addEventListener(k, U2.Case1(EventListener(f el)))
       let onRender () = 
@@ -110,8 +138,8 @@ type El() =
       )
     Element(n, Array.ofList a, Array.ofList b, f)
 
-  member x.delayed(f) =
-    Delayed(f)
+  member x.delayed sym body f =
+    Delayed(sym, body, f)
 
   member x.part (initial:'State) (fold:'State -> 'Event -> 'State) = 
     let evt = Control.Event<_>()

@@ -131,176 +131,6 @@ let withClass cls (el:Element) = el.classList.contains cls
 
 
 // ------------------------------------------------------------------------------------------------
-// Zones infra
-// ------------------------------------------------------------------------------------------------
-
-type PreviewService(checker:CheckingService, ed:monaco.editor.ICodeEditor, livePreviews) =
-  let mutable currentZone : option<float * monaco.editor.IViewZone> = None
-  let mutable zoneHeight = 0.0
-  let mutable tree = JsInterop.createObj []
-  let mutable container = document.createElement("div") :> Node
-
-  let removeZone () =
-    match currentZone with 
-    | Some(id, _) -> ed.changeViewZones(fun accessor -> accessor.removeZone(id))
-    | None -> ()
-    currentZone <- None
-  
-  let createAndAddZone endLine =
-    let mutable zoneId = -1.
-    let zone = JsInterop.createEmpty<monaco.editor.IViewZone>
-    
-    let node = document.createElement_div()
-    container <- document.createElement_div() :> Node
-    tree <- JsInterop.createObj []    
-    node.appendChild(container) |> ignore
-    ed.changeViewZones(fun accessor ->  
-      match currentZone with Some(id, _) -> accessor.removeZone(id) | _ -> ()
-      zone.afterLineNumber <- endLine
-      zone.heightInPx <- Some 300.0
-      zone.domNode <- node
-      zoneHeight <- 300.0
-      zoneId <- accessor.addZone(zone) 
-      currentZone <- Some (zoneId, zone) )
-
-  let updateZones trigger liveState =
-    let dom = 
-      liveState.CurrentPreview |> FsOption.bind (fun p ->
-        p.Render trigger liveState )
-    match dom with 
-    | None -> removeZone ()
-    | Some prev ->
-        if currentZone.IsNone then createAndAddZone 0.0
-        Log.trace("live", "Render %O to zone %O", dom, currentZone)
-        let id, zone = currentZone.Value
-        let newTree = prev.Preview |> renderVirtual 
-        let patches = Virtualdom.diff tree newTree
-        container <- Virtualdom.patch container patches
-        tree <- newTree
-        let newHeight = (container :?> HTMLElement).clientHeight
-        if zoneHeight <> newHeight || zone.afterLineNumber <> float prev.Line then
-          zone.afterLineNumber <- float prev.Line
-          zone.heightInPx <- Some newHeight
-          zoneHeight <- newHeight
-          ed.changeViewZones(fun accessor -> accessor.layoutZone(id) )
-
-  let mutable lastCode = ""
-  let mutable lastMapper = LocationMapper("")
-  let mutable changingEditor = false
-
-  let getUpdateEventAfterChange () = async {
-    let code = ed.getModel().getValue(monaco.editor.EndOfLinePreference.LF, false)
-    let position = ed.getPosition()
-    if code <> lastCode then
-      lastCode <- code
-      lastMapper <- LocationMapper(code)
-      let loc = lastMapper.LineColToAbsolute(int position.lineNumber, int position.column)
-      let! _, _, program = checker.TypeCheck(code)
-      return (UpdateSource(code, loc, program, lastMapper)) 
-    else 
-      let loc = lastMapper.LineColToAbsolute(int position.lineNumber, int position.column)
-      return (UpdateLocation(loc)) }
-
-  let createLivePreview (ed:monaco.editor.ICodeEditor) = 
-    let liveEvent = new Event<LiveEvent<CustomLiveEvent>>()
-    let noState = { new CustomLiveState }
-    let mutable liveState = 
-      { Mapper = LocationMapper("")
-        Location = 0
-        Program = { Body = Ast.node { Start = 0; End = 0 } [] }
-        Globals = []
-        Code = ""
-        Selection = None
-        State = noState
-        CurrentPreview = None }
-    (*
-    let mutable pivotState = 
-      { Selection = None
-        Focus = None
-        Mapper = LocationMapper("")
-        Location = 0
-        Program = { Body = Ast.node { Start = 0; End = 0 } [] }
-        Code = ""
-        Globals = []
-        Body = None
-        Menus = Hidden }
-        *) 
-
-    let applyEvent evt =
-      let liveState = updateLiveState liveState evt        
-      let newState =
-        match liveState.CurrentPreview with 
-        | Some(prev) -> prev.Update liveEvent.Trigger liveState evt
-        | None -> None
-      match newState, evt with
-      | Some newState, _ -> newState
-      | _, (UpdateSource _ | UpdateLocation _) ->
-        let state = livePreviews |> Seq.tryPick (fun lp ->
-          let state = { liveState with CurrentPreview = Some lp; State = lp.InitialState }
-          lp.Update liveEvent.Trigger state evt)
-        defaultArg state { liveState with CurrentPreview = None; State = noState }
-      | _ -> { liveState with CurrentPreview = None; State = noState }
-
-    liveEvent.Publish.Add(fun evt ->
-      try
-        Log.trace("live", "Updating state %O with event %O", liveState, evt)
-        let oldState = liveState 
-        liveState <- applyEvent evt
-
-        if (match evt with UpdateSource _ -> false | _ -> true) && (oldState.Code <> liveState.Code) then
-          changingEditor <- true
-          ed.getModel().setValue(liveState.Code)
-        match liveState.Selection with
-        | Some rng ->
-            changingEditor <- true
-            let mrng = JsInterop.createEmpty<monaco.IRange>
-            mrng.startColumn <- float rng.StartColumn
-            mrng.startLineNumber <- float rng.StartLineNumber
-            mrng.endColumn <- float rng.EndColumn
-            mrng.endLineNumber <- float rng.EndLineNumber
-            ed.setSelection(mrng)
-            liveState <- { liveState with Selection = None }
-        | _ -> ()
-
-        if changingEditor = true then
-          changingEditor <- false
-          async { 
-            Log.trace("live", "Editor changed. Getting after change event...")
-            let! evt = getUpdateEventAfterChange ()
-            Log.trace("live", "Editor changed. Updating state %O with event %O", liveState, evt)
-            liveState <- applyEvent evt
-            Log.trace("live", "Editor changed. New state %O", liveState)
-            updateZones liveEvent.Trigger liveState
-
-            (*match pivotState.Focus with 
-            | Some(focus, sel) ->
-                Log.trace("live", "Set focus to element #%s", focus)
-                pivotState <- { pivotState with Focus = None }
-                let element = document.getElementById(focus) |> unbox<HTMLInputElement>
-                element.focus()
-                sel |> FsOption.iter (fun s -> element.selectionStart <- float s; element.selectionEnd <- float s)
-            | _ -> ()*) } |> Async.StartImmediate
-        else
-          updateZones liveEvent.Trigger liveState
-      with e ->
-        Log.exn("live", "Error when updating state %O with event %O: %O", liveState, evt, e) )
-
-    async { let! glob = globalTypes |> Async.AwaitFuture 
-            liveEvent.Trigger(InitializeGlobals glob) } |> Async.StartImmediate
-
-    liveEvent.Trigger
-
-  let trigger = createLivePreview ed    
-      
-  do
-    ed.onDidChangeCursorPosition(fun ce -> 
-      if not changingEditor then
-        let code = ed.getModel().getValue(monaco.editor.EndOfLinePreference.LF, false)
-        Log.trace("live", "Cursor position changed: code <> lastCode = %s", code <> lastCode)
-        async { let! evt = getUpdateEventAfterChange ()
-                trigger evt } |> Async.StartImmediate ) |> ignore
-
-// ------------------------------------------------------------------------------------------------
 // Putting everything togeter
 // ------------------------------------------------------------------------------------------------
 
@@ -350,7 +180,8 @@ let renderErrors article el (source, errors) =
 let eval (s:string) : unit = ()
 
 let previews = 
-  [ Live.Pivot.preview |> unbox<LivePreview<CustomLiveState, CustomLiveEvent>> ]
+  [ Live.Pivot.preview |> unbox<LivePreview<CustomLiveState, CustomLiveEvent>> 
+    Live.Showable.preview |> unbox<LivePreview<CustomLiveState, CustomLiveEvent>> ]
 
 let setupEditor (parent:HTMLElement) =
   let source = (findChildElement (withClass "ia-source") parent).innerText.Trim()
@@ -406,10 +237,12 @@ let setupEditor (parent:HTMLElement) =
       opts.fontSize <- Some 15.0
       opts.lineHeight <- Some 20.0 )
 
+    let previewService = PreviewService(checkingService, globalTypes, ed, previews)
+
     let resizeEditor (text:string) =
       let dim = JsInterop.createEmpty<monaco.editor.IDimension>
       dim.width <- parent.clientWidth - 40.0
-      dim.height <- max 100.0 (20.0 + float (text.Split('\n').Length) * 20.0)
+      dim.height <- max 100.0 (20.0 + float (text.Split('\n').Length) * 20.0 + previewService.ZoneHeight)
       ed.layout(dim)
       monacoEl.style.height <- string dim.height + "px" 
 
@@ -418,9 +251,12 @@ let setupEditor (parent:HTMLElement) =
       if optionsVisible then
         editorService.UpdateSource(text) 
       resizeEditor text) |> ignore
-      
+     
+    previewService.ZoneSizeChanged.Add(fun _ ->
+      let text = ed.getModel().getValue(monaco.editor.EndOfLinePreference.LF, false)
+      resizeEditor text )
+    
     resizeEditor source
-    PreviewService(checkingService, ed, previews) |> ignore
     ed )
   
   let getText() = 

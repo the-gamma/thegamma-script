@@ -162,6 +162,7 @@ and evaluateEntity ctx (e:Entity) =
       value.Value |> Option.map (fun v -> v.Value)
 
   | EntityKind.ArgumentList _
+  | EntityKind.NamedParam _ 
   | EntityKind.NamedMember _ ->
       Some(unbox null)
 

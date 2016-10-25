@@ -127,10 +127,6 @@ type PivotEditorMenus =
   | Hidden
 
 type PivotEditorAction = 
-  //| UpdateSource of string * int * Program * LocationMapper
-  //| UpdateLocation of int
-  //| InitializeGlobals of seq<Entity>
-
   | UpdatePreview of DomNode
   | SelectRange of Range
   | SelectChainElement of int
@@ -169,7 +165,7 @@ let findPreview trigger globals (ent:Entity) =
       match res with
       | Some p ->
           Log.trace("live", "Found preview value: %O", p)
-          let mutable node = text "loading preview"
+          let mutable node = h?div ["class"=>"placeholder"] [text "Loading preview..."]
           let mutable returned = false
           async { let! nd = table<int, int>.create(unbox<Series.series<string, obj>> p).render()
                   if returned then trigger (CustomEvent(UpdatePreview nd))
@@ -321,8 +317,8 @@ let rec updatePivotState trigger state event =
           sections |> List.map (fun sec -> List.head sec.Nodes) 
           |> List.takeWhile (fun nd -> nd.Entity.Value.Symbol <> sym) |> List.tryLast
         let beforeDropped = defaultArg beforeDropped (List.head chain)
-        let newNodes = sections |> List.filter (fun sec -> (List.head sec.Nodes).Entity.Value.Symbol <> sym)
-        let newNodes = List.head chain :: (newNodes |> List.collect (fun sec -> sec.Nodes))
+        let newSections = sections |> List.filter (fun sec -> (List.head sec.Nodes).Entity.Value.Symbol <> sym)
+        let newNodes = List.head chain :: (newSections |> List.collect (fun sec -> sec.Nodes))
         reconstructChain state body newNodes
         |> selectName beforeDropped ) |> Some
 
@@ -352,9 +348,14 @@ let rec updatePivotState trigger state event =
               | _ -> [marker; "by <Property>"; "then"]
           | Pivot.GroupBy([], _) | Pivot.Empty -> res "" []
 
+        (*
         let injectCall expr = 
-          getProperties expr |> List.fold (fun expr name ->
-            node (Expr.Property(expr, node { Name = name }))) expr
+          getProperties expr 
+          |> List.fold (fun expr name ->
+              
+              node (Expr.Property(expr, node { Name = name }))
+
+            ) expr
           |> Parser.whiteAfter [ { Token = TokenKind.White whiteAfter; Range = {Start=0; End=0} } ]
 
         let tryInjectBefore prev part =
@@ -374,7 +375,17 @@ let rec updatePivotState trigger state event =
         let newBody = recreate (if injected then newBody else injectCall newBody)
         let newCode = (Ast.formatSingleExpression newBody).Trim()
         let newCode = state.Code.Substring(0, body.Range.Start) + newCode + state.Code.Substring(body.Range.End + 1)
-        { state with Code = newCode } |> replaceAndSelectMarker firstProperty ) |> Some
+        { state with Code = newCode } *)
+        
+        let newSections = sections
+          //match List.rev sections with
+          //| ({ Transformation = Pivot.GetSeries _ | Pivot.GetTheData } as last)::sections -> 
+          //    sec
+              
+        Log.trace("live", "Add section to %O", Array.ofSeq sections)
+        let newNodes = List.head chain :: (newSections |> List.collect (fun sec -> sec.Nodes))
+        reconstructChain state body newNodes
+        |> replaceAndSelectMarker firstProperty ) |> Some
 
 
 // ------------------------------------------------------------------------------------------------

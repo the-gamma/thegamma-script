@@ -80,6 +80,7 @@
     <Compile Include="providers/pivot.fs" />
     <Compile Include="live/live.fs" />
     <Compile Include="live/pivot.fs" />
+    <Compile Include="live/showable.fs" />
     <Compile Include="editors.fs" />
     <Compile Include="services.fs" />
     <Compile Include="monaco.fs" />

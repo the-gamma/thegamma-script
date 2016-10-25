@@ -57,7 +57,7 @@ module Helpers =
           let! dt = (getProperty<ChartData> chart "data").data
           cont [| box chart; box dt; box outputId |]
         with e ->
-          Browser.window.alert("SOmething went wrong: " + unbox e) }
+          Log.error("google", "Error when getting data or rendering chart: %O", e) }
         |> Async.StartImmediate)
 
 module ChartDataOperations =
