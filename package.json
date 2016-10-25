@@ -5,13 +5,13 @@
   "description": "The Gamma project",
   "scripts": {
     "justtest": "mocha out/tests/thegamma-tests",
-    "pretest": "concurrently \"fable src/thegamma\" \"fable src/libraries\" \"fable src/gui\" \"fable src/main\" \"fable tests/thegamma-tests\"",
+    "pretest": "concurrently \"fable src/thegamma\" \"fable src/libraries\" \"fable src/main\" \"fable tests/thegamma-tests\"",
     "test": "mocha out/tests/thegamma-tests",
-    "build": "concurrently \"fable src/thegamma\" \"fable src/libraries\" \"fable src/gui\" \"fable src/main\"",
+    "build": "concurrently \"fable src/thegamma\" \"fable src/libraries\" \"fable src/main\"",
     "postbuild": "webpack",
     "prewatchwebpack": "sleep 60",
     "watchwebpack": "webpack --watch",
-    "watchfable": "concurrently \"fable -w src/thegamma\" \"fable -w src/libraries\" \"fable -w src/gui\" \"fable -w src/main\"",
+    "watchfable": "concurrently \"fable -w src/thegamma\" \"fable -w src/libraries\" \"fable -w src/main\"",
     "watch": "concurrently \"npm run watchfable\" \"npm run watchwebpack\""
   },
   "author": "Tomas Petricek",
@@ -21,15 +21,17 @@
     "core-js": "^2.4.1",
     "fable-core": "^0.6.6",
     "monaco-editor": "^0.6.1",
-    "requirejs": "^2.3.2"
+    "requirejs": "^2.3.2",
+    "virtual-dom": "^2.1.1"
   },
   "main": "main.js",
   "devDependencies": {
     "concurrently": "^2.2.0",
     "fable-compiler": "^0.6.5",
+    "fable-import-virtualdom": "^0.8.1",
     "fable-plugins-nunit": "^0.6.0",
-    "source-map-loader": "^0.1.5",
     "mocha": "^3.0.2",
+    "source-map-loader": "^0.1.5",
     "webpack": "^1.13.1"
   },
   "repository": {

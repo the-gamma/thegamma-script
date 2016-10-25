@@ -14,8 +14,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{D6CA65DC
 		..\tools\fsprovider.fsx = ..\tools\fsprovider.fsx
 	EndProjectSection
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "gui", "gui\gui.fsproj", "{F1214B44-B9BF-4DC7-BF98-3A23E83E01FC}"
-EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "project", "project", "{DE272232-9989-46E8-A7C0-64E186628638}"
 	ProjectSection(SolutionItems) = preProject
 		..\build.fsx = ..\build.fsx
@@ -48,10 +46,6 @@ Global
 		{C103641D-9755-4DE4-BDA9-FDCFC022C80E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C103641D-9755-4DE4-BDA9-FDCFC022C80E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C103641D-9755-4DE4-BDA9-FDCFC022C80E}.Release|Any CPU.Build.0 = Release|Any CPU
-		{F1214B44-B9BF-4DC7-BF98-3A23E83E01FC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{F1214B44-B9BF-4DC7-BF98-3A23E83E01FC}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{F1214B44-B9BF-4DC7-BF98-3A23E83E01FC}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{F1214B44-B9BF-4DC7-BF98-3A23E83E01FC}.Release|Any CPU.Build.0 = Release|Any CPU
 		{97180C4B-514C-40E6-A362-C205AF9ED05C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{97180C4B-514C-40E6-A362-C205AF9ED05C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{97180C4B-514C-40E6-A362-C205AF9ED05C}.Release|Any CPU.ActiveCfg = Release|Any CPU

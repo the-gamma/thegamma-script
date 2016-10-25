@@ -6,8 +6,7 @@
     "refs": {
         "bindings": "../bindings",
         "libraries": "../libraries",
-        "thegamma": "../thegamma",
-        "gui": "../gui"
+        "thegamma": "../thegamma"
     },
     "targets": {
         "debug": {

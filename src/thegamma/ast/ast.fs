@@ -180,7 +180,7 @@ and RuntimeValue = interface end
 
 and EntityValue =
   { Value : RuntimeValue
-    Preview : RuntimeValue option }
+    Preview : Lazy<RuntimeValue option> }
 
 // ------------------------------------------------------------------------------------------------
 // Parsed AST 

@@ -52,6 +52,7 @@
   <Import Project="$(FSharpTargetsPath)" />
   <ItemGroup>
     <Compile Include="common.fs" />
+    <Compile Include="html.fs" />
     <Compile Include="series.fs" />
     <Compile Include="tables.fs" />
     <Compile Include="maps.fs" />
@@ -74,9 +75,9 @@
     <Reference Include="System.Numerics" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\gui\gui.fsproj">
-      <Name>gui</Name>
-      <Project>{f1214b44-b9bf-4dc7-bf98-3a23e83e01fc}</Project>
+    <ProjectReference Include="..\bindings\bindings.fsproj">
+      <Name>bindings</Name>
+      <Project>{278a68fc-0256-417c-af13-9a4af7381ccf}</Project>
       <Private>True</Private>
     </ProjectReference>
   </ItemGroup>

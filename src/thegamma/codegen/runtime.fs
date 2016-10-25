@@ -1,4 +1,4 @@
-﻿module TheGamma.TypePovidersRuntime
+﻿module TheGamma.TypeProvidersRuntime
 open System
 open TheGamma.Common
 

@@ -6,7 +6,7 @@ open Fable.Import
 open TheGamma
 open TheGamma.Babel
 open TheGamma.Common
-open TheGamma.TypePoviders
+open TheGamma.TypeProviders
 
 // ----------------------------------------------------------------------------
 // Operations that we can do on the table
@@ -100,7 +100,7 @@ module Transform =
 // Pivot provider
 // ------------------------------------------------------------------------------------------------
 
-open TheGamma.TypePoviders.ProviderHelpers
+open TheGamma.TypeProviders.ProviderHelpers
 
 let trimLeft c (s:string) = s.ToCharArray() |> Array.skipWhile ((=) c) |> System.String
 let trimRight c (s:string) = s.ToCharArray() |> Array.rev |> Array.skipWhile ((=) c) |> Array.rev |> System.String

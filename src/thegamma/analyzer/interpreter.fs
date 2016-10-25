@@ -54,8 +54,8 @@ let evaluateExpression (_stored:RuntimeValue[]) (expr:Expression) =
   try
     // Get fable to reference everything
     let s = TheGamma.Series.series<int, int>.create(async { return [||] }, "", "", "") 
-    TheGamma.TypePovidersRuntime.RuntimeContext("lol", "", "troll") |> ignore
-    TheGamma.TypePovidersRuntime.trimLeft |> ignore
+    TheGamma.TypeProvidersRuntime.RuntimeContext("lol", "", "troll") |> ignore
+    TheGamma.TypeProvidersRuntime.trimLeft |> ignore
     TheGamma.GoogleCharts.chart.bar |> ignore
     TheGamma.table<int, int>.create(s) |> ignore
     TheGamma.Maps.timeline<int, int>.create(s) |> ignore
@@ -79,7 +79,7 @@ let evaluateCall emitter inst args =
 
 let evaluatePreview typ value = 
   let previewName = {Name.Name="preview"}
-  match typ with
+  match Option.map Types.reduceType typ with
   | Some(Type.Object(FindProperty previewName e)) -> Some(evaluateCall e value [])
   | Some(Type.Object(FindMethod previewName (_, e))) -> Some(evaluateCall e value [])
   | _ -> None
@@ -88,7 +88,7 @@ let rec ensureValue ctx (e:Entity) =
   if e.Value.IsNone then
     match evaluateEntity ctx e with
     | Some value ->
-        e.Value <- Some { Value = value; Preview = evaluatePreview e.Type value }
+        e.Value <- Some { Value = value; Preview = Lazy.Create(fun () -> evaluatePreview e.Type value) }
     | _ -> ()
 
 and getValue ctx (e:Entity) = 

@@ -5,8 +5,7 @@
     "projFile": "thegamma.fsproj",
     "refs": {
         "bindings": "../bindings",
-        "libraries": "../libraries",
-        "gui": "../gui"
+        "libraries": "../libraries"
     },
     "scripts": {
     },

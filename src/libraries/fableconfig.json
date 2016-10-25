@@ -4,7 +4,7 @@
     "sourceMaps": true,
     "projFile": "libraries.fsproj",
     "refs": {
-        "gui": "../gui"
+        "bindings": "../bindings"      
     },
     "scripts": {
     },

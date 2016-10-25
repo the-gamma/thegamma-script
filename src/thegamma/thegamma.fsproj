@@ -63,6 +63,7 @@
   </Target>
   -->
   <ItemGroup>
+    <Compile Include="common/locations.fs" />
     <Compile Include="common/babel.fs" />
     <Compile Include="ast/ast.fs" />
     <Compile Include="ast/astops.fs" />
@@ -77,6 +78,8 @@
     <Compile Include="analyzer/interpreter.fs" />
     <Compile Include="providers/providers.fs" />
     <Compile Include="providers/pivot.fs" />
+    <Compile Include="live/live.fs" />
+    <Compile Include="live/pivot.fs" />
     <Compile Include="editors.fs" />
     <Compile Include="services.fs" />
     <Compile Include="monaco.fs" />
@@ -101,11 +104,6 @@
     <ProjectReference Include="..\bindings\bindings.fsproj">
       <Name>bindings</Name>
       <Project>{278a68fc-0256-417c-af13-9a4af7381ccf}</Project>
-      <Private>True</Private>
-    </ProjectReference>
-    <ProjectReference Include="..\gui\gui.fsproj">
-      <Name>gui</Name>
-      <Project>{f1214b44-b9bf-4dc7-bf98-3a23e83e01fc}</Project>
       <Private>True</Private>
     </ProjectReference>
     <ProjectReference Include="..\libraries\libraries.fsproj">

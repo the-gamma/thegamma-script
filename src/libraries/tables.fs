@@ -40,7 +40,7 @@ type html =
 
 type table<'k,'v> =
   { data : series<'k,'v>
-    showKey : bool 
+    showKey : bool option 
     hiddenColumns : Set<string>
     addedColumns : list<string * ('v -> obj)> }
 
@@ -48,13 +48,13 @@ type table<'k,'v> =
     { table.data = data
       hiddenColumns = Set.empty
       addedColumns = []
-      showKey = true }
+      showKey = None }
 
   member t.set(?title:string, ?showKey:bool) = 
     { table.data = t.data.set(t.data.data, seriesName=defaultArg title t.data.seriesName)
       hiddenColumns = t.hiddenColumns
       addedColumns = t.addedColumns
-      showKey = defaultArg showKey t.showKey }
+      showKey = match showKey with None -> t.showKey | sk -> sk }
 
   member t.hideColumns(names:string[]) =
     { t with hiddenColumns = Set.ofArray names }
@@ -62,29 +62,20 @@ type table<'k,'v> =
   member t.addColumn(name, f) =
     { t with addedColumns = (name, f)::t.addedColumns }
 
-  member t.show(outputId) =
-    let row (el:string) k (things:seq<DomNode>) =
+  member t.render() =
+    let row showKey (el:string) k (things:seq<DomNode>) =
       h?tr [] [ 
-        if t.showKey then yield h?(el) [] [text k]
+        if showKey then yield h?(el) [] [text k]
         for t in things -> h?(el) [] [t] 
       ]
 
-    let render nd = 
-      nd |> renderTo (document.getElementById(outputId))
-
-    let makeTable k header body = 
+    let makeTable showKey k header body = 
       h?table ["class" => "table table-striped"] [
         if not (String.IsNullOrWhiteSpace t.data.seriesName) then
           yield h?caption [] [ text t.data.seriesName ]
-        yield h?thead [] [ row "th" k header ]
+        yield h?thead [] [ row showKey "th" k header ]
         yield h?tbody [] body
       ]
-
-    // [ h?tr [] [ h?td ["colspan" => "2"] [text "Loading data..."] ] ]
-    // |> makeTable t.data.keyName [ t.data.valueName ]
-    // |> render
-
-    //invokeBlockCallback()
 
     let formatAdded o = 
       // Did someone say hack..?
@@ -109,19 +100,24 @@ type table<'k,'v> =
           [ if isObject first then for kv in filteredProperties first -> text kv.key
             else yield text t.data.valueName 
             for k, _ in t.addedColumns -> text k ]
-      
-        [ for k, v in vs ->
-            let formattedVals =
-              [ if isObject v then for kv in filteredProperties v -> text (unbox kv.value)
-                elif not (isNumber v) then yield text (v.ToString())
-                elif isNaN (unbox v) then yield text ""
-                else yield unbox v  // formatNumber (unbox v) "0,0.00" ]
-                for _, f in t.addedColumns -> formatAdded (f v) ] 
-            row "td" (unbox k) formattedVals ]
-        |> makeTable t.data.keyName headers
-        |> render 
+        let showKey = match t.showKey with Some sk -> sk | _ -> not (isObject first)
+        return
+          [ for k, v in vs ->
+              let formattedVals =
+                [ if isObject v then for kv in filteredProperties v -> text (unbox kv.value)
+                  elif not (isNumber v) then yield text (v.ToString())
+                  elif isNaN (unbox v) then yield text ""
+                  else yield text (unbox v)  // formatNumber (unbox v) "0,0.00" ]
+                  for _, f in t.addedColumns -> formatAdded (f v) ] 
+              row showKey "td" (unbox k) formattedVals ]
+          |> makeTable showKey t.data.keyName headers
       with e ->
-        console.log("Getting data for table failed: %O", e) }
+        Log.exn("live", "Getting data for table failed: %O", e) 
+        return raise e }
+
+  member t.show(outputId) =
+    async { let! dom = t.render()
+            dom |> renderTo (document.getElementById(outputId)) }
     |> Async.StartImmediate
 
 type empty() =

@@ -1,7 +1,10 @@
 ﻿module TheGamma.Html
-module FsOption = FSharp.Core.Option
-open Fable.Import.Browser
+
 open Fable.Core
+open Fable.Helpers
+open Fable.Import.Browser
+
+module FsOption = FSharp.Core.Option
 
 [<Fable.Core.Emit("jQuery($0).chosen()")>]
 let private chosen (el:HTMLElement) : unit = failwith "JS"
@@ -9,12 +12,15 @@ let private chosen (el:HTMLElement) : unit = failwith "JS"
 [<Fable.Core.Emit("jQuery($0).on($1, $2)")>]
 let private on (el:HTMLElement) (evt:string) (f:unit -> unit) : unit = failwith "JS"
 
+[<Emit("$0[$1]")>]
+let private getProperty (o:obj) (s:string) = failwith "!"
+
 [<Fable.Core.Emit("event")>]
 let private event () : Event = failwith "JS"
 
 type DomAttribute = 
   | Event of (HTMLElement -> Event -> unit)
-  | Property of string
+  | Attribute of string
 
 type DomNode = 
   | Text of string
@@ -22,7 +28,35 @@ type DomNode =
   | Element of tag:string * attributes:(string * DomAttribute)[] * children : DomNode[] * onRender : (HTMLElement -> unit) option
   | Part of func:(HTMLElement -> unit)
 
+let createTree tag args children =
+    let attrs = ResizeArray<_>()
+    let props = ResizeArray<_>()
+    for k, v in args do
+      match k, v with 
+      | k, Attribute v ->
+          attrs.Add (k, box v)
+      | k, Event f ->
+          props.Add ("on" + k, box (fun o -> f (getProperty o "target") (event()) ))
+    let attrs = JsInterop.createObj attrs
+    let props = JsInterop.createObj (Seq.append ["attributes", attrs] props)
+    let elem = Virtualdom.h(tag, props, children)
+    elem
+
 let mutable counter = 0
+
+let rec renderVirtual node = 
+  match node with
+  | Text(s) -> 
+      box s
+  | Element(tag, attrs, children, None) ->
+      createTree tag attrs (Array.map renderVirtual children)
+  | Delayed(func) ->
+      counter <- counter + 1
+      createTree "div" [] [| box "delayed..." |]
+  | Element _ ->
+      failwith "renderVirtual: Does not support elements with after-render handlers"
+  | Part _ ->
+      failwith "renderVirtual: Does not support parts"
 
 let rec render node = 
   match node with
@@ -45,7 +79,7 @@ let rec render node =
       for c, _ in rc do el.appendChild(c) |> ignore
       for k, a in attrs do 
         match a with
-        | Property(v) -> el.setAttribute(k, v)
+        | Attribute(v) -> el.setAttribute(k, v)
         | Event(f) -> el.addEventListener(k, U2.Case1(EventListener(f el)))
       let onRender () = 
         for _, f in rc do f()
@@ -59,7 +93,7 @@ let renderTo (node:HTMLElement) dom =
   f()
   
 let text s = Text(s)
-let (=>) k v = k, Property(v)
+let (=>) k v = k, Attribute(v)
 let (=!>) k f = k, Event(f)
 
 

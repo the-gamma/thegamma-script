@@ -1,4 +1,4 @@
-﻿namespace TheGamma.TypePoviders
+﻿namespace TheGamma.TypeProviders
 
 open TheGamma
 open TheGamma.Babel
