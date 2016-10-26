@@ -192,6 +192,16 @@ let formatWhiteAfterExpr nd =
     | _ -> nd.WhiteAfter
   String.concat "" [ for t in wa -> formatToken t.Token ]
 
+/// Format all white space before the given expression
+let formatWhiteBeforeExpr nd = 
+  let wa = 
+    match nd.Node with 
+    | Expr.Variable(n) -> nd.WhiteBefore @ n.WhiteBefore 
+    | Expr.Call(_, n, _)
+    | Expr.Property(_, n) -> n.WhiteBefore
+    | _ -> nd.WhiteBefore
+  String.concat "" [ for t in wa -> formatToken t.Token ]
+
 /// Format entity kind into something readable
 let formatEntityKind = function
   | EntityKind.GlobalValue _ -> "global value"

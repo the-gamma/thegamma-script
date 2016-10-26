@@ -244,13 +244,16 @@ let reconstructChain state (body:Node<_>) newNodes =
   let newCode = state.Code.Substring(0, body.Range.Start) + newCode + state.Code.Substring(body.Range.End + 1)
   { state with Code = newCode }
 
-let createChainNode args = 
+let createChainNodeFromName args name = 
   let node nd = Ast.node {Start=0; End=0} nd
   match args with
-  | None -> node (Expr.Property(node Expr.Empty, node {Name=marker}))
+  | None -> node (Expr.Property(node Expr.Empty, name))
   | Some args -> 
       let args = args |> List.map (fun a -> { Name = None; Value = node a })
-      node (Expr.Call(None, node {Name=marker}, node args))
+      node (Expr.Call(None, name, node args))
+
+let createChainNode args name = 
+  createChainNodeFromName args (Ast.node {Start=0; End=0} {Name=name})
 
 let rec updatePivotState trigger state event = 
   match event with
@@ -290,7 +293,7 @@ let rec updatePivotState trigger state event =
         let newNodes =
           chain |> List.collect (fun nd -> 
             if nd.Entity.Value.Symbol <> sym then [nd]
-            else [nd; createChainNode args] )        
+            else [nd; createChainNode args marker] )        
         reconstructChain state body newNodes
         |> replaceAndSelectMarker name) |> Some
 
@@ -299,7 +302,7 @@ let rec updatePivotState trigger state event =
         let newNodes =
           chain |> List.map (fun nd -> 
             if nd.Entity.Value.Symbol <> sym then nd
-            else createChainNode args )
+            else createChainNode args marker )
         reconstructChain state body newNodes
         |> replaceAndSelectMarker name) |> Some
 
@@ -324,65 +327,65 @@ let rec updatePivotState trigger state event =
 
   | AddTransform tfs ->
       state |> tryTransformChain (fun body recreate chain sections ->
-        let whites =
-          sections 
-          |> List.map (fun sec -> Ast.formatWhiteAfterExpr (List.last sec.Nodes))
-          |> List.countBy id
-        let whiteAfter, _ = ("",0)::whites |> List.maxBy (fun (s, c) -> if s = "" then 0 else c)
-        Log.trace("live", "Whitespace of sections: %O, inserting '%s'", Array.ofList whites, whiteAfter)
+        let dominantWhite whites = 
+          let whites = whites |> List.countBy id |> List.ofSeq
+          ("",0)::whites |> List.maxBy (fun (s, c) -> if s = "" then 0 else c) |> fst
+        let whiteBefore, whiteAfter =
+          sections |> List.map (fun sec -> Ast.formatWhiteBeforeExpr (List.head sec.Nodes)) |> dominantWhite,
+          sections |> List.map (fun sec -> Ast.formatWhiteAfterExpr (List.last sec.Nodes)) |> dominantWhite
+        Log.trace("live", "Inserting whitespace before '%s' and after '%s'", whiteBefore, whiteAfter)
+        let whiteBefore = [ { Token = TokenKind.White whiteBefore; Range = {Start=0; End=0} } ]
+        let whiteAfter = [ { Token = TokenKind.White whiteAfter; Range = {Start=0; End=0} } ]
         let node n = Ast.node { Start=0; End=0; } n
 
-        let firstProperty, getProperties = 
-          let res k l = k, fun _ -> l
+        let fields =  
+          sections 
+          |> List.collect (fun s -> s.Nodes) |> List.rev 
+          |> List.tryPick pickPivotFields
+
+        let firstProperty, properties = 
           match tfs with
-          | Pivot.DropColumns _ -> res "drop columns" [marker; "then"]
-          | Pivot.SortBy _ -> res "sort data" [marker; "then"]
-          | Pivot.FilterBy _ -> res "filter data" [marker; "then"] // TODO
-          | Pivot.Paging _ -> res "paging" [marker; "then"]
-          | Pivot.GetSeries _ -> res "get series" [marker]
-          | Pivot.GetTheData -> res "get the data" [marker]
-          | Pivot.GroupBy(_, _) -> "group data", fun expr ->
-              Log.trace("live", "Pick fields of %O, got: %O", expr, pickPivotFields expr)
-              match pickPivotFields expr with
-              | Some (f::_) -> [marker; "by " + f.Name; "then"]
-              | _ -> [marker; "by <Property>"; "then"]
-          | Pivot.GroupBy([], _) | Pivot.Empty -> res "" []
+          | Pivot.DropColumns _ -> "drop columns", [|marker; "then"|]
+          | Pivot.SortBy _ -> "sort data", [|marker; "then"|]
+          | Pivot.FilterBy _ -> "filter data", [|marker; "then"|] // TODO
+          | Pivot.Paging _ -> "paging", [|marker; "then"|]
+          | Pivot.GetSeries _ -> "get series", [|marker|]
+          | Pivot.GetTheData -> "get the data", [|marker|]
+          | Pivot.GroupBy(_, _) -> 
+              "group data", 
+              match fields with
+              | Some (f::_) -> [|marker; "by " + f.Name; "then"|]
+              | _ -> [|marker; "by Property"; "then"|]
+          | Pivot.GroupBy([], _) | Pivot.Empty -> "", [||]
 
-        (*
-        let injectCall expr = 
-          getProperties expr 
-          |> List.fold (fun expr name ->
+        let newSection =
+          { Transformation = tfs 
+            Nodes = 
+              properties 
+              |> Array.mapi (fun i prop ->
+                  let prop =
+                    if i <> 0 then createChainNode None prop
+                    else createChainNodeFromName None (Parser.whiteBefore whiteBefore (node {Name=prop}))
+                  if i <> properties.Length - 1 then prop 
+                  else Parser.whiteAfter whiteAfter prop )
+              |> List.ofArray }
+
+        let closeFirstSection = function
+          | section::sections -> 
+              ( match section.Transformation, List.last section.Nodes with
+                | Pivot.Paging _, { Node = Expr.Call(_, n, _) } when n.Node.Name = "take" -> section 
+                | _, { Node = Expr.Property(_, n) } when n.Node.Name = "then" -> section 
+                | _ -> { section with Nodes = section.Nodes @ [createChainNode None "then"] })
+              :: sections
+          | [] -> []
+
+        let newSections = 
+          match List.rev sections with
+          | ({ Transformation = Pivot.GetSeries _ | Pivot.GetTheData } as last)::sections ->
+              List.rev (last::newSection::closeFirstSection sections)
+          | sections -> List.rev (newSection::closeFirstSection sections)
               
-              node (Expr.Property(expr, node { Name = name }))
-
-            ) expr
-          |> Parser.whiteAfter [ { Token = TokenKind.White whiteAfter; Range = {Start=0; End=0} } ]
-
-        let tryInjectBefore prev part =
-          match pickPivotTransformations part with
-          | Some (Pivot.GetSeries _ :: _) 
-          | Some (Pivot.GetTheData _ :: _) -> true, injectCall prev
-          | _ -> false, prev
-
-        let injected, newBody =
-          List.tail chain |> List.fold (fun (injected, prev) part ->
-            let injected, prev = if injected then injected, prev else tryInjectBefore prev part
-            match part.Node with 
-            | Expr.Property(_, n) -> injected, { part with Node = Expr.Property(prev, n) }
-            | Expr.Call(_, n, args) -> injected, { part with Node = Expr.Call(Some prev, n, args) }
-            | _ -> failwith "Unexpected node in call chain") (false, List.head chain)
-
-        let newBody = recreate (if injected then newBody else injectCall newBody)
-        let newCode = (Ast.formatSingleExpression newBody).Trim()
-        let newCode = state.Code.Substring(0, body.Range.Start) + newCode + state.Code.Substring(body.Range.End + 1)
-        { state with Code = newCode } *)
-        
-        let newSections = sections
-          //match List.rev sections with
-          //| ({ Transformation = Pivot.GetSeries _ | Pivot.GetTheData } as last)::sections -> 
-          //    sec
-              
-        Log.trace("live", "Add section to %O", Array.ofSeq sections)
+        Log.trace("live", "Inserted section: %O", Array.ofSeq newSections)
         let newNodes = List.head chain :: (newSections |> List.collect (fun sec -> sec.Nodes))
         reconstructChain state body newNodes
         |> replaceAndSelectMarker firstProperty ) |> Some

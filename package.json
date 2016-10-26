@@ -17,22 +17,22 @@
   "author": "Tomas Petricek",
   "license": "Apache-2.0",
   "dependencies": {
-    "babel-standalone": "^6.15.0",
+    "babel-standalone": "^6.18.0",
     "core-js": "^2.4.1",
-    "fable-core": "^0.6.6",
-    "monaco-editor": "^0.6.1",
+    "fable-core": "^0.6.10",
+    "monaco-editor": "^0.7.0",
     "requirejs": "^2.3.2",
     "virtual-dom": "^2.1.1"
   },
   "main": "main.js",
   "devDependencies": {
-    "concurrently": "^2.2.0",
-    "fable-compiler": "^0.6.5",
+    "concurrently": "^3.1.0",
+    "fable-compiler": "^0.6.15",
     "fable-import-virtualdom": "^0.8.1",
     "fable-plugins-nunit": "^0.6.0",
-    "mocha": "^3.0.2",
+    "mocha": "^3.1.2",
     "source-map-loader": "^0.1.5",
-    "webpack": "^1.13.1"
+    "webpack": "^1.13.2"
   },
   "repository": {
     "type": "git",
