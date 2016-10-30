@@ -244,16 +244,42 @@ let reconstructChain state (body:Node<_>) newNodes =
   let newCode = state.Code.Substring(0, body.Range.Start) + newCode + state.Code.Substring(body.Range.End + 1)
   { state with Code = newCode }
 
-let createChainNodeFromName args name = 
+let createChainNode args name = 
   let node nd = Ast.node {Start=0; End=0} nd
   match args with
-  | None -> node (Expr.Property(node Expr.Empty, name))
+  | None -> node (Expr.Property(node Expr.Empty, node {Name=name}))
   | Some args -> 
       let args = args |> List.map (fun a -> { Name = None; Value = node a })
-      node (Expr.Call(None, name, node args))
+      node (Expr.Call(None, node {Name=name}, node args))
 
-let createChainNode args name = 
-  createChainNodeFromName args (Ast.node {Start=0; End=0} {Name=name})
+let getWhiteBeforeAndAfterSections firstNode sections =
+  let dominantWhite whites = 
+    let whites = whites |> List.countBy id |> List.ofSeq
+    ("",0)::whites |> List.maxBy (fun (s, c) -> if s = "" then 0 else c) |> fst
+  let whiteBefore, whiteAfter =
+    sections |> List.map (fun sec -> List.head sec.Nodes) |> List.map Ast.formatWhiteBeforeExpr |> dominantWhite,
+    sections |> List.map (fun sec -> List.last sec.Nodes) |> List.append [firstNode] |> List.map Ast.formatWhiteAfterExpr |> dominantWhite
+  Log.trace("live", "Inserting whitespace before '%s' and after '%s' for sections: %O", whiteBefore, whiteAfter, sections)
+  [ { Token = TokenKind.White whiteBefore; Range = {Start=0; End=0} } ],
+  [ { Token = TokenKind.White whiteAfter; Range = {Start=0; End=0} } ]
+
+let insertWhiteAroundSection before after section = 
+  let lastIdx = (List.length section.Nodes) - 1
+  { Transformation = section.Transformation
+    Nodes = 
+      section.Nodes |> List.mapi (fun i node ->
+        let node = 
+          match before, node with
+          | Some before, { Node = Expr.Property(inst, n) } when i = 0 -> 
+              { node with Node = Expr.Property(inst, { n with WhiteBefore = before }) }
+          | Some before, { Node = Expr.Call(inst, n, args) } when i = 0 -> 
+              { node with Node = Expr.Call(inst, { n with WhiteBefore = before }, args) }
+          | _ -> node
+        let node = 
+          match after, node with
+          | Some after, node when i = lastIdx -> { node with WhiteAfter = after }
+          | _ -> node
+        node ) }
 
 let rec updatePivotState trigger state event = 
   match event with
@@ -327,15 +353,7 @@ let rec updatePivotState trigger state event =
 
   | AddTransform tfs ->
       state |> tryTransformChain (fun body recreate chain sections ->
-        let dominantWhite whites = 
-          let whites = whites |> List.countBy id |> List.ofSeq
-          ("",0)::whites |> List.maxBy (fun (s, c) -> if s = "" then 0 else c) |> fst
-        let whiteBefore, whiteAfter =
-          sections |> List.map (fun sec -> Ast.formatWhiteBeforeExpr (List.head sec.Nodes)) |> dominantWhite,
-          sections |> List.map (fun sec -> Ast.formatWhiteAfterExpr (List.last sec.Nodes)) |> dominantWhite
-        Log.trace("live", "Inserting whitespace before '%s' and after '%s'", whiteBefore, whiteAfter)
-        let whiteBefore = [ { Token = TokenKind.White whiteBefore; Range = {Start=0; End=0} } ]
-        let whiteAfter = [ { Token = TokenKind.White whiteAfter; Range = {Start=0; End=0} } ]
+        let whiteBefore, whiteAfter = getWhiteBeforeAndAfterSections (List.head chain) sections
         let node n = Ast.node { Start=0; End=0; } n
 
         let fields =  
@@ -345,38 +363,31 @@ let rec updatePivotState trigger state event =
 
         let firstProperty, properties = 
           match tfs with
-          | Pivot.DropColumns _ -> "drop columns", [|marker; "then"|]
-          | Pivot.SortBy _ -> "sort data", [|marker; "then"|]
-          | Pivot.FilterBy _ -> "filter data", [|marker; "then"|] // TODO
-          | Pivot.Paging _ -> "paging", [|marker; "then"|]
-          | Pivot.GetSeries _ -> "get series", [|marker|]
-          | Pivot.GetTheData -> "get the data", [|marker|]
+          | Pivot.DropColumns _ -> "drop columns", [marker; "then"]
+          | Pivot.SortBy _ -> "sort data", [marker; "then"]
+          | Pivot.FilterBy _ -> "filter data", [marker; "then"] // TODO
+          | Pivot.Paging _ -> "paging", [marker; "then"]
+          | Pivot.GetSeries _ -> "get series", [marker]
+          | Pivot.GetTheData -> "get the data", [marker]
           | Pivot.GroupBy(_, _) -> 
               "group data", 
               match fields with
-              | Some (f::_) -> [|marker; "by " + f.Name; "then"|]
-              | _ -> [|marker; "by Property"; "then"|]
-          | Pivot.GroupBy([], _) | Pivot.Empty -> "", [||]
+              | Some (f::_) -> [marker; "by " + f.Name; "then"]
+              | _ -> [marker; "by Property"; "then"]
+          | Pivot.GroupBy([], _) | Pivot.Empty -> "", []
 
         let newSection =
-          { Transformation = tfs 
-            Nodes = 
-              properties 
-              |> Array.mapi (fun i prop ->
-                  let prop =
-                    if i <> 0 then createChainNode None prop
-                    else createChainNodeFromName None (Parser.whiteBefore whiteBefore (node {Name=prop}))
-                  if i <> properties.Length - 1 then prop 
-                  else Parser.whiteAfter whiteAfter prop )
-              |> List.ofArray }
+          { Transformation = tfs; Nodes = List.map (createChainNode None) properties }
+          |> insertWhiteAroundSection (Some whiteBefore) (Some whiteAfter)
 
         let closeFirstSection = function
           | section::sections -> 
-              ( match section.Transformation, List.last section.Nodes with
+              let section =
+                match section.Transformation, List.last section.Nodes with
                 | Pivot.Paging _, { Node = Expr.Call(_, n, _) } when n.Node.Name = "take" -> section 
                 | _, { Node = Expr.Property(_, n) } when n.Node.Name = "then" -> section 
-                | _ -> { section with Nodes = section.Nodes @ [createChainNode None "then"] })
-              :: sections
+                | _ -> { section with Nodes = section.Nodes @ [createChainNode None "then"] }
+              (insertWhiteAroundSection None (Some whiteAfter) section) :: sections
           | [] -> []
 
         let newSections = 

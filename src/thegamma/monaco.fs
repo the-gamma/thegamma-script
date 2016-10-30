@@ -123,15 +123,18 @@ let createCompletionProvider (getService:string -> CheckingService) =
 
       member this.resolveCompletionItem(item, token) = Fable.Core.U2.Case1 item }
 
-let setupMonacoServices (getService : string -> CheckingService) =
+let createdEditors = System.Collections.Generic.Dictionary<string, CheckingService>()
+let getService uri = createdEditors.[uri]
+
+let setupMonacoServices () = 
   let lang = JsInterop.createEmpty<languages.ILanguageExtensionPoint>
   lang.id <- "thegamma"
   languages.Globals.setTokensProvider("thegamma", tokensProvider) |> ignore
   languages.Globals.registerCompletionItemProvider("thegamma", createCompletionProvider getService) |> ignore
   languages.Globals.register(lang)
 
-
-let createMonacoEditor id code customize = 
+let createMonacoEditor id code svc customize = 
+  if createdEditors.Count = 0 then setupMonacoServices ()
   let services = JsInterop.createEmpty<editor.IEditorOverrideServices>
   let options = JsInterop.createEmpty<editor.IEditorConstructionOptions>
   let scroll = JsInterop.createEmpty<editor.IEditorScrollbarOptions>
@@ -145,7 +148,8 @@ let createMonacoEditor id code customize =
   options.scrollBeyondLastLine <- Some false
   options.overviewRulerLanes <- Some 0.0
   customize options
-  editor.Globals.create(document.getElementById(id), options, services)
-
+  let ed = editor.Globals.create(document.getElementById(id), options, services)
+  createdEditors.Add(ed.getModel().uri.toString(), svc)
+  ed
 
 

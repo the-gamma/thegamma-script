@@ -46,8 +46,8 @@ let isLocalHost() =
 
 let mutable enabledCategories = 
   if not (isLocalHost ()) then set []
-  //else set [ "LIVE"; "SYSTEM"; "PARSING";"BINDER"; "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "PROVIDERS"; "SERVICE"; "CODEGEN"; "INTERPRETER"; "RUNTIME" ]
-  else set ["LIVE"]
+  //else set [ "API"; "LIVE"; "SYSTEM"; "PARSING";"BINDER"; "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "PROVIDERS"; "SERVICE"; "CODEGEN"; "INTERPRETER"; "RUNTIME" ]
+  else set [] 
 type Log =
   static member setEnabled(cats) = enabledCategories <- cats
 
@@ -209,6 +209,14 @@ type ListDictionaryNode<'K, 'T> =
     Nested : Dictionary<'K, ListDictionaryNode<'K, 'T>> }
 
 type ListDictionary<'K, 'V> = Dictionary<'K, ListDictionaryNode<'K, 'V>>
+
+module JsHelpers = 
+  type KeyValue = 
+    abstract key : string
+    abstract value : obj
+
+  [<Emit("(function(o) { return Object.keys(o).map(function(k) { return {\"key\":k, \"value\":o[k] }; }); })($0)")>]
+  let properties(o:obj) : KeyValue[] = failwith "!"
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module ListDictionary = 

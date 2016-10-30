@@ -137,9 +137,13 @@ type Babel =
 [<Emit("Babel")>]
 let babel : Babel = Unchecked.defaultof<_> 
 
-let compileAndRun globals (text:string) prog = async {
+let compile globals (text:string) prog = async {
   try
     let! globals = Async.AwaitFuture globals
+    let globals = 
+      globals |> List.choose (function
+        | { Kind = EntityKind.GlobalValue(n, Some e) } -> Some(n.Name, e)
+        | _ -> None ) |> Map.ofSeq    
     let ctx = { LineLengths = [ for l in text.Split('\n') -> l.Length ]; Globals = globals }  
     let res = compileProgram ctx prog
     let code = babel.transformFromAst(Serializer.serializeProgram res, text, { presets = [| "es2015" |] })

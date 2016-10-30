@@ -25,14 +25,8 @@ module TableHelpers =
   [<Emit("isNaN($0)")>]
   let isNaN(n:float) : bool = failwith "!"
 
-  type KeyValue = 
-    abstract key : string
-    abstract value : obj
-
-  [<Emit("(function(o) { return Object.keys(o).map(function(k) { return {\"key\":k, \"value\":o[k] }; }); })($0)")>]
-  let properties(o:obj) : KeyValue[] = failwith "!"
-
 open TableHelpers
+open TheGamma.Common.JsHelpers
 
 type html =
   static member img(url:string) = 
