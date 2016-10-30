@@ -21,7 +21,6 @@
   "main": "main.js",
   "devDependencies": {
     "fable-compiler": "^0.7.5-alpha.22",
-    "fable-import-virtualdom": "^0.8.1",
     "fable-plugins-nunit": "^0.7.0-alpha.2",
     "mocha": "^3.1.2"
   },

@@ -60,7 +60,6 @@
     <Compile Include="google/options.fs" />
     <Compile Include="google/extensions.fs" />
     <Compile Include="google/charts.fs" />
-    <None Include="fableconfig.json" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="Fable.Core">

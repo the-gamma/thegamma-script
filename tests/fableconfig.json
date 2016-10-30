@@ -1,5 +1,5 @@
 {
-    "outDir": "out",
+    "outDir": "../out",
     "module":  "commonjs",
     "sourceMaps": true,
     "projFile": [

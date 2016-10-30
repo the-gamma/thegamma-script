@@ -75,7 +75,7 @@
     <When Condition="$(TargetFrameworkIdentifier) == '.NETFramework' And ($(TargetFrameworkVersion) == 'v4.5' Or $(TargetFrameworkVersion) == 'v4.5.1' Or $(TargetFrameworkVersion) == 'v4.5.2' Or $(TargetFrameworkVersion) == 'v4.5.3' Or $(TargetFrameworkVersion) == 'v4.6' Or $(TargetFrameworkVersion) == 'v4.6.1' Or $(TargetFrameworkVersion) == 'v4.6.2' Or $(TargetFrameworkVersion) == 'v4.6.3')">
       <ItemGroup>
         <Reference Include="nunit.framework">
-          <HintPath>..\..\packages\NUnit\lib\net45\nunit.framework.dll</HintPath>
+          <HintPath>../../packages/NUnit/lib/net45/nunit.framework.dll</HintPath>
           <Private>True</Private>
           <Paket>True</Paket>
         </Reference>
@@ -88,12 +88,11 @@
     <Compile Include="formatter.fs" />
     <Compile Include="binder.fs" />
     <Compile Include="typechecker.fs" />
-    <None Include="fableconfig.json" />
     <None Include="paket.references" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="Fable.Core">
-      <HintPath>..\..\node_modules\fable-core\Fable.Core.dll</HintPath>
+      <HintPath>../../node_modules/fable-core/Fable.Core.dll</HintPath>
     </Reference>
     <Reference Include="mscorlib" />
     <Reference Include="FSharp.Core, Version=$(TargetFSharpCoreVersion), Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">

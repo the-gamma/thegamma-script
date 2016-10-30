@@ -64,7 +64,6 @@
   -->
   <ItemGroup>
     <Compile Include="main.fsx" />
-    <None Include="fableconfig.json" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="Fable.Core">

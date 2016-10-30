@@ -87,7 +87,6 @@
     <Content Include="App.config">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
-    <None Include="fableconfig.json" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="Fable.Core">

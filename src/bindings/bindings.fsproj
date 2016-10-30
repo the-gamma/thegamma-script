@@ -47,8 +47,8 @@
     <Reference Include="System.Numerics" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="../../node_modules/fable-import-virtualdom/Fable.Helpers.Virtualdom.fs" />
     <Compile Include="monaco.fs" />
+    <Compile Include="virtualdom.fs" />
   </ItemGroup>
   <PropertyGroup>
     <MinimumVisualStudioVersion Condition="'$(MinimumVisualStudioVersion)' == ''">11</MinimumVisualStudioVersion>
