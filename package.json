@@ -4,35 +4,26 @@
   "version": "0.0.1",
   "description": "The Gamma project",
   "scripts": {
-    "justtest": "mocha out/tests/thegamma-tests",
-    "pretest": "concurrently \"fable src/thegamma\" \"fable src/libraries\" \"fable src/main\" \"fable tests/thegamma-tests\"",
+    "pretest": "fable tests",
     "test": "mocha out/tests/thegamma-tests",
-    "build": "concurrently \"fable src/thegamma\" \"fable src/libraries\" \"fable src/main\"",
-    "postbuild": "webpack",
-    "prewatchwebpack": "sleep 60",
-    "watchwebpack": "webpack --watch",
-    "watchfable": "concurrently \"fable -w src/thegamma\" \"fable -w src/libraries\" \"fable -w src/main\"",
-    "watch": "concurrently \"npm run watchfable\" \"npm run watchwebpack\""
+    "build": "fable src",
+    "watch": "fable -w src"
   },
   "author": "Tomas Petricek",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "dependencies": {
-    "babel-standalone": "^6.18.0",
+    "babel-standalone": "^6.18.1",
     "core-js": "^2.4.1",
-    "fable-core": "^0.6.10",
+    "fable-core": "^0.7.5-alpha.11",
     "monaco-editor": "^0.7.0",
-    "requirejs": "^2.3.2",
     "virtual-dom": "^2.1.1"
   },
   "main": "main.js",
   "devDependencies": {
-    "concurrently": "^3.1.0",
-    "fable-compiler": "^0.6.15",
+    "fable-compiler": "^0.7.5-alpha.22",
     "fable-import-virtualdom": "^0.8.1",
-    "fable-plugins-nunit": "^0.6.0",
-    "mocha": "^3.1.2",
-    "source-map-loader": "^0.1.5",
-    "webpack": "^1.13.2"
+    "fable-plugins-nunit": "^0.7.0-alpha.2",
+    "mocha": "^3.1.2"
   },
   "repository": {
     "type": "git",

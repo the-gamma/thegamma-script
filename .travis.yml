@@ -10,5 +10,4 @@ before_script:
   - npm install
 
 script:
-  - xbuild src/thegamma-script.sln
   - npm test

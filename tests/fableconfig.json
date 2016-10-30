@@ -1,0 +1,12 @@
+{
+    "outDir": "out",
+    "module":  "commonjs",
+    "sourceMaps": true,
+    "projFile": [
+      "../src/bindings/bindings.fsproj",
+      "../src/libraries/libraries.fsproj",
+      "../src/thegamma/thegamma.fsproj",
+      "../src/main/main.fsproj",
+      "thegamma-tests/thegamma-tests.fsproj"
+    ]
+}
