@@ -1,7 +1,9 @@
 {
-    "outDir": "../out",
-    "module":  "commonjs",
+    "outDir": "../out/tests",
+    "module":  "umd",
     "sourceMaps": true,
+    "plugins": [ "../node_modules/fable-plugins-nunit/Fable.Plugins.NUnit.dll" ],
+    "coreLib": "fable-core/umd",
     "projFile": [
       "../src/bindings/bindings.fsproj",
       "../src/libraries/libraries.fsproj",
