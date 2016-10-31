@@ -18,7 +18,7 @@ open TheGamma.Live.Common
 
 module FsOption = Microsoft.FSharp.Core.Option
 
-Fable.Import.Node.require.Invoke("core-js") |> ignore
+//Fable.Import.Node.require.Invoke("core-js") |> ignore
 
 // ------------------------------------------------------------------------------------------------
 // Global provided types

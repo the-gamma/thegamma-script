@@ -1,11 +1,27 @@
 {
     "outDir": "../out/src",
-    "module":  "commonjs",
     "sourceMaps": true,
+    "babelPlugins": [
+      "transform-runtime"
+    ],
     "projFile": [
       "bindings/bindings.fsproj",
       "libraries/libraries.fsproj",
       "thegamma/thegamma.fsproj",
       "main/main.fsproj"
-    ]
+    ],
+    "rollup": {
+      "format": "umd",
+      "external": ["monaco"],
+      "globals": {      
+        "monaco":"nada"
+      },
+      "plugins": [
+        ["commonjs", {
+          "namedExports": {
+            "virtual-dom": [ "h", "create", "diff", "patch" ]
+          }
+        }]
+      ]
+    }
 }

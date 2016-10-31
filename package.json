@@ -13,13 +13,14 @@
   "license": "MIT",
   "dependencies": {
     "babel-standalone": "^6.18.1",
-    "core-js": "^2.4.1",
     "fable-core": "^0.7.5-alpha.11",
     "monaco-editor": "^0.7.0",
     "virtual-dom": "^2.1.1"
   },
   "main": "main.js",
   "devDependencies": {
+    "babel-plugin-transform-runtime": "^6.15.0",
+    "babel-runtime": "^6.18.0",
     "fable-compiler": "^0.7.5-alpha.22",
     "fable-plugins-nunit": "^0.7.0-alpha.2",
     "mocha": "^3.1.2"

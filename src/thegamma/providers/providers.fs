@@ -267,8 +267,8 @@ module RestProvider =
         let typ = lookupNamed "series" [t1; t2]
         typ, 
         fun d -> 
-          ident("_series")?series?create /@/ 
-            [ ident("_runtime")?convertTupleSequence /@/ [func "v" e1; func "v" e2; d] 
+          ident("series")?create /@/ 
+            [ ident("convertTupleSequence") /@/ [func "v" e1; func "v" e2; d] 
               str "key"; str "value"; str "" ] // TODO: We don't have any info - that sucks
     | Generic("seq", [|ty|]) ->
         let elTy, emitter = getTypeAndEmitter lookupNamed ty
@@ -276,8 +276,8 @@ module RestProvider =
         serTy, 
         // This is over async, but the child `emitter` is not over async
         fun d -> 
-          ident("_series")?series?ordinal /@/ 
-            [ ident("_runtime")?convertSequence /@/ [func "v" emitter; d] 
+          ident("series")?ordinal /@/ 
+            [ ident("convertSequence") /@/ [func "v" emitter; d] 
               str "key"; str "value"; str "" ]
     | Record(membs) ->
         let membs = 
@@ -337,7 +337,7 @@ module RestProvider =
       ty
 
   let rec provideRestType lookupNamed name root cookies = 
-    let ctx = ident("_runtime")?RuntimeContext
+    let ctx = ident("RuntimeContext")
     ProvidedType.GlobalValue
       ( name, [],
         NewExpression(ctx, [str root; str cookies; str ""], None),

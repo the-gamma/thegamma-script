@@ -146,7 +146,9 @@ let toJson value =
   serializer.Serialize(tw, value)
   sb.ToString() 
 
-#r "../src/libraries/bin/Debug/gui.dll"
+#r "../src/libraries/bin/Debug/bindings.dll"
+#r "../src/libraries/bin/Debug/libraries.dll"
+#r "../src/libraries/bin/Debug/Fable.Core.dll"
 let libs = __SOURCE_DIRECTORY__ + "/../src/libraries/bin/Debug/libraries.dll"
 let asm = Assembly.LoadFile(libs)
 
@@ -165,6 +167,7 @@ let knownTypes =
       [ "IEnumerable`1", "seq" // wishful thinking
         "FSharpAsync`1", "async" // dtto
         "IEqualityComparer", "object"
+        "DomNode", "object"
         "table`2", "table"
         "empty", "empty"
         "timeline`2", "timeline"
@@ -178,25 +181,25 @@ let e =
   [|  for ct in chartTypes do
         yield exportType ctx ct BindingFlags.Instance
       yield { exportType ctx (asm.GetType("TheGamma.GoogleCharts.chart")) BindingFlags.Static 
-                with instance = [| "_charts"; "chart" |] }
+                with instance = [| "chart" |] }
       yield { exportType ctx (asm.GetType("TheGamma.empty")) BindingFlags.Static 
-                with instance = [| "_tables"; "empty" |] }
+                with instance = [| "empty" |] }
       yield exportType ctx (asm.GetType("TheGamma.empty")) BindingFlags.Instance
       yield { exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Static 
-                with instance = [| "_tables"; "table" |] }
+                with instance = [| "table" |] }
       yield exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Instance
       yield exportType ctx (asm.GetType("TheGamma.Maps.timeline`2")) BindingFlags.Instance 
       yield { exportType ctx (asm.GetType("TheGamma.Maps.timeline`2")) BindingFlags.Static 
-                with instance = [| "_maps"; "timeline" |] }
+                with instance = [| "timeline$1" |] }
       yield { exportType ctx (asm.GetType("TheGamma.Maps.geo")) BindingFlags.Static 
-                with instance = [| "_maps"; "geo" |] }
+                with instance = [| "geo" |] }
       yield { exportType ctx (asm.GetType("TheGamma.Maps.math")) BindingFlags.Static 
-                with instance = [| "_maps"; "math" |] }
+                with instance = [| "math" |] }
       yield exportType ctx (asm.GetType("TheGamma.Series.series`2")) BindingFlags.Instance 
       yield { exportType ctx (asm.GetType("TheGamma.Series.series`2")) BindingFlags.Static 
-                with instance = [| "_series"; "series" |] }
+                with instance = [| "series" |] }
       yield { exportType ctx (asm.GetType("TheGamma.html")) BindingFlags.Static 
-                with instance = [| "_tables"; "html" |] } |]
+                with instance = [| "html" |] } |]
 
 let fsprovider = __SOURCE_DIRECTORY__ + "/../out"
 System.IO.Directory.CreateDirectory(fsprovider)

@@ -56,6 +56,7 @@ let evaluateExpression (_stored:RuntimeValue[]) (expr:Expression) =
     let s = TheGamma.Series.series<int, int>.create(async { return [||] }, "", "", "") 
     TheGamma.TypeProvidersRuntime.RuntimeContext("lol", "", "troll") |> ignore
     TheGamma.TypeProvidersRuntime.trimLeft |> ignore
+    TheGamma.TypeProvidersRuntime.convertTupleSequence |> ignore
     TheGamma.GoogleCharts.chart.bar |> ignore
     TheGamma.table<int, int>.create(s) |> ignore
     TheGamma.Maps.timeline<int, int>.create(s) |> ignore

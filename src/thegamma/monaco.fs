@@ -8,7 +8,7 @@ open TheGamma.Common
 open TheGamma.Services
 open TheGamma.TypeChecker
 
-[<Emit("_monaco = monaco;")>]
+[<Emit("var i = 1; eval('monaco$' + i + ' = monaco'); monaco = monaco;")>]
 let hack : unit = ()
 hack
 

@@ -146,11 +146,11 @@ let makeDataEmitter isPreview isSeries tfs =
   { Emit = fun (this, _) -> 
       // TODO: This is not properly recursively transforming values, but they're just int/string, so it's OK
       if isSeries then
-        ident("_series")?series?create /@/ 
+        ident("series")?create /@/ 
           [ this?getData /@/ [str (Transform.toUrl (List.rev tfs)); bool isPreview]
             str "key"; str "value"; str "" ]
       else
-        ident("_series")?series?ordinal /@/ 
+        ident("series")?ordinal /@/ 
           [ this?getData /@/ [str (Transform.toUrl (List.rev tfs)); bool isPreview]
             str "key"; str "value"; str "" ] }
 
@@ -366,7 +366,7 @@ and makePivotType ctx tfs =
 let providePivotType root name lookupNamed fields =
   let fields = [ for f, t in fields -> { Name = f; Type = t }]
   let typ = makePivotType { Fields = fields; InputFields = fields; LookupNamed = lookupNamed; Root = root } []
-  let ctx = ident("_runtime")?PivotContext
+  let ctx = ident("PivotContext")
   let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box []  }
   let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box fields  }
   ProvidedType.GlobalValue
