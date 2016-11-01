@@ -201,9 +201,13 @@ let e =
       yield { exportType ctx (asm.GetType("TheGamma.html")) BindingFlags.Static 
                 with instance = [| "html" |] } |]
 
-let fsprovider = __SOURCE_DIRECTORY__ + "/../out"
-System.IO.Directory.CreateDirectory(fsprovider)
-System.IO.File.WriteAllText(fsprovider + "/libraries.json", toJson e)
+let fsprovider1 = __SOURCE_DIRECTORY__ + "/../dist"
+System.IO.Directory.CreateDirectory(fsprovider1)
+System.IO.File.WriteAllText(fsprovider1 + "/libraries.json", toJson e)
+
+let fsprovider2 = __SOURCE_DIRECTORY__ + "/../out"
+System.IO.Directory.CreateDirectory(fsprovider2)
+System.IO.File.WriteAllText(fsprovider2 + "/libraries.json", toJson e)
 
 
 

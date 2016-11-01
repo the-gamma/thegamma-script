@@ -1,13 +1,13 @@
 {
-  "private": true,
   "name": "thegamma-script",
   "version": "0.0.1",
   "description": "The Gamma project",
   "scripts": {
-    "pretest": "fable --verbose tests",
-    "test": "mocha out/tests/thegamma-tests",
-    "build": "fable src",
-    "watch": "fable -w src"
+    "pretest": "fable tests",
+    "test": "mocha dist/tests/thegamma-tests",
+    "prepublish": "npm run build",
+    "build": "fable --target es2015 src && fable --target commonjs src && fable --target min src && fable --target dev src",
+    "watch": "fable --target dev -w src"
   },
   "author": "Tomas Petricek",
   "license": "MIT",
@@ -17,13 +17,13 @@
     "monaco-editor": "^0.7.0",
     "virtual-dom": "^2.1.1"
   },
-  "main": "main.js",
   "devDependencies": {
     "babel-plugin-transform-runtime": "^6.15.0",
     "babel-runtime": "^6.18.0",
     "fable-compiler": "^0.7.5-alpha.22",
     "fable-plugins-nunit": "^0.7.0-alpha.2",
-    "mocha": "^3.1.2"
+    "mocha": "^3.1.2",
+    "rollup-plugin-uglify": "^1.0.1"
   },
   "repository": {
     "type": "git",
@@ -31,10 +31,14 @@
   },
   "keywords": [
     "data",
+    "visualization",
     "storytelling"
   ],
   "bugs": {
     "url": "https://github.com/the-gamma/thegamma-script/issues"
   },
-  "homepage": "https://github.com/the-gamma/thegamma-script#readme"
+  "homepage": "http://thegamma.net",
+  "main": "./dist/commonjs/main.js",
+  "module": "./dist/es2015/main/main.js",
+  "jsnext:main": "./dist/es2015/main/main.js"
 }

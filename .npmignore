@@ -1,0 +1,13 @@
+.paket/
+node_modules/
+paket-files/
+packages/
+src/
+tests/
+tools/
+
+.travis.yml
+paket.*
+debug.log
+npm-debug.log
+.ionide.debug

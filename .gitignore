@@ -5,7 +5,7 @@ node_modules/
 paket-files/
 packages/
 .fake/
-out/
+dist/
 
 obj
 bin

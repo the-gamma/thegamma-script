@@ -1,5 +1,5 @@
 {
-    "outDir": "../out/tests",
+    "outDir": "../dist/tests",
     "module":  "umd",
     "sourceMaps": true,
     "plugins": [ "../node_modules/fable-plugins-nunit/Fable.Plugins.NUnit.dll" ],

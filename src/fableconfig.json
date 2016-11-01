@@ -1,27 +1,56 @@
 {
-    "outDir": "../out/src",
-    "sourceMaps": true,
-    "babelPlugins": [
-      "transform-runtime"
-    ],
-    "projFile": [
-      "bindings/bindings.fsproj",
-      "libraries/libraries.fsproj",
-      "thegamma/thegamma.fsproj",
-      "main/main.fsproj"
-    ],
-    "rollup": {
-      "format": "umd",
-      "external": ["monaco"],
-      "globals": {      
-        "monaco":"nada"
-      },
-      "plugins": [
-        ["commonjs", {
-          "namedExports": {
-            "virtual-dom": [ "h", "create", "diff", "patch" ]
-          }
-        }]
-      ]
+  "sourceMaps": true,
+  "babelPlugins": [
+    "transform-runtime"
+  ],
+  "projFile": [
+    "bindings/bindings.fsproj",
+    "libraries/libraries.fsproj",
+    "thegamma/thegamma.fsproj",
+    "main/main.fsproj"
+  ],
+  "targets": {
+    "es2015": {
+      "outDir": "../dist/es2015",
+      "module": "es2015"
+    },
+    "commonjs": {
+      "outDir": "../dist/commonjs",
+      "module": "commonjs",
+      "coreLib": "fable-core/umd"
+    },
+    "min": {
+      "outDir": "../dist",
+      "rollup": {
+        "dest": "../dist/thegamma.min.js",
+        "format": "umd",
+        "external": ["monaco"],
+        "globals": {"monaco":"na"},
+        "plugins": [
+          [ "uglify" ],
+          ["commonjs", {
+             "namedExports": {
+               "virtual-dom": [ "h", "create", "diff", "patch" ]
+             }
+           }]          
+        ]
+      }
+    },
+    "dev": {
+      "outDir": "../dist",
+      "rollup": {
+        "dest": "../dist/thegamma.js",
+        "format": "umd",
+        "external": ["monaco"],
+        "globals": {"monaco":"na"},
+        "plugins": [
+          ["commonjs", {
+             "namedExports": {
+               "virtual-dom": [ "h", "create", "diff", "patch" ]
+             }
+           }]          
+        ]
+      }
     }
+  }
 }
