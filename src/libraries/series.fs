@@ -73,8 +73,8 @@ module SeriesInternals =
     Array.ofSeq res
 
   let zipAny (arr1:('k*'v1)[]) (arr2:('k*'v2)[]) =
-    let inline (<=.) (a:'k) (b:'k) = compare a b <= 0
-    let inline (>=.) (a:'k) (b:'k) = compare a b >= 0
+    let (<=.) (a:'k) (b:'k) = compare a b <= 0
+    let (>=.) (a:'k) (b:'k) = compare a b >= 0
     if isSortedUsing (<=.) fst arr1 && isSortedUsing (<=.) fst arr2 then zipSorted arr1 arr2
     elif isSortedUsing (>=.) fst arr1 && isSortedUsing (>=.) fst arr2 then Array.rev (zipSorted (Array.rev arr1) (Array.rev arr2))
     else zipUnsorted arr1 arr2
