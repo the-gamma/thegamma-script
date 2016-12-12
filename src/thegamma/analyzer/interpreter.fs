@@ -162,6 +162,10 @@ and evaluateEntity ctx (e:Entity) =
   | EntityKind.Variable(_, value) ->
       value.Value |> Option.map (fun v -> v.Value)
 
+  | EntityKind.List(ents) ->
+      evaluateExpr (List.map (getValue ctx) ents) (fun elements ->
+        ArrayExpression(elements, None)) |> Some
+      
   | EntityKind.ArgumentList _
   | EntityKind.NamedParam _ 
   | EntityKind.NamedMember _ ->

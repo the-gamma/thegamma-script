@@ -165,7 +165,7 @@ let findPreview trigger globals (ent:Entity) =
       match res with
       | Some p ->
           Log.trace("live", "Found preview value: %O", p)
-          let mutable node = h?div ["class"=>"placeholder"] [text "Loading preview..."]
+          let mutable node = h?div ["class" => "placeholder"] [text "Loading preview..."]
           let mutable returned = false
           async { let! nd = table<int, int>.create(unbox<Series.series<string, obj>> p).render()
                   if returned then trigger (CustomEvent(UpdatePreview nd))
@@ -175,9 +175,9 @@ let findPreview trigger globals (ent:Entity) =
           Log.trace("live", "After evaluation started: %O", node)
           node
       | _ -> 
-          text "preview could not be evaluated"
+          h?div [ "class" => "placeholder" ] [ text "Preview could not be evaluated" ]
   | _ ->
-      text "Does not have preview"
+      h?div [ "class" => "placeholder" ] [ text "This block does not have a preview" ]
 
 let updateBody trigger state = 
   match commandAtLocation state.Location state.Program with

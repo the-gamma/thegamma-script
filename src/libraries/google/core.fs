@@ -22,8 +22,32 @@ type ChartData =
 
 type Chart = interface end
 
-[<ReflectedDefinition>]
+module LazyCharting = 
+  let chartsToDraw = ResizeArray<_>()
+  let mutable googleLoaded = false
+
+  let drawChartOnLoad f = 
+    if googleLoaded then f()
+    else chartsToDraw.Add(f)
+
+  [<Emit("""
+    google.load('visualization', '1', { 'packages': ['corechart'], callback: function() { $0(); } });
+  """)>]
+  let initGoogle (f:unit -> unit) : unit = failwith "JS"
+
+  do initGoogle (fun () ->
+    googleLoaded <- true
+    for f in chartsToDraw do f() )
+
+  [<Emit("""
+    var ctor = eval("(function(a) { return new google.visualization." + $0.typeName + " (a); })");
+    var ch = ctor(document.getElementById($2));
+    if ($0.options.height == undefined) $0.options.height = 400;
+    ch.draw($1, $0.options);""")>]
+  let drawChart (chart:#Chart) (data:GoogleCharts.DataTable) (id:string) : unit = failwith "JS"
+
 module Helpers =
+
   [<Emit("undefined")>]
   let undefined<'T>() : 'T = failwith "!"
 
@@ -47,15 +71,12 @@ module Helpers =
     | _ when isNull o -> undefined<_>()
     | _ -> getProperty o prop
 
-  [<Emit("drawChart($0);")>]
-  let drawChart (f:(obj[] -> unit) -> unit) : unit = failwith "!"
-
   let showChart (chart:#Chart) (outputId:string) =
-    drawChart (fun cont ->
+    LazyCharting.drawChartOnLoad(fun () ->
       async {
         try
           let! dt = (getProperty<ChartData> chart "data").data
-          cont [| box chart; box dt; box outputId |]
+          LazyCharting.drawChart chart dt outputId 
         with e ->
           Log.error("google", "Error when getting data or rendering chart: %O", e) }
         |> Async.StartImmediate)

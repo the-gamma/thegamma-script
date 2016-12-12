@@ -169,7 +169,7 @@ and typeCheckEntity ctx (e:Entity) =
         let elty = getType ctx a
         if not (typesEqual typ elty) then
           Errors.TypeChecker.listElementTypeDoesNotMatch typ elty |> addError ctx a
-      Type.List typ
+      Type.App(Type.Forall(["a"], Type.List (Type.Parameter "a")), [typ])
 
   | EntityKind.Binding(name, { Kind = EntityKind.CallSite(inst, methName, parSpec) }) ->
       // Binding node is used to resolve type of a lambda function variable. 

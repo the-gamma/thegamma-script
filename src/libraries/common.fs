@@ -33,7 +33,7 @@ let consoleLog (args:obj[]) : unit =
       charIndex <- charIndex + 1
   printfn "%s" res
 
-[<Emit("logEvent($0, $1, $2, $3)")>]
+[<Emit("if (typeof logEvent != 'undefined') logEvent($0, $1, $2, $3)")>]
 let logEvent (category:string) (evt:string) (article:string) (data:obj) : unit = failwith "JS only"
 
 [<Emit("typeof window == 'undefined'")>]
@@ -46,8 +46,8 @@ let isLocalHost() =
 
 let mutable enabledCategories = 
   if not (isLocalHost ()) then set []
-  //else set [ "API"; "LIVE"; "SYSTEM"; "PARSING";"BINDER"; "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "PROVIDERS"; "SERVICE"; "CODEGEN"; "INTERPRETER"; "RUNTIME" ]
-  else set [] 
+  else set [ "API"; "LIVE"; "SYSTEM"; "PARSING";"BINDER"; "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "PROVIDERS"; "SERVICE"; "CODEGEN"; "INTERPRETER"; "RUNTIME" ]
+  //else set [] 
 type Log =
   static member setEnabled(cats) = enabledCategories <- cats
 

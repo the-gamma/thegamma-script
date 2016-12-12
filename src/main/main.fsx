@@ -18,38 +18,9 @@ open TheGamma.Live.Common
 
 module FsOption = Microsoft.FSharp.Core.Option
 
-//Fable.Import.Node.require.Invoke("core-js") |> ignore
-
 // ------------------------------------------------------------------------------------------------
 // Global provided types
 // ------------------------------------------------------------------------------------------------
-(*
-TypeProviders.RestProvider.provideRestType lookupNamed 
-        "olympics1" (services + "olympics") ""
-      TypeProviders.RestProvider.provideRestType lookupNamed 
-        "olympics3" (services + "pivot") ("source=" + services + "olympics")
-      TypeProviders.RestProvider.provideRestType lookupNamed 
-        "smlouvy1" (services + "smlouvy") ""
-      TypeProviders.RestProvider.provideRestType lookupNamed 
-        "smlouvy2" (services + "pivot") ("source=" + services + "smlouvy")
-      TypeProviders.RestProvider.provideRestType lookupNamed 
-        "adventure" (services + "adventure") ""
-      TypeProviders.RestProvider.provideRestType lookupNamed 
-        "world" (services + "worldbank") ""
-      
-      TypeProviders.Pivot.providePivotType (services + "pdata/olympics") "olympics" lookupNamed
-        [ "Games", PrimitiveType.String; "Year", PrimitiveType.Number;  "Sport", PrimitiveType.String; "Discipline", PrimitiveType.String 
-          "Athlete", PrimitiveType.String; "Team", PrimitiveType.String; "Gender", PrimitiveType.String; "Event", PrimitiveType.String 
-          "Medal", PrimitiveType.String; "Gold", PrimitiveType.Number; "Silver", PrimitiveType.Number; "Bronze", PrimitiveType.Number ]
-      
-      TypeProviders.Pivot.providePivotType (services + "pdata/smlouvy") "smlouvy" lookupNamed
-        [ "Uzavřeno", PrimitiveType.String; "Publikováno", PrimitiveType.String; "Hodnota", PrimitiveType.Number
-          "Chybí hodnota", PrimitiveType.String; "Subjekt", PrimitiveType.String; "Útvar", PrimitiveType.String
-          "Schválil", PrimitiveType.String; "Předmět", PrimitiveType.String; "Odkaz", PrimitiveType.String
-          "Platnost", PrimitiveType.String; "Příjemci", PrimitiveType.String; "Příjemci (IČO)", PrimitiveType.String ]            
-*)
-
-// TypeProviders.FSharpProvider.provideFSharpTypes lookupNamed ("/ext/libraries.json?" + string System.DateTime.Now.Ticks)     
 
 let buildGlobalsTable provideTypes = Async.StartAsNamedFuture "buildGlobalsTable" <| async {
   // We need to pass the lookup function to the code that provides types
@@ -91,297 +62,9 @@ let buildGlobalsTable provideTypes = Async.StartAsNamedFuture "buildGlobalsTable
     | _ -> None)
   return globalEntities } 
 
-
-(*
-let services = 
-  if isLocalHost() then "http://127.0.0.1:10042/"
-  else "http://thegamma-services.azurewebsites.net/"
-
-type ProvidedTypes = 
-  { LookupNamed : string -> Type list -> Type
-    Globals : list<string * Metadata list * Babel.Expression * Type> }
-    
-let types = async {
-  let mutable named = Map.empty
-  let lookupNamed n tyargs = 
-    match named.TryFind(n) with
-    | Some(r, tya) -> 
-        if List.length tya <> List.length tyargs then 
-          Log.error("Named type '%s' has mismatching length of type arguments", n)
-          failwith (sprintf "Named type '%s' has mismatching length of type arguments" n)
-        if tya.Length > 0 then 
-          Type.App(r, tyargs)
-        else r 
-    | None -> 
-        Log.error("Could not find named type '%s'", n)
-        failwith (sprintf "Could not find named type '%s'" n)
-
-  let restTys = 
-    [ TypeProviders.RestProvider.provideRestType lookupNamed 
-        "olympics1" (services + "olympics") ""
-      TypeProviders.RestProvider.provideRestType lookupNamed 
-        "olympics3" (services + "pivot") ("source=" + services + "olympics")
-      TypeProviders.RestProvider.provideRestType lookupNamed 
-        "smlouvy1" (services + "smlouvy") ""
-      TypeProviders.RestProvider.provideRestType lookupNamed 
-        "smlouvy2" (services + "pivot") ("source=" + services + "smlouvy")
-      TypeProviders.RestProvider.provideRestType lookupNamed 
-        "adventure" (services + "adventure") ""
-      TypeProviders.RestProvider.provideRestType lookupNamed 
-        "world" (services + "worldbank") ""
-      
-      TypeProviders.Pivot.providePivotType (services + "pdata/olympics") "olympics" lookupNamed
-        [ "Games", PrimitiveType.String; "Year", PrimitiveType.Number;  "Sport", PrimitiveType.String; "Discipline", PrimitiveType.String 
-          "Athlete", PrimitiveType.String; "Team", PrimitiveType.String; "Gender", PrimitiveType.String; "Event", PrimitiveType.String 
-          "Medal", PrimitiveType.String; "Gold", PrimitiveType.Number; "Silver", PrimitiveType.Number; "Bronze", PrimitiveType.Number ]
-      
-      TypeProviders.Pivot.providePivotType (services + "pdata/smlouvy") "smlouvy" lookupNamed
-        [ "Uzavřeno", PrimitiveType.String; "Publikováno", PrimitiveType.String; "Hodnota", PrimitiveType.Number
-          "Chybí hodnota", PrimitiveType.String; "Subjekt", PrimitiveType.String; "Útvar", PrimitiveType.String
-          "Schválil", PrimitiveType.String; "Předmět", PrimitiveType.String; "Odkaz", PrimitiveType.String
-          "Platnost", PrimitiveType.String; "Příjemci", PrimitiveType.String; "Příjemci (IČO)", PrimitiveType.String ]            
-
-      // TODO: some more types 
-      TypeProviders.NamedType("value", ["a"], Type.Any)
-      TypeProviders.NamedType("object", [], Type.Any)
-      TypeProviders.NamedType("seq", ["a"], Type.Any) 
-      TypeProviders.NamedType("async", ["a"], Type.Any) ]
-
-  let! fsTys = TypeProviders.FSharpProvider.provideFSharpTypes lookupNamed ("/ext/libraries.json?" + string System.DateTime.Now.Ticks)     
-  let allTys = restTys @ fsTys
-
-  named <- 
-    allTys 
-    |> Seq.choose (function TypeProviders.NamedType(s, tya, t) -> Some(s, (t, tya)) | _ -> None)
-    |> Map.ofSeq
-
-  let globals = 
-    allTys 
-    |> List.choose (function TypeProviders.GlobalValue(s, m, e, t) -> Some(s, m, e, t) | _ -> None)
-  
-  return { Globals = globals; LookupNamed = lookupNamed } } |> Async.StartAsNamedFuture "types"
-
-let globalTypes = async { 
-  let! ty = types |> Async.AwaitFuture
-  Log.trace("typechecker", "Global values: %O", Array.ofList ty.Globals)
-  return ty.Globals |> List.map (fun (n, m, e, t) -> Interpreter.globalEntity n m t (Some e)) } |> Async.StartAsNamedFuture "global types"
-
-let globalExprs = async { 
-  let! ty = types |> Async.AwaitFuture
-  return ty.Globals |> List.map (fun (n, _, e, _) -> n, e) |> Map.ofList } |> Async.StartAsNamedFuture "global exps"
-
 // ------------------------------------------------------------------------------------------------
-// HTML helpers
+// JavaScript API
 // ------------------------------------------------------------------------------------------------
-
-let findElements f (el:Element) =
-  let rec loop acc (el:Node) = 
-    if el = null then acc
-    else
-      let acc = 
-        if el.nodeType = 1.0 && f (el :?> Element) then (el :?> Element)::acc
-        else acc
-      loop (loop acc el.firstChild) el.nextSibling
-  loop [] el.firstChild
-
-let tryFindChildElement f (el:Element) = 
-  let rec loop (el:Node) = 
-    if el = null then None
-    elif el.nodeType = 1.0 && f (el :?> HTMLElement) then Some (el :?> HTMLElement)
-    else 
-      match loop el.firstChild with
-      | None -> loop el.nextSibling
-      | res -> res  
-  loop el.firstChild 
-
-let findChildElement f e = tryFindChildElement f e |> FsOption.get
-
-let withClass cls (el:Element) = el.classList.contains cls
-
-
-// ------------------------------------------------------------------------------------------------
-// Putting everything togeter
-// ------------------------------------------------------------------------------------------------
-
-
-[<Emit("setRunner($0, $1)")>]
-let setRunner (article:string) (f:unit -> unit) = failwith "JS"
-
-[<Emit("shareSnippet($0, $1)")>]
-let shareSnippet (snippet:string) (compiled:string) = failwith "JS"
-
-[<Emit("cannotShareSnippet()")>]
-let cannotShareSnippet () = failwith "JS"
-
-
-let renderErrors article el (source, errors) = 
-  if not (Seq.isEmpty errors) then
-    Log.event("compiler", "errors", article, 
-      JsInterop.createObj ["source", box source; "errors", box [| for e in errors -> e.Number |] ])
-  h?ul["class" => "error"] 
-    [ for e in errors |> Seq.sortBy (fun e -> e.Range.Start) -> 
-        h?li [] [
-          h?span ["class" => "err"] [ text (sprintf "error %d" e.Number) ]
-          text " "
-          h?span ["class" => "loc"] [ text (sprintf "at line %d col %d" e.Range.Start.Line e.Range.Start.Column) ]
-          text (": " + e.Message) ] ]
-  |> renderTo el
-
-
-let previews = 
-  [ Live.Pivot.preview |> unbox<LivePreview<CustomLiveState, CustomLiveEvent>> 
-    Live.Showable.preview |> unbox<LivePreview<CustomLiveState, CustomLiveEvent>> ]
-
-let setupEditor (parent:HTMLElement) =
-  let source = (findChildElement (withClass "ia-source") parent).innerText.Trim()
-  let compiled = tryFindChildElement (withClass "ia-compiled") parent |> FsOption.map (fun el -> el.innerText.Trim())
-  let outputId = (findChildElement (withClass "ia-output") parent).id
-    
-  let runBtn = findChildElement (withClass "ia-run") parent
-  let shareBtn = findChildElement (withClass "ia-share") parent
-  let showCodeBtn = findChildElement (withClass "ia-show-source") parent
-  let showOptionsBtn = tryFindChildElement (withClass "ia-show-options") parent
-  
-  let editorEl = findChildElement (withClass "ia-editor") parent
-  let monacoEl = findChildElement (withClass "ia-monaco") parent
-  let errorsEl = findChildElement (withClass "ia-errors") parent
-  let optionsEl = findChildElement (withClass "ia-options") parent
-  
-  let article = parent.dataset.["article"]
-
-  let checkingService = CheckingService(article, globalTypes)
-  let editorService = EditorService(article, checkingService.TypeCheck, 2000)
-  checkingService.ErrorsReported.Add (renderErrors article errorsEl)
-
-  let run text = async {
-    Log.event("compiler", "run", article, text)
-    let! code = async {
-      match compiled with
-      | Some compiled when text = source -> return compiled
-      | _ ->
-        let! _, _, prog = checkingService.TypeCheck(text)
-        let! newBody = prog.Body.Node |> Async.map (callShowMethod outputId)
-        let prog = { prog with Body = { prog.Body with Node = newBody } }
-        return! CodeGenerator.compileAndRun globalExprs text prog }
-
-    // Get fable to reference everything
-    let s = TheGamma.Series.series<int, int>.create(async { return [||] }, "", "", "") 
-    TheGamma.TypeProvidersRuntime.RuntimeContext("lol", "", "troll") |> ignore
-    TypeProvidersRuntime.trimLeft |> ignore
-    TheGamma.GoogleCharts.chart.bar |> ignore
-    TheGamma.table<int, int>.create(s) |> ignore
-    TheGamma.Maps.timeline<int, int>.create(s) |> ignore
-    TheGamma.Series.series<int, int>.values([| 1 |]) |> ignore
-    eval code }
-
-  setRunner article (fun () -> 
-    run source |> Async.StartImmediate)
-
-  let mutable optionsVisible = false
-  let mutable editorVisible = false
-
-  let ed = Lazy.Create(fun () ->   
-    let ed = Monaco.createMonacoEditor monacoEl.id source (fun opts ->
-      opts.fontFamily <- Some "Inconsolata"
-      opts.fontSize <- Some 15.0
-      opts.lineHeight <- Some 20.0 )
-
-    let previewService = PreviewService(checkingService, globalTypes, ed, previews)
-
-    let resizeEditor (text:string) =
-      let dim = JsInterop.createEmpty<monaco.editor.IDimension>
-      dim.width <- parent.clientWidth - 40.0
-      dim.height <- max 100.0 (20.0 + float (text.Split('\n').Length) * 20.0 + previewService.ZoneHeight)
-      ed.layout(dim)
-      monacoEl.style.height <- string dim.height + "px" 
-
-    ed.getModel().onDidChangeContent(fun _ ->
-      let text = ed.getModel().getValue(monaco.editor.EndOfLinePreference.LF, false)
-      if optionsVisible then
-        editorService.UpdateSource(text) 
-      resizeEditor text) |> ignore
-     
-    previewService.ZoneSizeChanged.Add(fun _ ->
-      let text = ed.getModel().getValue(monaco.editor.EndOfLinePreference.LF, false)
-      resizeEditor text )
-    
-    resizeEditor source
-    ed )
-  
-  let getText() = 
-    if not ed.IsValueCreated then source
-    else ed.Value.getModel().getValue(monaco.editor.EndOfLinePreference.LF, false)
-
-  let setText (edit:string) membr t = 
-    Log.event("options", "set-text", article, JsInterop.createObj ["edit", box edit; "member", box membr ])
-    ed.Value.getModel().setValue(t)
-    if showOptionsBtn.IsSome && optionsVisible then
-      editorService.UpdateSource(t, true)
-    run(t) |> Async.StartImmediate
-
-  let showOrHideActions () =
-    let vis = if optionsVisible || editorVisible then "inline" else "none"
-    let modf = getText() <> source
-    runBtn.style.display <- vis
-    shareBtn.style.display <- if modf then "inline" else vis
-
-  showOptionsBtn |> FsOption.iter (fun btn -> 
-    editorService.EditorsUpdated.Add (fun eds ->
-      eds
-      |> List.sortBy (fun ed -> ed.Range.Start)
-      |> List.map (Editors.renderEditor checkingService.IsWellTyped setText (getText())) 
-      |> h?div ["class" => "ia-editor-panel"]
-      |> renderTo optionsEl )
-  
-    btn.onclick <- fun _ ->
-      optionsVisible <- not optionsVisible
-      showOrHideActions()
-      optionsEl.style.display <- if optionsVisible then "block" else "none"
-      Log.event("gui", "options", article, box optionsVisible)
-      if optionsVisible then editorService.UpdateSource(getText())
-      box () )
-
-  let switchEditor () =
-    editorVisible <- not editorVisible
-    showOrHideActions()
-    editorEl.style.display <- if editorVisible then "block" else "none"
-    Log.event("gui", "editor", article, editorVisible)
-    if editorVisible then 
-      ed.Force() |> ignore
-      editorService.UpdateSource(getText()) 
-    
-  showCodeBtn.onclick <- fun _ -> switchEditor(); box()
-  if source.Contains("empty.create") then switchEditor()
-
-  shareBtn.onclick <- fun e -> 
-    let text = getText()
-    Log.event("gui", "share", article, text)
-    async { 
-      let! ok, _, prog = checkingService.TypeCheck(text)
-      let! newBody = prog.Body.Node |> Async.map (callShowMethod "output-id-placeholder")
-      let prog = { prog with Body = { prog.Body with Node = newBody } }
-      let! compiled = CodeGenerator.compileAndRun globalExprs text prog         
-      if not ok then cannotShareSnippet()
-      else shareSnippet text compiled } |> Async.StartImmediate
-    box ()
-
-  runBtn.onclick <- fun e -> 
-    Log.event("gui", "run", article, "click")
-    getText() |> run |> Async.StartImmediate |> box
-
-  ed, checkingService
-
-let servicesLookup = ResizeArray<Lazy<monaco.editor.ICodeEditor> * _>()
-
-Monaco.setupMonacoServices(fun name ->
-  servicesLookup |> Seq.pick (fun (ed, svc) ->
-    if ed.IsValueCreated && ed.Value.getModel().uri.toString() = name then Some(svc)
-    else None )
-)
-
-for el in findElements (withClass "ia-figure") document.body do
-  servicesLookup.Add(setupEditor (el :?> HTMLElement))
-*)
 
 type TheGammaProviders = 
   { globals : Future<Entity list> }
@@ -431,31 +114,6 @@ let evaluate ctx code outputId = async {
   TheGamma.Series.series<int, int>.values([| 1 |]) |> ignore
   return eval code }
 
-(*
-TypeProviders.RestProvider.provideRestType lookupNamed 
-        "olympics1" (services + "olympics") ""
-      TypeProviders.RestProvider.provideRestType lookupNamed 
-        "olympics3" (services + "pivot") ("source=" + services + "olympics")
-      TypeProviders.RestProvider.provideRestType lookupNamed 
-        "smlouvy1" (services + "smlouvy") ""
-      TypeProviders.RestProvider.provideRestType lookupNamed 
-        "smlouvy2" (services + "pivot") ("source=" + services + "smlouvy")
-      TypeProviders.RestProvider.provideRestType lookupNamed 
-        "adventure" (services + "adventure") ""
-      TypeProviders.RestProvider.provideRestType lookupNamed 
-        "world" (services + "worldbank") ""
-      
-      TypeProviders.Pivot.providePivotType (services + "pdata/olympics") "olympics" lookupNamed
-        [ "Games", PrimitiveType.String; "Year", PrimitiveType.Number;  "Sport", PrimitiveType.String; "Discipline", PrimitiveType.String 
-          "Athlete", PrimitiveType.String; "Team", PrimitiveType.String; "Gender", PrimitiveType.String; "Event", PrimitiveType.String 
-          "Medal", PrimitiveType.String; "Gold", PrimitiveType.Number; "Silver", PrimitiveType.Number; "Bronze", PrimitiveType.Number ]
-      
-      TypeProviders.Pivot.providePivotType (services + "pdata/smlouvy") "smlouvy" lookupNamed
-        [ "Uzavřeno", PrimitiveType.String; "Publikováno", PrimitiveType.String; "Hodnota", PrimitiveType.Number
-          "Chybí hodnota", PrimitiveType.String; "Subjekt", PrimitiveType.String; "Útvar", PrimitiveType.String
-          "Schválil", PrimitiveType.String; "Předmět", PrimitiveType.String; "Odkaz", PrimitiveType.String
-          "Platnost", PrimitiveType.String; "Příjemci", PrimitiveType.String; "Příjemci (IČO)", PrimitiveType.String ]            
-*)
 type provider = string -> (string -> Type list -> Type) -> Async<list<ProvidedType>>
 
 let previews = 
@@ -469,8 +127,20 @@ type editorOptions =
     autoHeight : bool option
     monacoOptions : (monaco.editor.IEditorConstructionOptions -> unit) option }
 
+type error = 
+  { number : int
+    message : string
+    startLine : int
+    startColumn : int
+    endLine : int
+    endColumn : int }
+
 let defaultEditorOptions = 
   { width = None; height = None; maxHeight = None; autoHeight = None; monacoOptions = None }
+
+type editor(ed:monaco.editor.ICodeEditor) = 
+  member x.getValue() = 
+    ed.getModel().getValue(monaco.editor.EndOfLinePreference.LF, false)
 
 type gamma(ctx:TheGammaContext) =
   static member createContext(providers:TheGammaProviders) =
@@ -484,6 +154,16 @@ type gamma(ctx:TheGammaContext) =
       with e ->
         Log.exn("api", "Evaluating code '%O' failed with error '%O'.", code, e) }
     |> Async.StartImmediate
+
+  member x.errorsReported(f) = 
+    ctx.checkingService.ErrorsReported.Add(fun (source, errors) ->
+      errors 
+      |> Array.sortBy (fun e -> e.Range.Start)
+      |> Array.map (fun e -> 
+          { number = e.Number; message = e.Message; 
+            startLine = e.Range.Start.Line; startColumn = e.Range.Start.Column;
+            endLine = e.Range.End.Line; endColumn = e.Range.End.Column }) 
+      |> f )
 
   member x.createEditor(id, source, options) =
 
@@ -527,6 +207,7 @@ type gamma(ctx:TheGammaContext) =
       previewService.ZoneSizeChanged.Add(fun _ -> autosizeEditor ())
       autosizeEditor ()
 
+    editor(ed)
   
 type providers =
   static member createProviders(providers) =
@@ -546,14 +227,15 @@ type providers =
     (fun _ lookup ->
       TypeProviders.FSharpProvider.provideFSharpTypes lookup url)
 
-  static member pivot(url, members) : provider = 
-    let members = JsHelpers.properties(members) |> Array.map (fun kv -> 
-      let typ = 
-        match unbox kv.value with
-        | "string" -> PrimitiveType.String
-        | "bool" -> PrimitiveType.Bool
-        | "number" -> PrimitiveType.Number
-        | s -> failwith (sprintf "The property '%s' has invalid type '%s'. Only 'string', 'number' and 'bool' are supported." kv.key s)
-      kv.key, typ)
+  static member pivot(url) : provider = 
     (fun name lookup -> async {
+      let! membersJson = Http.Request("GET", Pivot.concatUrl url "metadata")
+      let members = JsHelpers.properties(jsonParse<obj> membersJson) |> Array.map (fun kv -> 
+        let typ = 
+          match unbox kv.value with
+          | "string" -> PrimitiveType.String
+          | "bool" -> PrimitiveType.Bool
+          | "number" -> PrimitiveType.Number
+          | s -> failwith (sprintf "The property '%s' has invalid type '%s'. Only 'string', 'number' and 'bool' are supported." kv.key s)
+        kv.key, typ)
       return [TypeProviders.Pivot.providePivotType url name lookup members] })
