@@ -1,4 +1,4 @@
-﻿#if INTERACTIVEZ
+﻿#if INTERACTIVE
 #r "../../packages/NUnit/lib/net45/nunit.framework.dll"
 #I "../../src/libraries/bin/Debug"
 #I "../../src/thegamma/bin/Debug"
@@ -53,6 +53,7 @@ let check (code:string) cond vars =
   if not completed then failwith "Asynchronosu operation did not complete"
   let _, ent = entities.Entities |> Seq.find (snd >> cond)
   let errors = TypeChecker.collectTypeErrors prog
+  printfn "%A" errors
   ent.Type.Value,
   [ for e in errors -> e.Number, code.Substring(e.Range.Start, e.Range.End - e.Range.Start + 1) ]
 
@@ -66,6 +67,7 @@ let equal (expected:'T) (actual:'T) = Assert.AreEqual(expected, actual)
 
 /// Assert that two types are equal
 let assertType t1 (t2, _) = 
+  let t1, t2 = Types.reduceType t1, Types.reduceType t2
   equal (Ast.formatType t1) (Ast.formatType t2)
 
 /// Assert that result contains given errors
@@ -94,7 +96,7 @@ let rec testObj () = delay "testObj" (fun () ->
 let rec seriesObj () = 
   obj [
     meth "make" (forall "b" (series (par "b"))) [
-      "vals", false, list (par "b") ]
+      "vals", false, apply (par "b") (forall "x" (list (par "x"))) ]
     meth "makeTwo" (forall "b" (series (par "b"))) [
       "val1", false, par "b"
       "val2", false, par "b" ]

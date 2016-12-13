@@ -5,6 +5,7 @@
   "scripts": {
     "pretest": "fable tests",
     "test": "mocha dist/tests/thegamma-tests",
+    "justtest": "mocha dist/tests/thegamma-tests",
     "prepublish": "npm run build",
     "build": "fable --target es2015 src && fable --target commonjs src && fable --target min src && fable --target dev src",
     "watch": "fable --target dev -w src"
@@ -13,7 +14,9 @@
   "license": "MIT",
   "dependencies": {
     "babel-standalone": "^6.18.1",
-    "fable-core": "^0.7.5-alpha.11",
+    "fable-compiler": "^0.7.22",
+    "fable-core": "^0.7.15",
+    "fable-plugins-nunit": "^0.7.2",
     "monaco-editor": "^0.7.0",
     "virtual-dom": "^2.1.1"
   },

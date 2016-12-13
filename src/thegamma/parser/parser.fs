@@ -45,12 +45,20 @@ let clone ctx =
 let next ctx = 
   ctx.Position <- ctx.Position + 1
 
+/// Helper for creating diposables
+/// (workaround for https://github.com/fable-compiler/Fable/pull/602)
+type DisposableHelper(f) = 
+  interface System.IDisposable with
+    member x.Dispose() = f()
+
+let disposable f = 
+  new DisposableHelper(f) :> System.IDisposable
+
 /// Temporarilly silence all error reports (we're in wrong state anyway)
 let usingSilentMode ctx = 
   let prev = ctx.Silent
   ctx.Silent <- true
-  { new System.IDisposable with
-      member x.Dispose() = ctx.Silent <- prev }
+  disposable (fun () -> ctx.Silent <- prev )
 
 /// Report error if we are not in silent mode
 let addError ctx e = 
@@ -70,12 +78,11 @@ let usingIndent current (tok:Token) ctx =
     | _ ->
         ctx.IndentStack <- (ctx.IndentCurrent, current)::ctx.IndentStack
         true
-  { new System.IDisposable with
-      member x.Dispose() =
-        match started, ctx.IndentStack with
-        | true, t::stack -> ctx.IndentStack <- stack
-        | false, _ -> ()
-        | _ -> failwith "usingIndent: We lost item from an indentation stack" }
+  disposable (fun () ->
+    match started, ctx.IndentStack with
+    | true, t::stack -> ctx.IndentStack <- stack
+    | false, _ -> ()
+    | _ -> failwith "usingIndent: We lost item from an indentation stack" )
 
 /// In this mode, we accept toknes that are not indented at line 0 
 /// (which is useful when parsing erroneously nested top-level commands)
@@ -85,16 +92,15 @@ let usingTopLevelNesting ctx =
   match ctx.IndentStack with
   | x::xs -> ctx.IndentStack <- (0, true)::xs
   | _ -> ()
-  { new System.IDisposable with
-      member x.Dispose() = ctx.StrictlyNested <- prev }
+  disposable (fun () ->
+    ctx.StrictlyNested <- prev )
 
 /// When we are not at top-level, we can break indentation rules 
 /// (and report an error)
 let usingNonTopLevel ctx = 
   let prev = ctx.TopLevel
   ctx.TopLevel <- false
-  { new System.IDisposable with
-      member x.Dispose() = ctx.TopLevel <- prev }
+  disposable (fun () -> ctx.TopLevel <- prev)
 
 /// Set current line indent after parsing a token
 let setLineIndent ctx l = 

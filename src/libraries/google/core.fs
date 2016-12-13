@@ -31,7 +31,8 @@ module LazyCharting =
     else chartsToDraw.Add(f)
 
   [<Emit("""
-    google.load('visualization', '1', { 'packages': ['corechart'], callback: function() { $0(); } });
+    if (typeof google != "undefined")
+      google.load('visualization', '1', { 'packages': ['corechart'], callback: function() { $0(); } });
   """)>]
   let initGoogle (f:unit -> unit) : unit = failwith "JS"
 
