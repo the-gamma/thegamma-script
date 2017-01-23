@@ -16,7 +16,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{D6CA65DC
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "project", "project", "{DE272232-9989-46E8-A7C0-64E186628638}"
 	ProjectSection(SolutionItems) = preProject
-		..\build.fsx = ..\build.fsx
 		..\package.json = ..\package.json
 		..\paket.dependencies = ..\paket.dependencies
 		..\webpack.config.js = ..\webpack.config.js

@@ -141,6 +141,8 @@ let defaultEditorOptions =
 type editor(ed:monaco.editor.ICodeEditor) = 
   member x.getValue() = 
     ed.getModel().getValue(monaco.editor.EndOfLinePreference.LF, false)
+  member x.setValue(text) = 
+    ed.getModel().setValue(text)
 
 type gamma(ctx:TheGammaContext) =
   static member createContext(providers:TheGammaProviders) =
@@ -229,7 +231,7 @@ type providers =
 
   static member pivot(url) : provider = 
     (fun name lookup -> async {
-      let! membersJson = Http.Request("GET", Pivot.concatUrl url "metadata")
+      let! membersJson = Http.Request("GET", url + "?metadata")
       let members = JsHelpers.properties(jsonParse<obj> membersJson) |> Array.map (fun kv -> 
         let typ = 
           match unbox kv.value with

@@ -35,9 +35,12 @@ type Transformation =
   | GroupBy of string list * Aggregation list
   | FilterBy of (string * bool * string) list
   | Paging of Paging list
+  | Empty
+  // One of these may be the last one
+  | Metadata
   | GetSeries of string * string
   | GetTheData
-  | Empty
+  | GetRange of string
 
 type Field = 
   { Name : string 
@@ -46,31 +49,48 @@ type Field =
 module Transform = 
 
   let private formatAgg = function
-    | GroupKey -> ["key"]
-    | CountAll -> ["count-all"]
-    | CountDistinct(f) -> ["count-dist"; f]
-    | ReturnUnique(f) -> ["unique"; f]
-    | ConcatValues(f) -> ["concat-vals"; f]
-    | Sum(f) -> ["sum"; f]
-    | Mean(f) -> ["mean"; f]
+    | GroupKey -> "key"
+    | CountAll -> "count-all"
+    | CountDistinct(f) -> "count-dist " + Ast.escapeIdent f
+    | ReturnUnique(f) -> "unique " + Ast.escapeIdent f
+    | ConcatValues(f) -> "concat-vals " + Ast.escapeIdent f
+    | Sum(f) -> "sum " + Ast.escapeIdent f
+    | Mean(f) -> "mean " + Ast.escapeIdent f
 
   let toUrl transforms = 
-    [ for t in List.rev transforms ->
+    [ for t in transforms ->
         match t with
         | GetTheData -> []
-        | FilterBy(conds) -> "filter"::(List.collect (fun (f,b,v) -> [f; (if b then "eq" else "neq"); v]) conds)
-        | DropColumns(columns) -> "drop"::columns
-        | SortBy(columns) -> "sort"::(List.collect (fun (c, o) -> [c; (if o = Ascending then "asc" else "desc")]) columns)
-        | GroupBy(flds, aggs) -> "group"::((List.map (fun f -> "by-" + f) flds) @ (List.collect formatAgg aggs))
-        | Paging(ops) -> "page"::(List.collect (function Take k -> ["take"; k] | Skip k -> ["skip"; k]) ops)
-        | GetSeries(k, v) -> "series"::k::v::[]
+        | Metadata -> ["metadata", []]
+        | GetRange fld -> ["range", [fld]]
+        | FilterBy(conds) -> ["filter", (List.map (fun (f,b,v) -> f + (if b then " eq " else " neq ") + v) conds)]
+        | DropColumns(columns) -> ["drop", columns]
+        | SortBy(columns) -> ["sort", (List.map (fun (c, o) -> c + (if o = Ascending then " asc" else " desc")) columns)]
+        | GroupBy(flds, aggs) -> ["groupby", (List.map (fun fld -> "by " + Ast.escapeIdent fld) flds) @ (List.map formatAgg aggs)]
+        | Paging(ops) -> ops |> List.map (function Take k -> "take", [k] | Skip k -> "skip", [k]) 
+        | GetSeries(k, v) -> ["series", [k; v]]
         | Empty -> [] ]
-    |> List.mapi (fun i l -> if i = 0 || List.isEmpty l then l else "then"::l)
     |> List.concat
-    |> String.concat "/"
+    |> List.map (fun (op, args) -> 
+        if List.isEmpty args then op 
+        else op + "(" + String.concat "," args + ")")
+    |> String.concat "$"
 
+  (*
+  let sample = 
+    [ GroupBy(["Athlete"], [GroupKey; Sum("Gold Medals"); ConcatValues("Team")])
+      SortBy(["Gold", Descending])
+      Paging([Take "10"])
+      GetSeries("Athlete", "Gold") ]
+  
+  toUrl  sample
+  // groupby([Athlete],key,sum 'Gold Medals',concat-vals Team)$sort(Gold desc)$take(10)$series(Athlete,Gold)
+  *)
+   
   let singleTransformFields fields = function
     | Empty -> fields
+    | Metadata -> failwith "Metadata should not appear in normal queries"
+    | GetRange _ -> failwith "GetRange should not appear in normal queries"
     | GetTheData -> fields
     | SortBy _ -> fields
     | Paging _ -> fields
@@ -280,8 +300,9 @@ and handleGroupRequest ctx rest keys =
   |> makeObjectType  
 
 and handleFilterEqNeqRequest ctx rest (fld, eq) conds = async {
-  let url = concatUrl (concatUrl ctx.Root "range") (FilterBy(conds)::rest |> List.rev |> Transform.toUrl)
-  let! options = Http.Request("GET", url + "?" + fld)
+  let tfs = if List.isEmpty conds then rest else FilterBy(conds)::rest
+  let url = ctx.Root + "?" + (GetRange(fld)::tfs |> List.rev |> Transform.toUrl)
+  let! options = Http.Request("GET", url)
   let options = jsonParse<string[]> options
   return
     [ for opt in options do
@@ -335,8 +356,8 @@ and makePivotTypeImmediate ctx tfs = async {
       return handleGroupRequest ctx rest flds
   | GroupBy(flds, aggs) ->
       return handleGroupAggRequest ctx rest flds aggs 
-  | GetTheData ->
-      return failwith "makePivotTypeImmediate: Get the data shouldn't be of pivot type" }
+  | GetTheData | GetRange _ | Metadata ->
+      return failwith "makePivotTypeImmediate: GetTheData, GetRange and Metadata shouldn't be of pivot type" }
 
 and adjustForPreview tfs = 
   match tfs with
@@ -371,4 +392,4 @@ let providePivotType root name lookupNamed fields =
   let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box fields  }
   ProvidedType.GlobalValue
     ( name, [meta1; meta2],
-      NewExpression(ctx, [str (concatUrl root "data"); ArrayExpression([], None)], None), typ)
+      NewExpression(ctx, [str root; ArrayExpression([], None)], None), typ)

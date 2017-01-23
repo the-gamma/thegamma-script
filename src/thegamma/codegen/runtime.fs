@@ -39,7 +39,7 @@ type PivotContext(root, calls) =
     let url = calls |> Array.fold (fun (tfs:string) (id, vals) -> 
       if vals.Length <> 1 then failwith "PivotContext.getData: Expected one argument"
       tfs.Replace(id, string vals.[0])) tfs
-    Log.trace("runtime", "Pivot: %s", concatUrl root url)
-    let url = if isPreview then (concatUrl root url) + "?preview" else concatUrl root url
+    let url = root + "?" + url + if isPreview then "&preview" else ""
+    Log.trace("runtime", "Pivot: %s", url)
     let! res = Http.Request("GET", url)
     return jsonParse<obj> res }

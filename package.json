@@ -8,7 +8,7 @@
     "justtest": "mocha dist/tests/thegamma-tests",
     "prepublish": "npm run build",
     "build": "fable --target es2015 src && fable --target commonjs src && fable --target min src && fable --target dev src",
-    "watch": "fable --target dev -w src"
+    "watch": "fable -w --target dev src"
   },
   "author": "Tomas Petricek",
   "license": "MIT",

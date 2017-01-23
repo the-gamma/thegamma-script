@@ -218,7 +218,7 @@ type PreviewService(checker:CheckingService, globals:Future<list<Entity>>, ed:mo
           let! newHeight = waitForActualHeight 1
           Log.trace("live", "Old height: %s, New height: %s", zoneHeight, newHeight)
           if zoneHeight <> newHeight || zone.afterLineNumber <> float prev.Line then
-            zone.afterLineNumber <- float prev.Line
+            zone.afterLineNumber <-   float prev.Line
             zone.heightInPx <- Some newHeight
             zoneHeight <- newHeight
             ed.changeViewZones(fun accessor -> accessor.layoutZone(id))
