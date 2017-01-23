@@ -2,3 +2,4 @@
  * 0.0.2 - Improvements in the public API
  * 0.0.3 - Report errors, inline chart handling
  * 0.0.4 - Update pdata protocol to match thegamma.net docs
+ * 0.0.5 - Fix monaco language registration

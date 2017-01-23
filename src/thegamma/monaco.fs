@@ -129,9 +129,9 @@ let getService uri = createdEditors.[uri]
 let setupMonacoServices () = 
   let lang = JsInterop.createEmpty<languages.ILanguageExtensionPoint>
   lang.id <- "thegamma"
+  languages.Globals.register(lang)
   languages.Globals.setTokensProvider("thegamma", tokensProvider) |> ignore
   languages.Globals.registerCompletionItemProvider("thegamma", createCompletionProvider getService) |> ignore
-  languages.Globals.register(lang)
 
 let createMonacoEditor id code svc customize = 
   if createdEditors.Count = 0 then setupMonacoServices ()
