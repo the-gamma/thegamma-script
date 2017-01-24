@@ -1,6 +1,7 @@
 # The Gamma: Tools for open data-driven storytelling
 
 [![Build status](https://api.travis-ci.org/the-gamma/thegamma-script.svg)](https://travis-ci.org/the-gamma/thegamma-script)
+[![NPM version](https://img.shields.io/npm/v/thegamma-script.svg)](https://npmjs.org/package/thegamma-script)
 
 <img align="right" src="https://github.com/the-gamma/thegamma-script/raw/master/img/logo.png" alt="The Gamma logo" />
 
@@ -41,7 +42,9 @@ the transformed data and you can even modify the code using a simple user interf
 ## Documentation
 
 The full project documentation is available on [thegamma.net](http://thegamma.net) web site:
-
+ 
+ - [Contributing: Building from the source code](http://thegamma.net/contributing/)
+   explains how to build everything locally for those who want to contribute!
  - [Developers: Using The Gamma JavaScript library](http://thegamma.net/developers/) 
    discusses how to embed visualizations using The Gamma JavaScript library and how
    to create and interact with the built-in editor.
