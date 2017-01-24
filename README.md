@@ -1,18 +1,17 @@
 # The Gamma: Tools for open data-driven storytelling
 
-<img align="right" src="https://github.com/the-gamma/thegamma-script/raw/master/img/logo.png" alt="The Gamma logo" />
-
 [![Build status](https://api.travis-ci.org/the-gamma/thegamma-script.svg)](https://travis-ci.org/the-gamma/thegamma-script)
 
-The Gamma is a simple JavaScript library that lets anyone create transparent and open data 
-visualizations that are linked to the original source of data and encourages the reader to 
-explore data further and find more interesting facts in the data source.
+<img align="right" src="https://github.com/the-gamma/thegamma-script/raw/master/img/logo.png" alt="The Gamma logo" />
 
-The Gamma library implements a simple scripting language with spreadsheet-inspired tooling 
-that runs in the browser and lets users perform simple data aggregation and exploration. The
-JavaScript package lets you run scripts written in The Gamma script and it provides a rich 
-web-based editor that you can embed on your site to let anyone write and modify The Gamma
-visualizations. To see it live, [check out The Gamma sample page](http://thegamma-sample-web.azurewebsites.net/)
+The Gamma is a simple JavaScript library that lets anyone create transparent and open data 
+visualizations that are linked to the original data source and encourage the reader to 
+further explore data and find interesting facts on their own.
+
+The Gamma implements a scripting language with spreadsheet-inspired tooling 
+that runs in the browser and lets users perform simple data aggregation and exploration. 
+The package lets you run The Gamma scripts and provides a rich web-based editor that 
+you can embed on your site. To see it live, [check out The Gamma sample page](http://thegamma-sample-web.azurewebsites.net/)
 or a more elaborate [Visualization of Olympic medals](http://rio2016.thegamma.net/). For more
 information about the project and deteiled documentation, see [thegamma.net](http://thegamma.net/).
 
