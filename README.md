@@ -17,7 +17,40 @@ you can embed on your site.
 
  - [Project homepage](http://thegamma.net/) contains all you need to get started
  - [The Gamma sample web](http://thegamma-sample-web.azurewebsites.net/) shows a minimal demo ([source](https://github.com/the-gamma/thegamma-sample-web))
- - [Visualization of Olympic medals](http://rio2016.thegamma.net/) is bigger project built using The Gamma ([source](https://github.com/the-gamma/thegamma-olympics-web))
+ - [Visualization of Olympic medals](http://rio2016.thegamma.net/) is bigger sample project ([source](https://github.com/the-gamma/thegamma-olympics-web))
+ 
+## The Gamma script
+
+The core of The Gamma project is a simple scripting langauge that makes it easy to write
+code to perform data aggregation and data exploration. For example, if you want to find the
+top 8 athletes by the number of gold medals from Rio 2016, you can write:
+
+```
+olympics
+  .'filter data'.'Games is'.'Rio (2016)'.then
+  .'group data'.'by Athlete'.'sum Gold'.then
+  .'sort data'.'by Gold descending'.then
+  .'paging'.take(8)
+  .'get the data'
+```
+
+Rich tooling is available when writing code using The Gamma web-based editor and so you get
+auto-completion for available operations when typing `.`, you can see a live preview of 
+the transformed data and you can even modify the code using a simple user interface.
+
+## Documentation
+
+The full project documentation is available on [thegamma.net](http://thegamma.net) web site:
+
+ - [Developers: Using The Gamma JavaScript library](http://thegamma.net/developers/) 
+   discusses how to embed visualizations using The Gamma JavaScript library and how
+   to create and interact with the built-in editor.
+ - [Data: Providing data as a REST services](http://thegamma.net/publishing/)
+   discusses how to provide data for the visualization. This is just a matter of
+   writing a simple service that evaluates queries.
+ - [Exploring: Aggregating and visualizing data](http://thegamma.net/exploring/)
+   covers The Gamma scripting language and the tools that you and your readers can
+   use to explore and visualize data.
 
 ## Credits and license
 The Gamma is built at [The Alan Turing Institute](https://www.turing.ac.uk/) and has been 
