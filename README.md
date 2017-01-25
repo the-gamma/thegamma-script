@@ -1,7 +1,6 @@
 # The Gamma: Tools for open data-driven storytelling
 
 [![Build status](https://api.travis-ci.org/the-gamma/thegamma-script.svg)](https://travis-ci.org/the-gamma/thegamma-script)
-[![NPM version](https://img.shields.io/npm/v/thegamma-script.svg)](https://npmjs.org/package/thegamma-script)
 
 <img align="right" src="https://github.com/the-gamma/thegamma-script/raw/master/img/logo.png" alt="The Gamma logo" />
 
