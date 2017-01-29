@@ -53,7 +53,6 @@ let check (code:string) cond vars =
   if not completed then failwith "Asynchronosu operation did not complete"
   let _, ent = entities.Entities |> Seq.find (snd >> cond)
   let errors = TypeChecker.collectTypeErrors prog
-  printfn "%A" errors
   ent.Type.Value,
   [ for e in errors -> e.Number, code.Substring(e.Range.Start, e.Range.End - e.Range.Start + 1) ]
 
