@@ -555,6 +555,5 @@ let ``Ranges of identifiers in Olympic sample are correct`` =
     chart.columns([data, phelp], ["#F4C300","#3CB3EC"])
       .legend(position="none")
   """
-  //actual |> assertErrors []
-  //actual |> assertNamesMatch
-  ()
+  actual |> assertErrors []
+  actual |> assertNamesMatch
