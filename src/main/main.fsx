@@ -112,6 +112,7 @@ let evaluate ctx code outputId = async {
   TheGamma.table<int, int>.create(s) |> ignore
   TheGamma.Maps.timeline<int, int>.create(s) |> ignore
   TheGamma.Series.series<int, int>.values([| 1 |]) |> ignore
+  TheGamma.placeholder.create("") |> ignore
   return eval code }
 
 type provider = string -> (string -> Type list -> Type) -> Async<list<ProvidedType>>

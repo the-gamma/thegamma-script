@@ -169,7 +169,7 @@ let knownTypes =
         "IEqualityComparer", "object"
         "DomNode", "object"
         "table`2", "table"
-        "empty", "empty"
+        "placeholder", "placeholder"
         "timeline`2", "timeline"
         "series`2", "series"; "value`1", "value"; "options", "options" ]
     for t in recordTypes do yield t.Name, t.Name 
@@ -182,9 +182,9 @@ let e =
         yield exportType ctx ct BindingFlags.Instance
       yield { exportType ctx (asm.GetType("TheGamma.GoogleCharts.chart")) BindingFlags.Static 
                 with instance = [| "chart" |] }
-      yield { exportType ctx (asm.GetType("TheGamma.empty")) BindingFlags.Static 
-                with instance = [| "empty" |] }
-      yield exportType ctx (asm.GetType("TheGamma.empty")) BindingFlags.Instance
+      yield { exportType ctx (asm.GetType("TheGamma.placeholder")) BindingFlags.Static 
+                with instance = [| "placeholder" |] }
+      yield exportType ctx (asm.GetType("TheGamma.placeholder")) BindingFlags.Instance
       yield { exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Static 
                 with instance = [| "table" |] }
       yield exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Instance

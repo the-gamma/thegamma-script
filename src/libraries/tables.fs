@@ -114,8 +114,8 @@ type table<'k,'v> =
             dom |> renderTo (document.getElementById(outputId)) }
     |> Async.StartImmediate
 
-type empty() =
-  static member create() = empty()
+type placeholder(message:string) =
+  static member create(message:string) = placeholder(message)
   member x.show(outputId) =
-    h?div ["class" => "loading"] [ h?p [] [ text "No output produced." ] ]
+    h?div ["class" => "placeholder"] [ h?p [] [ text message ] ]
     |> renderTo (document.getElementById(outputId))
