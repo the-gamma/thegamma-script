@@ -415,14 +415,14 @@ let renderNodeList trigger nodes =
               text n.Node.Name 
             ]
             h?a ["click" =!> trigger (RemoveElement(nd.Entity.Value.Symbol))] [
-              h?i ["class" => "fa fa-times"] [] 
+              h?i ["class" => "gfa gfa-times"] [] 
             ]
           ]
       | _ -> () ]
 
 let renderContextMenu trigger = 
   h?a ["class" => "right"; "click" =!> trigger (SwitchMenu ContextualDropdownOpen) ] [
-    h?i ["class" => "fa fa-plus"] [] 
+    h?i ["class" => "gfa gfa-plus"] [] 
   ]
 
 let renderAddPropertyMenu trigger f nodes =
@@ -539,7 +539,7 @@ let renderSection triggerEvent section =
                       else setCustomValidity el "Cannot parse expression"
                     "value" => Ast.formatSingleExpression arg.Value ] []
                   h?a ["click" =!> trigger (removeOp)] [
-                    h?i ["class" => "fa fa-times"] [] 
+                    h?i ["class" => "gfa gfa-times"] [] 
                   ]
                 ]
           | _ -> ()
@@ -558,7 +558,7 @@ let renderSection triggerEvent section =
             ]
             if n.Node.Name = (snd last.Value).Node.Name then
               yield h?a ["click" =!> trigger (RemoveElement(sym))] [
-                h?i ["class" => "fa fa-times"] [] 
+                h?i ["class" => "gfa gfa-times"] [] 
               ]
           ]
         yield renderContextMenu trigger
@@ -601,12 +601,12 @@ let renderPivot triggerEvent (state:LiveState<_>) =
               text (transformName sec.Transformation) 
             ]
             h?a ["click" =!> trigger (RemoveSection(secSymbol))] [
-              h?i ["class" => "fa fa-times"] [] 
+              h?i ["class" => "gfa gfa-times"] [] 
             ]
           ]
         yield h?li ["class" => if state.State.Menus = AddDropdownOpen then "add selected" else "add"] [ 
           h?a ["click" =!> trigger (SwitchMenu AddDropdownOpen) ] [
-            h?i ["class" => "fa fa-plus"] [] 
+            h?i ["class" => "gfa gfa-plus"] [] 
           ]
         ]
       ]
@@ -629,9 +629,9 @@ let renderPivot triggerEvent (state:LiveState<_>) =
       ]
       h?div ["class" => "toolbar"] [
         yield h?span ["class"=>"navig"] [
-          h?a [] [ h?i ["click" =!> trigger (SelectChainElement -1); "class" => "fa fa-chevron-left"] [] ]
-          h?a [] [ h?i ["click" =!> trigger (SelectChainElement 0); "class" => "fa fa-circle"] [] ]
-          h?a [] [ h?i ["click" =!> trigger (SelectChainElement +1); "class" => "fa fa-chevron-right"] [] ]
+          h?a [] [ h?i ["click" =!> trigger (SelectChainElement -1); "class" => "gfa gfa-chevron-left"] [] ]
+          h?a [] [ h?i ["click" =!> trigger (SelectChainElement 0); "class" => "gfa gfa-circle"] [] ]
+          h?a [] [ h?i ["click" =!> trigger (SelectChainElement +1); "class" => "gfa gfa-chevron-right"] [] ]
         ]
         yield! renderSection triggerEvent selSec
       ]

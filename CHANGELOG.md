@@ -1,3 +1,4 @@
+ * 0.0.8 - Update Fable, remove FontAwesome dependency from pivot
  * 0.0.7 - Add empty placeholder visualization
  * 0.0.6 - Update README
  * 0.0.5 - Fix monaco language registration
