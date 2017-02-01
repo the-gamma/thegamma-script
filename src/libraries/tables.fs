@@ -64,7 +64,7 @@ type table<'k,'v> =
       ]
 
     let makeTable showKey k header body = 
-      h?table ["class" => "table table-striped"] [
+      h?table ["class" => "thegamma-table"] [
         if not (String.IsNullOrWhiteSpace t.data.seriesName) then
           yield h?caption [] [ text t.data.seriesName ]
         yield h?thead [] [ row showKey "th" k header ]
