@@ -32,7 +32,7 @@ module LazyCharting =
 
   [<Emit("""
     if (typeof google != "undefined")
-      google.load('visualization', '1', { 'packages': ['corechart'], callback: function() { $0(); } });
+      google.load('visualization', '1', { 'packages': ['corechart'], 'callback': function() { $0(); } });
   """)>]
   let initGoogle (f:unit -> unit) : unit = failwith "JS"
 

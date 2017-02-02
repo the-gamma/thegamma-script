@@ -46,8 +46,8 @@ let isLocalHost() =
 
 let mutable enabledCategories = 
   if not (isLocalHost ()) then set []
-  //else set [ "RUNTIME"; "API"; "LIVE"; "SYSTEM"; "PARSING";"BINDER"; "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "PROVIDERS"; "SERVICE"; "CODEGEN"; "INTERPRETER"; "RUNTIME" ]
-  else set [] 
+  else set [ "RUNTIME"; "API"; "LIVE"; "SYSTEM"; "PARSING";"BINDER"; "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "PROVIDERS"; "SERVICE"; "CODEGEN"; "INTERPRETER"; "RUNTIME" ]
+  //else set [] 
 type Log =
   static member setEnabled(cats) = enabledCategories <- cats
 

@@ -1,3 +1,4 @@
+ * 0.0.10 - Fix callback for Google Charts loading (IE)
  * 0.0.9 - Remove Bootstrap table dependency
  * 0.0.8 - Update Fable, remove FontAwesome dependency from pivot
  * 0.0.7 - Add empty placeholder visualization
