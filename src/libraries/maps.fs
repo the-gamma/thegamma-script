@@ -149,6 +149,114 @@ type math =
   static member sub(f1:float, f2:float) = f1 - f2
   static member div(f1:float, f2:float) = f1 / f2
 
+module YouDrawHelpers = 
+  type keyvalue = 
+    { key : obj 
+      value : obj }
+
+  // Adapted from: https://bl.ocks.org/1wheel/07d9040c3422dac16bd5be741433ff1e
+  // (from the awesome work https://www.nytimes.com/interactive/2017/01/15/us/politics/you-draw-obama-legacy.html)
+  [<Emit("""
+    function youDrawIt(id, data, clipx, loy, hiy, eclr, dclr) {
+  var clamp = function(a, b, c){ return Math.max(a, Math.min(b, c)) }
+  var f = d3.f
+  var sel = d3.select('#' + id).html('')
+  var c = d3.conventions({
+    parentSel: sel, 
+    totalWidth: sel.node().offsetWidth, 
+    height: 400, 
+    margin: {left: 50, right: 50, top: 30, bottom: 30}
+  })
+  c.svg.append('rect').at({width: c.width, height: c.height, opacity: 0})  
+  
+  var lox = Number.MAX_VALUE;
+  var hix = Number.MIN_VALUE;
+  var cnext = Number.MAX_VALUE;
+  data.forEach(function(kv) { 
+    if (kv.key > clipx) cnext = Math.min(cnext, kv.key);
+    lox = Math.min(lox, kv.key); hix = Math.max(hix, kv.key); });
+  c.x.domain([lox, hix]);
+  c.y.domain([loy, hiy]);
+  c.xAxis.ticks(4).tickFormat(f())
+  c.yAxis.ticks(5).tickFormat(f())
+  c.drawAxis()
+
+  var area = d3.area().x(f('key', c.x)).y0(f('value', c.y)).y1(c.height)
+  var line = d3.area().x(f('key', c.x)).y(f('value', c.y))
+
+  var clipRect = c.svg.append('clipPath#clip').append('rect')
+    .at({width: c.x(clipx) - 2, height: c.height});
+    var correctSel = c.svg.append('g').attr('clip-path', 'url(#clip)');
+
+  correctSel.append('path.area').at({d: area(data)})
+  correctSel.append('path.line').at({d: line(data)})
+  correctSel.append('path.line').attr("stroke", eclr).attr("stroke-width", 3).at({d: line(data)})
+  var yourDataSel = c.svg.append('path.your-line').attr("stroke", dclr).attr("stroke-width", 3).attr("stroke-dasharray", "5 5")
+
+  var yourData = data
+    .map(function(d){ return {key: d.key, value: d.value, defined: 0} })
+    .filter(function(d){
+      if (d.key == clipx) d.defined = true
+      return d.key >= clipx
+    });
+
+  var completed = false
+  var drag = d3.drag()
+    .on('drag', function(){
+      var pos = d3.mouse(this)
+      var key = clamp(cnext, hix, c.x.invert(pos[0]))
+      var value = clamp(0, c.y.domain()[1], c.y.invert(pos[1]))
+
+      yourData.forEach(function(d){
+        if (Math.abs(d.key - key) < .5){
+          d.value = value
+          d.defined = true
+        }
+      })
+
+      yourDataSel.at({d: line.defined(f('defined'))(yourData)})
+
+      if (!completed && d3.mean(yourData, f('defined')) == 1){
+        completed = true
+        clipRect.transition().duration(1000).attr('width', c.x(hix))
+      }
+    })
+  c.svg.call(drag)
+
+    }    
+    youDrawIt($0, $1, $2, $3, $4, $5, $6)""")>]
+  let run (id:string) (data:keyvalue[]) (clipx:int) (loy:float) (hiy:float) (eclr:string) (dclr:string) : unit = 
+    failwith "JS"
+
+type youdraw = 
+  { data : series<int, float> 
+    clip : int option
+    min : float option
+    max : float option 
+    lineColor : string option
+    drawColor : string option }
+  static member create(data:series<int, float>) =
+    { youdraw.data = data
+      clip = None; min = None; max = None 
+      lineColor = None; drawColor = None }
+  member y.setRange(min, max) = { y with min = Some min; max = Some max }
+  member y.setClip(clip) = { y with clip = Some clip }
+  member y.setColors(line, draw) = { y with lineColor = Some line; drawColor = Some draw }
+  member y.show(outputId) =   
+    async { 
+      let id = "el" + (Guid.NewGuid().ToString().Replace("-", ""))
+      h?div ["class" => "youdraw"] [ h?div ["id" => id] [] ] |> renderTo (document.getElementById outputId)
+      let! data = y.data.data |> Async.AwaitFuture 
+      do 
+        try
+          let loy = match y.min with Some v -> v | _ -> data |> Seq.map snd |> Seq.min
+          let hiy = match y.max with Some v -> v | _ -> data |> Seq.map snd |> Seq.max
+          let clipx = match y.clip with Some v -> v | _ -> fst (data.[data.Length / 2])
+          let data = data |> Array.map (fun (k, v) -> { YouDrawHelpers.keyvalue.key = k; YouDrawHelpers.keyvalue.value = v})
+          let lc, dc = defaultArg y.lineColor "#606060", defaultArg y.drawColor "#FFC700"
+          YouDrawHelpers.run id data clipx loy hiy lc dc
+        with e ->
+          Log.exn("runtime", "YouDraw failed", e) } |> Async.StartImmediate  
 
 type timeline<'k,'v> =
   { data : series<'k,'v> 
