@@ -63,6 +63,7 @@ let evaluateExpression (_stored:RuntimeValue[]) (expr:Expression) =
     TheGamma.Series.series<int, int>.values([| 1 |]) |> ignore    
     TheGamma.placeholder.create("") |> ignore
     TheGamma.Maps.youdraw.create |> ignore
+    TheGamma.Interactive.interactive.create |> ignore
 
     // The name `_stored` may appear in the generated code!
     _stored.Length |> ignore

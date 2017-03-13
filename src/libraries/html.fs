@@ -31,10 +31,10 @@ type DomAttribute =
 type DomNode = 
   | Text of string
   | Delayed of string * DomNode * (string -> unit)
-  | Element of tag:string * attributes:(string * DomAttribute)[] * children : DomNode[] * onRender : (HTMLElement -> unit) option
+  | Element of ns:string * tag:string * attributes:(string * DomAttribute)[] * children : DomNode[] * onRender : (HTMLElement -> unit) option
   | Part of func:(HTMLElement -> unit)
 
-let createTree tag args children =
+let createTree ns tag args children =
     let attrs = ResizeArray<_>()
     let props = ResizeArray<_>()
     for k, v in args do
@@ -46,7 +46,8 @@ let createTree tag args children =
       | k, Event f ->
           props.Add ("on" + k, box (fun o -> f (getProperty o "target") (event()) ))
     let attrs = JsInterop.createObj attrs
-    let props = JsInterop.createObj (Seq.append ["attributes", attrs] props)
+    let ns = if ns = null || ns = "" then [] else ["namespace", box ns]
+    let props = JsInterop.createObj (Seq.append (ns @ ["attributes", attrs]) props)
     let elem = Virtualdom.h(tag, props, children)
     elem
 
@@ -56,8 +57,8 @@ let rec renderVirtual node =
   match node with
   | Text(s) -> 
       box s
-  | Element(tag, attrs, children, None) ->
-      createTree tag attrs (Array.map renderVirtual children)
+  | Element(ns, tag, attrs, children, None) ->
+      createTree ns tag attrs (Array.map renderVirtual children)
   | Delayed(symbol, body, func) ->
       counter <- counter + 1
       let id = sprintf "delayed_%d" counter
@@ -79,7 +80,7 @@ let rec renderVirtual node =
           waitForAdded 10 node
       let h = createNew Hook ()
 
-      createTree "div" ["renderhk", Property h] [| renderVirtual body |]
+      createTree null "div" ["renderhk", Property h] [| renderVirtual body |]
   | Element _ ->
       failwith "renderVirtual: Does not support elements with after-render handlers"
   | Part _ ->
@@ -100,8 +101,10 @@ let rec render node =
       let el = document.createElement("div")
       el :> Node, (fun () -> func el)
 
-  | Element(tag, attrs, children, f) ->
-      let el = document.createElement(tag)
+  | Element(ns, tag, attrs, children, f) ->
+      let el = 
+        if ns = null || ns = "" then document.createElement(tag)
+        else document.createElementNS(ns, tag) :?> HTMLElement
       let rc = Array.map render children
       for c, _ in rc do el.appendChild(c) |> ignore
       for k, a in attrs do 
@@ -125,8 +128,9 @@ let (=>) k v = k, Attribute(v)
 let (=!>) k f = k, Event(f)
 
 
-type El() = 
-  static member (?) (_:El, n:string) = fun a b ->
+type El(ns) = 
+  member x.Namespace = ns
+  static member (?) (el:El, n:string) = fun a b ->
     let n, f = 
       if n <> "chosen" then n, None
       else "select", Some (fun el ->
@@ -136,7 +140,7 @@ type El() =
           | Event f -> on el k (fun () -> f el (event()))
           | _ -> ()
       )
-    Element(n, Array.ofList a, Array.ofList b, f)
+    Element(el.Namespace, n, Array.ofList a, Array.ofList b, f)
 
   member x.delayed sym body f =
     Delayed(sym, body, f)
@@ -159,4 +163,5 @@ type El() =
         container <- Some el
         render() )
 
-let h = El()
+let h = El(null)
+let s = El("http://www.w3.org/2000/svg")

@@ -166,10 +166,12 @@ let knownTypes =
   [ yield! 
       [ "IEnumerable`1", "seq" // wishful thinking
         "FSharpAsync`1", "async" // dtto
+        "IComparer", "object"
         "IEqualityComparer", "object"
         "DomNode", "object"
         "table`2", "table"
         "youdraw", "youdraw"
+        "interactive", "interactive"
         "placeholder", "placeholder"
         "timeline`2", "timeline"
         "series`2", "series"; "value`1", "value"; "options", "options" ]
@@ -189,6 +191,9 @@ let e =
       yield { exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Static 
                 with instance = [| "table" |] }
       yield exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Instance
+      yield exportType ctx (asm.GetType("TheGamma.Interactive.interactive")) BindingFlags.Instance 
+      yield { exportType ctx (asm.GetType("TheGamma.Interactive.interactive")) BindingFlags.Static 
+                with instance = [| "interactive" |] }
       yield exportType ctx (asm.GetType("TheGamma.Maps.youdraw")) BindingFlags.Instance 
       yield { exportType ctx (asm.GetType("TheGamma.Maps.youdraw")) BindingFlags.Static 
                 with instance = [| "youdraw" |] }
