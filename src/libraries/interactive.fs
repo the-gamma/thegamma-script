@@ -58,6 +58,7 @@ module Visualizations =
 
   type Shape<[<Measure>] 'vx, [<Measure>] 'vy> = 
     | Line of seq<continuous<'vx> * continuous<'vy>>
+    | Area of seq<continuous<'vx> * continuous<'vy>>
     | Layered of seq<Shape<'vx, 'vy>>
     | Axes of Shape<'vx, 'vy>
     | Interactive of seq<EventHandler<'vx, 'vy>> * Shape<'vx, 'vy>
@@ -71,11 +72,13 @@ module Visualizations =
 
   type ScaledShapeInner<[<Measure>] 'vx, [<Measure>] 'vy> = 
     | ScaledLine of (continuous<'vx> * continuous<'vy>)[]
+    | ScaledArea of (continuous<'vx> * continuous<'vy>)[]
     | ScaledLayered of ScaledShape<'vx, 'vy>[]
     | ScaledAxes of   
-        (continuous<'vx>[] * continuous<'vy>[]) * 
-        ((continuous<'vx>*string)[] * (continuous<'vy>*string)[]) * 
-        ScaledShape<'vx, 'vy>
+        limits : ((continuous<'vx> * continuous<'vx>) * (continuous<'vy> * continuous<'vy>)) *
+        grid : (continuous<'vx>[] * continuous<'vy>[]) * 
+        labels : ((continuous<'vx>*string)[] * (continuous<'vy>*string)[]) * 
+        shape : ScaledShape<'vx, 'vy>
     | ScaledInteractive of seq<EventHandler<'vx, 'vy>> * ScaledShape<'vx, 'vy>
 
   and ScaledShape<[<Measure>] 'vx, [<Measure>] 'vy> =
@@ -90,42 +93,65 @@ module Visualizations =
     let mag = 10. ** (floor (max (log10 lo) (log10 hi)) - 1.0)
     let decimals = max 0. (-(log10 mag))
     let alo, ahi = floor (lo / mag) * mag, ceil (hi / mag) * mag
-    let range = [| for v in alo .. mag .. ahi -> CO (unbox<float<'u>> v) |]
-    let tmag = mag * (float (range.Length / 5)) // generate ~5 text labels
-    [| for v in alo .. tmag .. ahi -> CO (unbox<float<'u>> v), toFixed v decimals |], 
-    range
+    let range = (ahi - alo) / mag
+    let tmag = mag * (floor (range / 5.)) // generate ~5 text labels
+    let gmag = mag * (floor (range / 10.)) // generate ~10 grid lines
+    (CO (unbox<float<'u>> alo), CO (unbox<float<'u>> ahi)),
+    [| for v in alo .. gmag .. ahi -> CO (unbox<float<'u>> v) |],
+    [| for v in alo .. tmag .. ahi -> CO (unbox<float<'u>> v), toFixed v decimals |]
 
   let unionScales s1 s2 =
     match s1, s2 with
     | Continuous(l1, h1), Continuous(l2, h2) -> Continuous(min l1 l2, max h1 h2)
 
+  // Replace scales in all immediately nested things that will
+  // share the same scale when combined via Layered
+  // (recursively over Interacitve & Layered with Line as leaf)
+
+  let rec replaceScales scales (Scaled(_, shape) as scaled) =
+    match shape with
+    | ScaledLine _ 
+    | ScaledArea _ -> Scaled(scales, shape)
+    | ScaledInteractive(f, shape) -> Scaled(scales, ScaledInteractive(f, replaceScales scales shape))
+    | ScaledLayered(shapes) -> Scaled(scales, ScaledLayered(Array.map (replaceScales scales) shapes))
+    | ScaledAxes _ -> scaled
+
   // From the leafs to the root, calculate the scales of
   // everything (composing sales of leafs to get scale of root)
+
+  let calculateLineOrAreaScales line = 
+    let xs = line |> Array.map fst 
+    let ys = line |> Array.map snd
+    let x0, x1 = Array.min xs, Array.max xs
+    let y0, y1 = Array.min ys, Array.max ys
+    Continuous(x0, x1), Continuous(y0, y1)
 
   let rec calculateScales<[<Measure>] 'ux, [<Measure>] 'uy> (shape:Shape<'ux, 'uy>) = 
     match shape with
     | Line line -> 
-        let line = line |> Seq.toArray
-        let xs = line |> Array.map fst 
-        let ys = line |> Array.map snd
-        let x0, x1 = Array.min xs, Array.max xs
-        let y0, y1 = Array.min ys, Array.max ys
-        let sx, sy = Continuous(x0, x1), Continuous(y0, y1)
+        let line = Seq.toArray line 
+        let sx, sy = calculateLineOrAreaScales line
         Scaled((sx, sy), ScaledLine(line))
+
+    | Area area -> 
+        let area = Seq.toArray area
+        let sx, sy = calculateLineOrAreaScales area
+        Scaled((sx, sy), ScaledArea(area))
 
     | Axes shape ->
         let scaled = calculateScales shape        
         let (Scaled((Continuous(lx, hx), Continuous(ly, hy)), _)) = scaled
-        let (rxt,rx), (ryt,ry) = generateRange lx hx, generateRange ly hy
-        let scales = Continuous(Array.head rx, Array.last rx), Continuous(Array.head ry, Array.last ry)
-        Scaled(scales, ScaledAxes((rx, ry), (rxt, ryt), scaled))
+        let (limx, gx , lblx), (limy, gy, lbly) = generateRange lx hx, generateRange ly hy
+        let scales = Continuous(limx), Continuous(limy)
+        Scaled(scales, ScaledAxes((limx, limy), (gx, gy), (lblx, lbly), scaled))
 
     | Layered shapes ->
         let shapes = shapes |> Array.ofSeq
         let scaled = shapes |> Array.map calculateScales 
         let sxs = scaled |> Array.map (fun (Scaled((sx, _), _)) -> sx)
         let sys = scaled |> Array.map (fun (Scaled((_, sy), _)) -> sy)
-        Scaled((Array.reduce unionScales sxs, Array.reduce unionScales sys), ScaledLayered scaled)
+        let scales = (Array.reduce unionScales sxs, Array.reduce unionScales sys)
+        Scaled(scales, ScaledLayered scaled) |> replaceScales scales 
 
     | Interactive(f, shape) ->
         let (Scaled(scale, shape)) = calculateScales shape
@@ -141,11 +167,13 @@ module Visualizations =
 
   type ProjectedShapeInner<[<Measure>] 'vx, [<Measure>] 'vy> = 
     | ProjectedLine of (continuous<'vx> * continuous<'vy>)[]
+    | ProjectedArea of (continuous<'vx> * continuous<'vy>)[]
     | ProjectedLayered of ProjectedShape<'vx, 'vy>[]
     | ProjectedAxes of   
-        (continuous<'vx>[] * continuous<'vy>[]) * 
-        ((continuous<'vx>*string)[] * (continuous<'vy>*string)[]) * 
-        ProjectedShape<'vx, 'vy>
+        limits : ((continuous<'vx> * continuous<'vx>) * (continuous<'vy> * continuous<'vy>)) *
+        grid : (continuous<'vx>[] * continuous<'vy>[]) * 
+        labels : ((continuous<'vx>*string)[] * (continuous<'vy>*string)[]) * 
+        shape : ProjectedShape<'vx, 'vy>
     | ProjectedInteractive of seq<EventHandler<'vx, 'vy>> * ProjectedShape<'vx, 'vy>
 
   and ProjectedShape<[<Measure>] 'vx, [<Measure>] 'vy> =
@@ -181,9 +209,12 @@ module Visualizations =
     | Scaled(scales, ScaledLine line) -> 
         Projected(projection, scales, ProjectedLine line)
 
-    | Scaled(scales, ScaledAxes(r, rg, shape)) ->
+    | Scaled(scales, ScaledArea area) -> 
+        Projected(projection, scales, ProjectedArea area)
+
+    | Scaled(scales, ScaledAxes(lim, grid, lbls, shape)) ->
         let ppad = Padding(10.0, 10.0, 40.0, 40.0, projection)
-        Projected(ppad, scales, ProjectedAxes(r, rg, calculateProjections shape ppad))
+        Projected(ppad, scales, ProjectedAxes(lim, grid, lbls, calculateProjections shape ppad))
         
     | Scaled(scales, ScaledLayered shapes) ->
         Projected(projection, scales, ProjectedLayered(shapes |> Array.map (fun s -> calculateProjections s projection)))
@@ -197,6 +228,8 @@ module Visualizations =
 
   let rec drawShape<[<Measure>] 'ux, [<Measure>] 'uy> (shape:ProjectedShape<'ux, 'uy>) = 
     let (Projected(projection, (sx, sy), shape)) = shape
+    let (Continuous(lx, hx), Continuous(ly, hy)) = sx, sy
+
     let projectCont (x, y) = 
       match project sx sy (x, y) projection with
       | (CO x), (CO y) -> x, y
@@ -209,23 +242,34 @@ module Visualizations =
           |> Array.ofList
         Path(path, "fill:transparent; stroke:rgb(0,164,0); stroke-width:1") 
 
-    | ProjectedAxes((rx, ry), (rxt, ryt), shape) ->
-        let (Continuous(lx, hx), Continuous(ly, hy)) = sx, sy
+    | ProjectedArea line -> 
+        let firstY, lastY = snd (Seq.head line), snd (Seq.last line)
+        let path = 
+          [ console.log("lx, ly", projectCont (lx, ly))
+            yield MoveTo(projectCont (lx, ly))
+            for pt in line do yield LineTo (projectCont pt) 
+            console.log("lx, lastY", projectCont (lx, lastY))
+            yield LineTo(projectCont (hx, ly))
+            yield LineTo(projectCont (lx, ly)) ]
+          |> Array.ofList
+        Path(path, "fill:rgb(128,128,128); stroke:transparent; stroke-width:0") 
+
+    | ProjectedAxes(((lox, hix), (loy, hiy)), (gridx, gridy), (lblx, lbly), shape) ->
         let offs (dx, dy) (x, y) = (x+dx, y+dy)
         Combine   
            [| yield Path(
                 [|yield MoveTo (projectCont (lx, hy)) 
                   yield LineTo (projectCont (lx, ly))
                   yield LineTo (projectCont (hx, ly)) |], "fill:transparent; stroke:rgb(0,0,0); stroke-width:2");
-              for x, xl in rxt do 
+              for x, xl in lblx do 
                 yield Text(offs (0., 10.0) (projectCont (x, ly)), xl, "alignment-baseline:hanging;text-anchor:middle;font:9pt sans-serif")
-              for y, yl in ryt do 
+              for y, yl in lbly do 
                 yield Text(offs (-10., 0.0) (projectCont (lx, y)), yl, "alignment-baseline:middle;text-anchor:end;font:9pt sans-serif")
               yield Path(
-                [|for x in rx do
+                [|for x in gridx do
                     yield MoveTo (projectCont (x, ly))
                     yield LineTo (projectCont (x, hy))
-                  for y in ry do
+                  for y in gridy do
                     yield MoveTo (projectCont (lx, y))
                     yield LineTo (projectCont (hx, y)) |], "fill:transparent; stroke:rgb(196,196,196); stroke-width:1") 
               yield drawShape shape |]     
@@ -283,23 +327,26 @@ module Visualizations =
         x > min x1 x2 && x < max x1 x2 &&
           y > min y1 y2 && y < max y1 y2 
 
-  let rec triggerEvent<[<Measure>] 'ux, [<Measure>] 'uy> (shape:ProjectedShape<'ux, 'uy>) (event:InteractiveEvent<1,1>) = 
+  let rec triggerEvent<[<Measure>] 'ux, [<Measure>] 'uy> (shape:ProjectedShape<'ux, 'uy>) (jse:Event) (event:InteractiveEvent<1,1>) = 
     let (Projected(projection, scales, shape)) = shape
     match shape with
-    | ProjectedLine _ -> ()
-    | ProjectedAxes(_, _, shape) -> triggerEvent shape event
-    | ProjectedLayered shapes -> for shape in shapes do triggerEvent shape event
+    | ProjectedLine _
+    | ProjectedArea _ -> ()
+    | ProjectedAxes(_, _, _, shape) -> triggerEvent shape jse event
+    | ProjectedLayered shapes -> for shape in shapes do triggerEvent shape jse event
     | ProjectedInteractive(handlers, shape) ->
         let localEvent = projectEvent scales projection event
         if inScales scales localEvent then 
           for handler in handlers do 
             match localEvent, handler with
-            | MouseEvent(MouseEventKind.Move, pt), MouseMove(f) -> f pt
-            | MouseEvent(MouseEventKind.Up, pt), MouseUp(f) -> f pt
-            | MouseEvent(MouseEventKind.Down, pt), MouseDown(f) -> f pt
+            | MouseEvent(MouseEventKind.Move, pt), MouseMove(f) 
+            | MouseEvent(MouseEventKind.Up, pt), MouseUp(f) 
+            | MouseEvent(MouseEventKind.Down, pt), MouseDown(f) -> 
+                jse.preventDefault()
+                f pt
             | MouseEvent(_, _), _  -> ()
 
-        triggerEvent shape event
+        triggerEvent shape jse event
 
   // ----------------------------------------------------------------------------------------------
   // EOF
@@ -329,8 +376,7 @@ module InteractiveHelpers =
   open Visualizations
 
   type YouDrawEvent = 
-    | StartDrawing
-    | EndDrawing
+    | SwitchDrawing of bool
     | Draw of float * float
 
   type YouDrawState = 
@@ -339,19 +385,28 @@ module InteractiveHelpers =
 
   let state = 
     { Drawing = false
-      Data = [| for x in 0. .. 0.1 .. 6.28 -> CO x, CO x |] }
+      Data = [| for x in 0. .. 1.2 .. 6. -> CO x, CO x |] }
 
   let handler state evt = 
-    state
+    match evt with
+    | SwitchDrawing drawing -> { state with Drawing = drawing }
+    | Draw (downX, downY) ->
+        let indexed = Array.indexed state.Data
+        let nearest, _ = indexed |> Array.minBy (fun (_, (CO x, _)) -> abs (downX - x))
+        { state with 
+            Data = indexed |> Array.map (fun (i, (x, y)) -> 
+              if i = nearest then (x, CO downY) else (x, y)) }
 
   let render trigger state = 
     let chart = 
       Axes
         (Interactive(
-          [ 
-            MouseMove(fun (CO x, CO y) -> printfn "Move: (%A,%A)" x y)
-            MouseDown(fun (CO x, CO y) -> printfn "Down: (%A,%A)" x y) ],
+          [ MouseMove(fun (CO x, CO y) -> 
+              if state.Drawing then trigger (Draw (x, y)) )
+            MouseDown(fun _ -> trigger (SwitchDrawing true) )
+            MouseUp(fun _ -> trigger (SwitchDrawing false) ) ],
           (Layered [|
+            Area [| for x in 0. .. 0.1 .. 6.28 -> CO x, CO (sin x) |]
             Line [| for x in 0. .. 0.1 .. 6.28 -> CO x, CO (cos x) |]
             Line state.Data
           |])
@@ -360,7 +415,6 @@ module InteractiveHelpers =
     let scaled = calculateScales chart
     let master = Scale((0.0, 800.0), (500.0, 0.0))
     let projected = calculateProjections scaled master
-    console.log(projected)
     let svg = drawShape projected
 
     let mouseHandler kind el (evt:Event) =
@@ -373,7 +427,8 @@ module InteractiveHelpers =
         else getParent parent.parentElement
 
       let x, y = getOffset (getParent el) (evt.pageX, evt.pageY)
-      triggerEvent projected (MouseEvent(kind, (CO x, CO y)))
+      printfn "Position: (%A, %A)" x y
+      triggerEvent projected evt (MouseEvent(kind, (CO x, CO y)))
 
     h?div ["style"=>"width:800px;height:500px"] [
       s?svg [
