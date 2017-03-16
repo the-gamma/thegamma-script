@@ -1,4 +1,4 @@
- * UNRELEASED - SVG based interactive animations
+ * 0.0.12 - SVG based interactive animations (replace You Draw It)
  * 0.0.11 - Add experimental You Draw It visualization 
  * 0.0.10 - Fix callback for Google Charts loading (IE)
  * 0.0.9 - Remove Bootstrap table dependency
