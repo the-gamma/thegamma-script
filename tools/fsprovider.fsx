@@ -171,7 +171,6 @@ let knownTypes =
         "DomNode", "object"
         "table`2", "table"
         "youdraw", "youdraw"
-        "interactive", "interactive"
         "placeholder", "placeholder"
         "timeline`2", "timeline"
         "series`2", "series"; "value`1", "value"; "options", "options" ]
@@ -191,11 +190,8 @@ let e =
       yield { exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Static 
                 with instance = [| "table" |] }
       yield exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Instance
-      yield exportType ctx (asm.GetType("TheGamma.Interactive.interactive")) BindingFlags.Instance 
-      yield { exportType ctx (asm.GetType("TheGamma.Interactive.interactive")) BindingFlags.Static 
-                with instance = [| "interactive" |] }
-      yield exportType ctx (asm.GetType("TheGamma.Maps.youdraw")) BindingFlags.Instance 
-      yield { exportType ctx (asm.GetType("TheGamma.Maps.youdraw")) BindingFlags.Static 
+      yield exportType ctx (asm.GetType("TheGamma.Interactive.youdraw")) BindingFlags.Instance 
+      yield { exportType ctx (asm.GetType("TheGamma.Interactive.youdraw")) BindingFlags.Static 
                 with instance = [| "youdraw" |] }
       yield exportType ctx (asm.GetType("TheGamma.Maps.timeline`2")) BindingFlags.Instance 
       yield { exportType ctx (asm.GetType("TheGamma.Maps.timeline`2")) BindingFlags.Static 

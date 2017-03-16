@@ -7,6 +7,55 @@ open Fable.Helpers
 module Visualizations = 
 
   // ----------------------------------------------------------------------------------------------
+  // Domain that users see
+  // ----------------------------------------------------------------------------------------------
+  
+  type Color =
+    | RGB of int * int * int
+    | HTML of string
+
+  type AlphaColor = float * Color 
+  type Width = Pixels of int
+  type GradientStop = float * AlphaColor
+
+  type FillStyle =
+    | Solid of AlphaColor
+    | LinearGradient of seq<GradientStop>
+
+  type Number =
+    | Integer of int
+    | Percentage of float
+
+  type Style = 
+    { StrokeColor : AlphaColor
+      StrokeWidth : Width
+      StrokeDashArray : seq<Number>
+      Fill : FillStyle 
+      Animation : option<int * string * (Style -> Style)>
+      Font : string }
+
+  type HorizontalAlign = Start | Center | End
+  type VerticalAlign = Baseline | Middle | Hanging
+
+  type continuous<[<Measure>] 'u> = CO of float<'u> 
+
+  type EventHandler<[<Measure>] 'vx, [<Measure>] 'vy> = 
+    | MouseMove of ((continuous<'vx> * continuous<'vy>) -> unit)
+    | MouseUp of ((continuous<'vx> * continuous<'vy>) -> unit)
+    | MouseDown of ((continuous<'vx> * continuous<'vy>) -> unit)
+    | MouseLeave of (unit -> unit)
+
+  type Shape<[<Measure>] 'vx, [<Measure>] 'vy> = 
+    | Style of (Style -> Style) * Shape<'vx, 'vy>
+    | Text of continuous<'vx> * continuous<'vy> * VerticalAlign * HorizontalAlign * string
+    | Scale of option<continuous<'vx> * continuous<'vx>> * option<continuous<'vy> * continuous<'vy>> * Shape<'vx, 'vy>
+    | Line of seq<continuous<'vx> * continuous<'vy>>
+    | Area of seq<continuous<'vx> * continuous<'vy>>
+    | Layered of seq<Shape<'vx, 'vy>>
+    | Axes of Shape<'vx, 'vy>
+    | Interactive of seq<EventHandler<'vx, 'vy>> * Shape<'vx, 'vy>
+
+  // ----------------------------------------------------------------------------------------------
   // SVG stuff
   // ----------------------------------------------------------------------------------------------
   
@@ -45,23 +94,42 @@ module Visualizations =
     | Path(p, style) ->
         yield s?path [ "d" => formatPath p; "style" => style ] [] }
 
-  // ----------------------------------------------------------------------------------------------
-  // Domain that users see
-  // ----------------------------------------------------------------------------------------------
-  
-  type continuous<[<Measure>] 'u> = CO of float<'u> 
+  let formatColor = function
+    | RGB(r,g,b) -> sprintf "rgb(%d, %d, %d)" r g b
+    | HTML(clr) -> clr
 
-  type EventHandler<[<Measure>] 'vx, [<Measure>] 'vy> = 
-    | MouseMove of ((continuous<'vx> * continuous<'vy>) -> unit)
-    | MouseUp of ((continuous<'vx> * continuous<'vy>) -> unit)
-    | MouseDown of ((continuous<'vx> * continuous<'vy>) -> unit)
+  let formatNumber = function
+    | Integer n -> string n
+    | Percentage p -> string p + "%"
 
-  type Shape<[<Measure>] 'vx, [<Measure>] 'vy> = 
-    | Line of seq<continuous<'vx> * continuous<'vy>>
-    | Area of seq<continuous<'vx> * continuous<'vy>>
-    | Layered of seq<Shape<'vx, 'vy>>
-    | Axes of Shape<'vx, 'vy>
-    | Interactive of seq<EventHandler<'vx, 'vy>> * Shape<'vx, 'vy>
+  let rec formatStyle (defs:ResizeArray<_>) style = 
+    let style, anim =
+      match style.Animation with 
+      | Some (ms, ease, anim) ->
+          let id = "anim_" + System.Guid.NewGuid().ToString().Replace("-", "")
+          let fromstyle = formatStyle defs { style with Animation = None }
+          let tostyle = formatStyle defs { anim style with Animation = None }
+          h?style [] [ text (sprintf "@keyframes %s { from { %s } to { %s } }" id fromstyle tostyle) ] |> defs.Add
+          anim style, sprintf "animation: %s %dms %s; " id ms ease
+      | None -> style, ""
+
+    anim +
+    ( "font:" + style.Font + ";" ) +
+    ( let (so, clr) = style.StrokeColor 
+      let (Pixels sw) = style.StrokeWidth
+      sprintf "stroke-opacity:%f; stroke-width:%dpx; stroke:%s; " so sw (formatColor clr) ) +
+    ( if Seq.isEmpty style.StrokeDashArray then "" 
+      else "stroke-dasharray:" + String.concat "," (Seq.map formatNumber style.StrokeDashArray) + ";" ) +
+    ( match style.Fill with
+      | LinearGradient(points) ->
+          let id = "gradient_" + System.Guid.NewGuid().ToString().Replace("-", "")
+          s?linearGradient ["id"=>id] 
+            [ for pt, (o, clr) in points ->
+                s?stop ["offset"=> string pt + "%"; "stop-color" => formatColor clr; "stop-opacity" => string o ] [] ]
+          |> defs.Add
+          sprintf "fill:url(#%s)" id
+      | Solid(fo, clr) ->
+          sprintf "fill-opacity:%f; fill:%s; " fo (formatColor clr) )
 
   // ----------------------------------------------------------------------------------------------
   // Calculating scales
@@ -71,6 +139,8 @@ module Visualizations =
     | Continuous of continuous<'v> * continuous<'v>
 
   type ScaledShapeInner<[<Measure>] 'vx, [<Measure>] 'vy> = 
+    | ScaledStyle of (Style -> Style) * ScaledShape<'vx, 'vy>
+    | ScaledText of continuous<'vx> * continuous<'vy> * VerticalAlign * HorizontalAlign * string    
     | ScaledLine of (continuous<'vx> * continuous<'vy>)[]
     | ScaledArea of (continuous<'vx> * continuous<'vy>)[]
     | ScaledLayered of ScaledShape<'vx, 'vy>[]
@@ -90,10 +160,11 @@ module Visualizations =
 
   let generateRange (CO (lo:float<'u>)) (CO (hi:float<'u>)) = 
     let lo, hi = unbox lo, unbox hi 
-    let mag = 10. ** (floor (max (log10 lo) (log10 hi)) - 1.0)
+    let mag = 10. ** round (log10 (hi - lo))
     let decimals = max 0. (-(log10 mag))
     let alo, ahi = floor (lo / mag) * mag, ceil (hi / mag) * mag
     let range = (ahi - alo) / mag
+    let mag, range = if range >= 10. then mag, range else mag/10.0, range * 10.0 // maybe floor log when calculating mag instead?
     let tmag = mag * (floor (range / 5.)) // generate ~5 text labels
     let gmag = mag * (floor (range / 10.)) // generate ~10 grid lines
     (CO (unbox<float<'u>> alo), CO (unbox<float<'u>> ahi)),
@@ -111,7 +182,9 @@ module Visualizations =
   let rec replaceScales scales (Scaled(_, shape) as scaled) =
     match shape with
     | ScaledLine _ 
+    | ScaledText _
     | ScaledArea _ -> Scaled(scales, shape)
+    | ScaledStyle(f, shape) -> Scaled(scales, ScaledStyle(f, replaceScales scales shape))
     | ScaledInteractive(f, shape) -> Scaled(scales, ScaledInteractive(f, replaceScales scales shape))
     | ScaledLayered(shapes) -> Scaled(scales, ScaledLayered(Array.map (replaceScales scales) shapes))
     | ScaledAxes _ -> scaled
@@ -128,6 +201,20 @@ module Visualizations =
 
   let rec calculateScales<[<Measure>] 'ux, [<Measure>] 'uy> (shape:Shape<'ux, 'uy>) = 
     match shape with
+    | Scale(sx, sy, shape) ->
+        let (Scaled((asx, asy), shape)) = calculateScales shape
+        let scales = 
+          (match sx with Some sx -> Continuous(sx) | _ -> asx), 
+          (match sy with Some sy -> Continuous(sy) | _ -> asy) 
+        Scaled(scales, shape) |> replaceScales scales
+
+    | Style(style, shape) ->
+        let (Scaled(scales, shape)) = calculateScales shape
+        Scaled(scales, ScaledStyle(style, Scaled(scales, shape)))
+
+    | Shape.Text(x, y, va, ha, t) ->
+        Scaled((Continuous(x, x), Continuous(y, y)), ScaledText(x, y, va, ha, t))
+
     | Line line -> 
         let line = Seq.toArray line 
         let sx, sy = calculateLineOrAreaScales line
@@ -166,6 +253,8 @@ module Visualizations =
     | Padding of float<'uy> * float<'ux> * float<'uy> * float<'ux> * Projection<'vx, 'vy, 'ux, 'uy>
 
   type ProjectedShapeInner<[<Measure>] 'vx, [<Measure>] 'vy> = 
+    | ProjectedStyle of (Style -> Style) * ProjectedShape<'vx, 'vy>
+    | ProjectedText of continuous<'vx> * continuous<'vy> * VerticalAlign * HorizontalAlign * string    
     | ProjectedLine of (continuous<'vx> * continuous<'vy>)[]
     | ProjectedArea of (continuous<'vx> * continuous<'vy>)[]
     | ProjectedLayered of ProjectedShape<'vx, 'vy>[]
@@ -206,14 +295,20 @@ module Visualizations =
 
   let rec calculateProjections<[<Measure>] 'ux, [<Measure>] 'uy> (shape:ScaledShape<'ux, 'uy>) projection = 
     match shape with
+    | Scaled(scales, ScaledStyle(style, shape)) ->
+        Projected(projection, scales, ProjectedStyle(style, calculateProjections shape projection))
+
     | Scaled(scales, ScaledLine line) -> 
         Projected(projection, scales, ProjectedLine line)
+
+    | Scaled(scales, ScaledText(x, y, va, ha, t)) -> 
+        Projected(projection, scales, ProjectedText(x, y, va, ha, t))
 
     | Scaled(scales, ScaledArea area) -> 
         Projected(projection, scales, ProjectedArea area)
 
     | Scaled(scales, ScaledAxes(lim, grid, lbls, shape)) ->
-        let ppad = Padding(10.0, 10.0, 40.0, 40.0, projection)
+        let ppad = Padding(20.0, 20.0, 40.0, 100.0, projection)
         Projected(ppad, scales, ProjectedAxes(lim, grid, lbls, calculateProjections shape ppad))
         
     | Scaled(scales, ScaledLayered shapes) ->
@@ -226,7 +321,12 @@ module Visualizations =
   // Drawing
   // ----------------------------------------------------------------------------------------------
 
-  let rec drawShape<[<Measure>] 'ux, [<Measure>] 'uy> (shape:ProjectedShape<'ux, 'uy>) = 
+  let rec hideFill style = 
+    { style with Fill = Solid(0.0, RGB(0, 0, 0)); Animation = match style.Animation with Some(n,e,f) -> Some(n,e,f >> hideFill) | _ -> None }
+  let rec hideStroke style = 
+    { style with StrokeColor = (0.0, snd style.StrokeColor); Animation = match style.Animation with Some(n,e,f) -> Some(n,e,f >> hideStroke) | _ -> None }
+
+  let rec drawShape<[<Measure>] 'ux, [<Measure>] 'uy> defs style (shape:ProjectedShape<'ux, 'uy>) = 
     let (Projected(projection, (sx, sy), shape)) = shape
     let (Continuous(lx, hx), Continuous(ly, hy)) = sx, sy
 
@@ -235,24 +335,30 @@ module Visualizations =
       | (CO x), (CO y) -> x, y
 
     match shape with
+    | ProjectedStyle(sf, shape) ->
+        drawShape defs (sf style) shape
+
+    | ProjectedText(x, y, va, ha, t) -> 
+        let va = match va with Baseline -> "baseline" | Hanging -> "hanging" | Middle -> "middle"
+        let ha = match ha with Start -> "start" | Center -> "middle" | End -> "end"
+        Text(projectCont (x, y), t, sprintf "alignment-baseline:%s; text-anchor:%s;" va ha + formatStyle defs style)
+
     | ProjectedLine line -> 
         let path = 
           [ yield MoveTo(projectCont (Seq.head line)) 
             for pt in Seq.skip 1 line do yield LineTo (projectCont pt) ]
           |> Array.ofList
-        Path(path, "fill:transparent; stroke:rgb(0,164,0); stroke-width:1") 
+        Path(path, formatStyle defs (hideFill style)) 
 
     | ProjectedArea line -> 
-        let firstY, lastY = snd (Seq.head line), snd (Seq.last line)
+        let firstX, lastX = fst (Seq.head line), fst (Seq.last line)
         let path = 
-          [ console.log("lx, ly", projectCont (lx, ly))
-            yield MoveTo(projectCont (lx, ly))
+          [ yield MoveTo(projectCont (firstX, ly))
             for pt in line do yield LineTo (projectCont pt) 
-            console.log("lx, lastY", projectCont (lx, lastY))
-            yield LineTo(projectCont (hx, ly))
-            yield LineTo(projectCont (lx, ly)) ]
-          |> Array.ofList
-        Path(path, "fill:rgb(128,128,128); stroke:transparent; stroke-width:0") 
+            yield LineTo(projectCont (lastX, ly))
+            yield LineTo(projectCont (firstX, ly)) ]
+          |> Array.ofList        
+        Path(path, formatStyle defs (hideStroke style)) 
 
     | ProjectedAxes(((lox, hix), (loy, hiy)), (gridx, gridy), (lblx, lbly), shape) ->
         let offs (dx, dy) (x, y) = (x+dx, y+dy)
@@ -271,14 +377,14 @@ module Visualizations =
                     yield LineTo (projectCont (x, hy))
                   for y in gridy do
                     yield MoveTo (projectCont (lx, y))
-                    yield LineTo (projectCont (hx, y)) |], "fill:transparent; stroke:rgb(196,196,196); stroke-width:1") 
-              yield drawShape shape |]     
+                    yield LineTo (projectCont (hx, y)) |], "fill:transparent; stroke:rgb(228,228,228); stroke-width:1") 
+              yield drawShape defs style shape |]     
 
     | ProjectedLayered shapes ->
-        Combine(shapes |> Array.map (fun s -> drawShape s))
+        Combine(shapes |> Array.map (fun s -> drawShape defs style s))
 
     | ProjectedInteractive(f, shape) ->
-        drawShape shape
+        drawShape defs style shape
 
   // ----------------------------------------------------------------------------------------------
   // Event handling
@@ -287,6 +393,7 @@ module Visualizations =
   type MouseEventKind = Move | Up | Down
   type InteractiveEvent<[<Measure>] 'vx, [<Measure>] 'vy> = 
     | MouseEvent of MouseEventKind * (continuous<'vx> * continuous<'vy>)    
+    | MouseLeave
 
   // inverse operation to scaleOne
   let scaleOneInv (tlv:float<'u>, thv:float<'u>) (scale:Scale<'v>) (coord:continuous<'u>) : continuous<'v> =  
@@ -320,9 +427,11 @@ module Visualizations =
   let projectEvent scales projection event =
     match event with
     | MouseEvent(kind, (x, y)) -> MouseEvent(kind, projectInv scales (x, y) projection)
+    | MouseLeave -> MouseLeave
 
   let inScales (Continuous(CO x1, CO x2), Continuous(CO y1, CO y2)) event =
     match event with
+    | MouseLeave -> true
     | MouseEvent(_, (CO x, CO y)) -> 
         x > min x1 x2 && x < max x1 x2 &&
           y > min y1 y2 && y < max y1 y2 
@@ -331,7 +440,9 @@ module Visualizations =
     let (Projected(projection, scales, shape)) = shape
     match shape with
     | ProjectedLine _
+    | ProjectedText _
     | ProjectedArea _ -> ()
+    | ProjectedStyle(_, shape)
     | ProjectedAxes(_, _, _, shape) -> triggerEvent shape jse event
     | ProjectedLayered shapes -> for shape in shapes do triggerEvent shape jse event
     | ProjectedInteractive(handlers, shape) ->
@@ -344,6 +455,8 @@ module Visualizations =
             | MouseEvent(MouseEventKind.Down, pt), MouseDown(f) -> 
                 jse.preventDefault()
                 f pt
+            | MouseLeave, EventHandler.MouseLeave f -> f () 
+            | MouseLeave, _ 
             | MouseEvent(_, _), _  -> ()
 
         triggerEvent shape jse event
@@ -376,46 +489,109 @@ module InteractiveHelpers =
   open Visualizations
 
   type YouDrawEvent = 
-    | SwitchDrawing of bool
+    | StopDrawing 
+    | ShowResults
     | Draw of float * float
 
   type YouDrawState = 
     { Drawing : bool
-      Data : (continuous<1> * continuous<1>)[] }
+      Completed : bool
+      Clip : float
+      Data : (float * float)[]
+      Guessed : (float * option<float>)[] }
 
-  let state = 
+  let initState data clipx = 
     { Drawing = false
-      Data = [| for x in 0. .. 1.2 .. 6. -> CO x, CO x |] }
+      Completed = false
+      Data = data
+      Clip = clipx
+      Guessed = [| for x, y in data do if x > clipx then yield x, None |] }
 
   let handler state evt = 
     match evt with
-    | SwitchDrawing drawing -> { state with Drawing = drawing }
+    | ShowResults -> { state with Completed = true }
+    | StopDrawing -> { state with Drawing = false }
     | Draw (downX, downY) ->
-        let indexed = Array.indexed state.Data
-        let nearest, _ = indexed |> Array.minBy (fun (_, (CO x, _)) -> abs (downX - x))
-        { state with 
-            Data = indexed |> Array.map (fun (i, (x, y)) -> 
-              if i = nearest then (x, CO downY) else (x, y)) }
+        let indexed = Array.indexed state.Guessed
+        let nearest, _ = indexed |> Array.minBy (fun (_, (x, _)) -> abs (downX - x))
+        { state with
+            Drawing = true
+            Guessed = indexed |> Array.map (fun (i, (x, y)) -> 
+              if i = nearest then (x, Some downY) else (x, y)) }
 
-  let render trigger state = 
+  let render (topLbl, leftLbl, rightLbl) (leftClr,rightClr,guessClr) (loy, hiy) trigger state = 
+    let all = 
+      [| for x, y in state.Data -> CO x, CO y |]
+    let known = 
+      [| for x, y in state.Data do if x <= state.Clip then yield CO x, CO y |]
+    let right = 
+      [| yield Array.last known
+         for x, y in state.Data do if x > state.Clip then yield CO x, CO y |]
+    let guessed = 
+      [| yield Array.last known
+         for x, y in state.Guessed do if y.IsSome then yield CO x, CO y.Value |]
+
+    let lx, ly = (fst (Seq.head state.Data) + float state.Clip) / 2., loy + (hiy - loy) / 10.
+    let rx, ry = (fst (Seq.last state.Data) + float state.Clip) / 2., loy + (hiy - loy) / 10.
+    let tx, ty = float state.Clip, hiy - (hiy - loy) / 10.
+    let setColor c s = { s with Font = "12pt sans-serif"; Fill=Solid(1.0, HTML c); StrokeColor=(0.0, RGB(0,0,0)) }
+    let labels = 
+      Shape.Layered [
+        Style(setColor leftClr, Shape.Text(CO lx, CO ly, VerticalAlign.Baseline, HorizontalAlign.Center, leftLbl))
+        Style(setColor rightClr, Shape.Text(CO rx, CO ry, VerticalAlign.Baseline, HorizontalAlign.Center, rightLbl))
+        Style(setColor guessClr, Shape.Text(CO tx, CO ty, VerticalAlign.Baseline, HorizontalAlign.Center, topLbl))
+      ]
+
     let chart = 
       Axes
         (Interactive(
-          [ MouseMove(fun (CO x, CO y) -> 
-              if state.Drawing then trigger (Draw (x, y)) )
-            MouseDown(fun _ -> trigger (SwitchDrawing true) )
-            MouseUp(fun _ -> trigger (SwitchDrawing false) ) ],
-          (Layered [|
-            Area [| for x in 0. .. 0.1 .. 6.28 -> CO x, CO (sin x) |]
-            Line [| for x in 0. .. 0.1 .. 6.28 -> CO x, CO (cos x) |]
-            Line state.Data
-          |])
+          ( if state.Completed then []
+            else
+              [ MouseMove(fun (CO x, CO y) -> 
+                  if state.Drawing then trigger (Draw (x, y)) )
+                MouseDown(fun (CO x, CO y) -> 
+                  trigger (Draw (x, y)) )
+                EventHandler.MouseLeave(fun _ -> trigger StopDrawing )
+                MouseUp(fun _ -> trigger StopDrawing ) ]),
+          Shape.Scale
+            ( None, Some(CO loy, CO hiy), 
+              Layered [
+                yield labels
+                yield Style(hideFill >> hideStroke, Line all)
+                yield Style(
+                  (fun s -> { s with StrokeColor = (1.0, HTML leftClr); Fill = Solid(0.2, HTML leftClr) }), 
+                  Layered [ Area known; Line known ]) 
+                if state.Completed then
+                  yield Style((fun s -> 
+                    { s with 
+                        StrokeColor = (1.0, HTML rightClr)
+                        StrokeDashArray = [ Percentage 0.; Percentage 100. ]
+                        Fill = Solid(0.0, HTML rightClr)
+                        Animation = Some(1000, "ease", fun s -> 
+                          { s with
+                              StrokeDashArray = [ Percentage 100.; Percentage 0. ]
+                              Fill = Solid(0.2, HTML rightClr) } 
+                        ) }), 
+                    Layered [ Area right; Line right ])                 
+                if guessed.Length > 1 then
+                  yield Style(
+                    (fun s -> { s with StrokeColor = (1.0, HTML guessClr); StrokeDashArray = [ Integer 5; Integer 5 ] }), 
+                    Line guessed ) 
+              ])
         ))
 
     let scaled = calculateScales chart
-    let master = Scale((0.0, 800.0), (500.0, 0.0))
+    let master = Scale((0.0, 800.0), (400.0, 0.0))
     let projected = calculateProjections scaled master
-    let svg = drawShape projected
+    let defstyle = 
+      { Fill = Solid(1.0, RGB(196, 196, 196))
+        StrokeColor = (1.0, RGB(256, 0, 0))
+        StrokeDashArray = []
+        StrokeWidth = Pixels 2
+        Animation = None 
+        Font = "10pt sans-serif" }
+    let defs = ResizeArray<_>()
+    let svg = drawShape defs defstyle projected
 
     let mouseHandler kind el (evt:Event) =
       let evt = evt :?> MouseEvent
@@ -427,25 +603,67 @@ module InteractiveHelpers =
         else getParent parent.parentElement
 
       let x, y = getOffset (getParent el) (evt.pageX, evt.pageY)
-      printfn "Position: (%A, %A)" x y
       triggerEvent projected evt (MouseEvent(kind, (CO x, CO y)))
 
-    h?div ["style"=>"width:800px;height:500px"] [
-      s?svg [
-          "width"=>"800"; "height"=>"500"; 
-          "mousemove" =!> mouseHandler MouseEventKind.Move
-          "mousedown" =!> mouseHandler MouseEventKind.Down
-          "mouseup" =!> mouseHandler MouseEventKind.Up
-        ] (List.ofSeq (renderSvg svg))
-
+    h?div ["style"=>"text-align:center"] [
+      h?div ["style"=>"width:800px;height:400px;margin:0px auto 0px auto"] [
+        s?svg [
+            "width"=>"800"; "height"=>"400"; 
+            "mousemove" =!> mouseHandler MouseEventKind.Move
+            "mousedown" =!> mouseHandler MouseEventKind.Down
+            "mouseup" =!> mouseHandler MouseEventKind.Up
+            "mouseleave" =!> fun _ evt -> triggerEvent projected evt MouseLeave
+          ] [
+            yield! defs
+            yield! renderSvg svg
+          ]
+      ]
+      h?br [] []
+      h?button [
+          yield "click" =!> fun _ _ -> trigger ShowResults
+          if state.Guessed |> Seq.last |> snd = None then
+            yield "disabled" => "disabled"
+        ] [ text "Show me how I did" ]
     ]
 
-  let main id = app id state render handler
+open TheGamma.Series
+open TheGamma.Common
 
-type interactive = 
-  { a:int }
-  static member create() = { a = 0 }
+type youdraw = 
+  { data : series<float, float> 
+    clip : float option
+    min : float option
+    max : float option 
+    knownColor : string option
+    unknownColor : string option 
+    drawColor : string option 
+    topLabel : string option
+    knownLabel : string option
+    guessLabel : string option }
+  static member create(data:series<float, float>) =
+    { youdraw.data = data
+      clip = None; min = None; max = None 
+      guessLabel = None; topLabel = None; knownLabel = None;
+      knownColor = None; unknownColor = None; drawColor = None }
+  member y.setRange(min, max) = { y with min = Some min; max = Some max }
+  member y.setClip(clip) = { y with clip = Some clip }
+  member y.setColors(known, unknown) = { y with knownColor = Some known; unknownColor = Some unknown }
+  member y.setDrawColor(draw) = { y with drawColor = Some draw }
+  member y.setLabels(top, known, guess) = { y with knownLabel = Some known; topLabel = Some top; guessLabel = Some guess }
   member y.show(outputId) =   
     async { 
-      InteractiveHelpers.main outputId
+      let! data = y.data.data |> Async.AwaitFuture 
+      try
+        let loy = match y.min with Some v -> v | _ -> data |> Seq.map snd |> Seq.min
+        let hiy = match y.max with Some v -> v | _ -> data |> Seq.map snd |> Seq.max
+        let clipx = match y.clip with Some v -> v | _ -> fst (data.[data.Length / 2])
+        let data = Array.sortBy fst data
+        let lc, dc, gc = defaultArg y.knownColor "#606060", defaultArg y.unknownColor "#FFC700", defaultArg y.drawColor "#808080"          
+        InteractiveHelpers.app outputId 
+          (InteractiveHelpers.initState data clipx) 
+          (InteractiveHelpers.render 
+            (defaultArg y.topLabel "", defaultArg y.knownLabel "", defaultArg y.guessLabel "") 
+            (lc,dc,gc) (loy, hiy)) InteractiveHelpers.handler
+      with e ->
+        Log.exn("GUI", "Interactive rendering failed: %O", e)
     } |> Async.StartImmediate  
