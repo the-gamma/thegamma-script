@@ -40,10 +40,13 @@ module Visualizations =
   type continuous<[<Measure>] 'u> = CO of float<'u> 
 
   type EventHandler<[<Measure>] 'vx, [<Measure>] 'vy> = 
-    | MouseMove of ((continuous<'vx> * continuous<'vy>) -> unit)
-    | MouseUp of ((continuous<'vx> * continuous<'vy>) -> unit)
-    | MouseDown of ((continuous<'vx> * continuous<'vy>) -> unit)
-    | MouseLeave of (unit -> unit)
+    | MouseMove of (MouseEvent -> (continuous<'vx> * continuous<'vy>) -> unit)
+    | MouseUp of (MouseEvent -> (continuous<'vx> * continuous<'vy>) -> unit)
+    | MouseDown of (MouseEvent -> (continuous<'vx> * continuous<'vy>) -> unit)
+    | TouchStart of (TouchEvent -> (continuous<'vx> * continuous<'vy>) -> unit)
+    | TouchEnd of (TouchEvent -> (continuous<'vx> * continuous<'vy>) -> unit)
+    | TouchMove of (TouchEvent -> (continuous<'vx> * continuous<'vy>) -> unit)
+    | MouseLeave of (MouseEvent -> unit)
 
   type Shape<[<Measure>] 'vx, [<Measure>] 'vy> = 
     | Style of (Style -> Style) * Shape<'vx, 'vy>
@@ -391,8 +394,11 @@ module Visualizations =
   // ----------------------------------------------------------------------------------------------
 
   type MouseEventKind = Move | Up | Down
+  type TouchEventKind = Move | End | Start 
+
   type InteractiveEvent<[<Measure>] 'vx, [<Measure>] 'vy> = 
     | MouseEvent of MouseEventKind * (continuous<'vx> * continuous<'vy>)    
+    | TouchEvent of TouchEventKind * (continuous<'vx> * continuous<'vy>)    
     | MouseLeave
 
   // inverse operation to scaleOne
@@ -427,12 +433,14 @@ module Visualizations =
   let projectEvent scales projection event =
     match event with
     | MouseEvent(kind, (x, y)) -> MouseEvent(kind, projectInv scales (x, y) projection)
+    | TouchEvent(kind, (x, y)) -> TouchEvent(kind, projectInv scales (x, y) projection)
     | MouseLeave -> MouseLeave
 
   let inScales (Continuous(CO x1, CO x2), Continuous(CO y1, CO y2)) event =
     match event with
     | MouseLeave -> true
-    | MouseEvent(_, (CO x, CO y)) -> 
+    | MouseEvent(_, (CO x, CO y)) 
+    | TouchEvent(_, (CO x, CO y)) -> 
         x > min x1 x2 && x < max x1 x2 &&
           y > min y1 y2 && y < max y1 y2 
 
@@ -454,9 +462,15 @@ module Visualizations =
             | MouseEvent(MouseEventKind.Up, pt), MouseUp(f) 
             | MouseEvent(MouseEventKind.Down, pt), MouseDown(f) -> 
                 jse.preventDefault()
-                f pt
-            | MouseLeave, EventHandler.MouseLeave f -> f () 
+                f (unbox jse) pt
+            | TouchEvent(TouchEventKind.Move, pt), TouchMove(f) 
+            | TouchEvent(TouchEventKind.Start, pt), TouchStart(f) 
+            | TouchEvent(TouchEventKind.End, pt), TouchEnd(f) -> 
+                jse.preventDefault()
+                f (unbox jse) pt
+            | MouseLeave, EventHandler.MouseLeave f -> f (unbox jse) 
             | MouseLeave, _ 
+            | TouchEvent(_, _), _  
             | MouseEvent(_, _), _  -> ()
 
         triggerEvent shape jse event
@@ -489,20 +503,17 @@ module InteractiveHelpers =
   open Visualizations
 
   type YouDrawEvent = 
-    | StopDrawing 
     | ShowResults
     | Draw of float * float
 
   type YouDrawState = 
-    { Drawing : bool
-      Completed : bool
+    { Completed : bool
       Clip : float
       Data : (float * float)[]
       Guessed : (float * option<float>)[] }
 
   let initState data clipx = 
-    { Drawing = false
-      Completed = false
+    { Completed = false
       Data = data
       Clip = clipx
       Guessed = [| for x, y in data do if x > clipx then yield x, None |] }
@@ -510,16 +521,14 @@ module InteractiveHelpers =
   let handler state evt = 
     match evt with
     | ShowResults -> { state with Completed = true }
-    | StopDrawing -> { state with Drawing = false }
     | Draw (downX, downY) ->
         let indexed = Array.indexed state.Guessed
         let nearest, _ = indexed |> Array.minBy (fun (_, (x, _)) -> abs (downX - x))
         { state with
-            Drawing = true
             Guessed = indexed |> Array.map (fun (i, (x, y)) -> 
               if i = nearest then (x, Some downY) else (x, y)) }
 
-  let render (topLbl, leftLbl, rightLbl) (leftClr,rightClr,guessClr) (loy, hiy) trigger state = 
+  let render (width, height) (topLbl, leftLbl, rightLbl) (leftClr,rightClr,guessClr) (loy, hiy) trigger state = 
     let all = 
       [| for x, y in state.Data -> CO x, CO y |]
     let known = 
@@ -547,12 +556,12 @@ module InteractiveHelpers =
         (Interactive(
           ( if state.Completed then []
             else
-              [ MouseMove(fun (CO x, CO y) -> 
-                  if state.Drawing then trigger (Draw (x, y)) )
-                MouseDown(fun (CO x, CO y) -> 
-                  trigger (Draw (x, y)) )
-                EventHandler.MouseLeave(fun _ -> trigger StopDrawing )
-                MouseUp(fun _ -> trigger StopDrawing ) ]),
+              [ MouseMove(fun evt (CO x, CO y) -> 
+                  if (int evt.buttons) &&& 1 = 1 then trigger(Draw(x, y)) )
+                TouchMove(fun evt (CO x, CO y) -> 
+                  trigger(Draw(x, y)) )
+                MouseDown(fun evt (CO x, CO y) -> trigger(Draw(x, y)) )
+                TouchStart(fun evt (CO x, CO y) -> trigger(Draw(x, y)) ) ]),
           Shape.Scale
             ( None, Some(CO loy, CO hiy), 
               Layered [
@@ -581,7 +590,7 @@ module InteractiveHelpers =
         ))
 
     let scaled = calculateScales chart
-    let master = Scale((0.0, 800.0), (400.0, 0.0))
+    let master = Scale((0.0, width), (height, 0.0))
     let projected = calculateProjections scaled master
     let defstyle = 
       { Fill = Solid(1.0, RGB(196, 196, 196))
@@ -593,37 +602,49 @@ module InteractiveHelpers =
     let defs = ResizeArray<_>()
     let svg = drawShape defs defstyle projected
 
-    let mouseHandler kind el (evt:Event) =
-      let evt = evt :?> MouseEvent
+    let getRelativeLocation el x y =
       let rec getOffset (parent:HTMLElement) (x, y) = 
         if parent = null then (x, y)
         else getOffset (unbox parent.offsetParent) (x-parent.offsetLeft, y-parent.offsetTop)
       let rec getParent (parent:HTMLElement) = 
         if parent.offsetParent <> null then parent 
         else getParent parent.parentElement
-
-      let x, y = getOffset (getParent el) (evt.pageX, evt.pageY)
+      getOffset (getParent el) (x, y)
+    
+    let mouseHandler kind el (evt:Event) =
+      let evt = evt :?> MouseEvent
+      let x, y = getRelativeLocation el evt.pageX evt.pageY
       triggerEvent projected evt (MouseEvent(kind, (CO x, CO y)))
 
-    h?div ["style"=>"text-align:center"] [
-      h?div ["style"=>"width:800px;height:400px;margin:0px auto 0px auto"] [
+    let touchHandler kind el (evt:Event) =
+      let evt = evt :?> TouchEvent
+      let touch = evt.touches.[0]
+      let x, y = getRelativeLocation el touch.pageX touch.pageY
+      triggerEvent projected evt (TouchEvent(kind, (CO x, CO y)))
+
+    h?div ["style"=>"text-align:center;padding-top:20px"] [
+      h?div ["style"=>sprintf "width:%dpx;height:%dpx;margin:0px auto 0px auto" (int width) (int height)] [
         s?svg [
-            "width"=>"800"; "height"=>"400"; 
+            "width"=>string (int width); "height"=> string(int height); 
             "mousemove" =!> mouseHandler MouseEventKind.Move
             "mousedown" =!> mouseHandler MouseEventKind.Down
             "mouseup" =!> mouseHandler MouseEventKind.Up
             "mouseleave" =!> fun _ evt -> triggerEvent projected evt MouseLeave
+            "touchmove" =!> touchHandler TouchEventKind.Move
+            "touchdown" =!> touchHandler TouchEventKind.Start
+            "touchup" =!> touchHandler TouchEventKind.End
           ] [
             yield! defs
             yield! renderSvg svg
           ]
       ]
-      h?br [] []
-      h?button [
-          yield "click" =!> fun _ _ -> trigger ShowResults
-          if state.Guessed |> Seq.last |> snd = None then
-            yield "disabled" => "disabled"
-        ] [ text "Show me how I did" ]
+      h?div ["style"=>"padding-bottom:20px"] [
+        h?button [
+            yield "click" =!> fun _ _ -> trigger ShowResults
+            if state.Guessed |> Seq.last |> snd = None then
+              yield "disabled" => "disabled"
+          ] [ text "Show me how I did" ]
+        ]
     ]
 
 open TheGamma.Series
@@ -652,7 +673,18 @@ type youdraw =
   member y.setLabels(top, known, guess) = { y with knownLabel = Some known; topLabel = Some top; guessLabel = Some guess }
   member y.show(outputId) =   
     async { 
+      let id = "container" + System.Guid.NewGuid().ToString().Replace("-", "")
+      h?div ["id" => id] [ ] |> renderTo (document.getElementById(outputId))        
+
+      // Get data & wait until the element is created
       let! data = y.data.data |> Async.AwaitFuture 
+      let mutable i = 10
+      while i > 0 && document.getElementById(id) = null do
+        do! Async.Sleep(10)
+        i <- i - 1
+      let element = document.getElementById(id)
+      let size = element.clientWidth, max 400. (element.clientWidth / 2.) 
+
       try
         let loy = match y.min with Some v -> v | _ -> data |> Seq.map snd |> Seq.min
         let hiy = match y.max with Some v -> v | _ -> data |> Seq.map snd |> Seq.max
@@ -661,7 +693,7 @@ type youdraw =
         let lc, dc, gc = defaultArg y.knownColor "#606060", defaultArg y.unknownColor "#FFC700", defaultArg y.drawColor "#808080"          
         InteractiveHelpers.app outputId 
           (InteractiveHelpers.initState data clipx) 
-          (InteractiveHelpers.render 
+          (InteractiveHelpers.render size
             (defaultArg y.topLabel "", defaultArg y.knownLabel "", defaultArg y.guessLabel "") 
             (lc,dc,gc) (loy, hiy)) InteractiveHelpers.handler
       with e ->

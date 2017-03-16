@@ -1,3 +1,4 @@
+ * 0.0.13 - Make You Draw It more mobile friendly
  * 0.0.12 - SVG based interactive animations (replace You Draw It)
  * 0.0.11 - Add experimental You Draw It visualization 
  * 0.0.10 - Fix callback for Google Charts loading (IE)
