@@ -38,6 +38,7 @@ module Visualizations =
   type VerticalAlign = Baseline | Middle | Hanging
 
   type continuous<[<Measure>] 'u> = CO of float<'u> 
+  type categorical<[<Measure>] 'u> = CA of string
 
   type EventHandler<[<Measure>] 'vx, [<Measure>] 'vy> = 
     | MouseMove of (MouseEvent -> (continuous<'vx> * continuous<'vy>) -> unit)
@@ -48,15 +49,22 @@ module Visualizations =
     | TouchMove of (TouchEvent -> (continuous<'vx> * continuous<'vy>) -> unit)
     | MouseLeave of (MouseEvent -> unit)
 
+  type Orientation = 
+    | Vertical
+    | Horizontal
+
   type Shape<[<Measure>] 'vx, [<Measure>] 'vy> = 
     | Style of (Style -> Style) * Shape<'vx, 'vy>
     | Text of continuous<'vx> * continuous<'vy> * VerticalAlign * HorizontalAlign * string
     | Scale of option<continuous<'vx> * continuous<'vx>> * option<continuous<'vy> * continuous<'vy>> * Shape<'vx, 'vy>
     | Line of seq<continuous<'vx> * continuous<'vy>>
     | Area of seq<continuous<'vx> * continuous<'vy>>
+    | Bar of categorical<'vx> * continuous<'vy>
+    | Stack of Orientation * seq<Shape<'vx, 'vy>>
     | Layered of seq<Shape<'vx, 'vy>>
     | Axes of Shape<'vx, 'vy>
     | Interactive of seq<EventHandler<'vx, 'vy>> * Shape<'vx, 'vy>
+    | Padding of (float * float * float * float) * Shape<'vx, 'vy>
 
   // ----------------------------------------------------------------------------------------------
   // SVG stuff
@@ -140,6 +148,11 @@ module Visualizations =
 
   type Scale<[<Measure>] 'v> =
     | Continuous of continuous<'v> * continuous<'v>
+    | Categorical of categorical<'v>[]
+
+  type Value<[<Measure>] 'u> = 
+    | CAR of categorical<'u> * float
+    | COV of continuous<'u>
 
   type ScaledShapeInner<[<Measure>] 'vx, [<Measure>] 'vy> = 
     | ScaledStyle of (Style -> Style) * ScaledShape<'vx, 'vy>
@@ -147,21 +160,27 @@ module Visualizations =
     | ScaledLine of (continuous<'vx> * continuous<'vy>)[]
     | ScaledArea of (continuous<'vx> * continuous<'vy>)[]
     | ScaledLayered of ScaledShape<'vx, 'vy>[]
-    | ScaledAxes of   
-        limits : ((continuous<'vx> * continuous<'vx>) * (continuous<'vy> * continuous<'vy>)) *
-        grid : (continuous<'vx>[] * continuous<'vy>[]) * 
-        labels : ((continuous<'vx>*string)[] * (continuous<'vy>*string)[]) * 
+    | ScaledBar of categorical<'vx> * continuous<'vy>
+    | ScaledStack of Orientation * ScaledShape<'vx, 'vy>[]
+    | ScaledAxes of
+        // TODO: generate Text and Line instead!   
+        grid : (Value<'vx>[] * Value<'vy>[]) * 
+        labels : ((Value<'vx>*string)[] * (Value<'vy>*string)[]) * 
         shape : ScaledShape<'vx, 'vy>
     | ScaledInteractive of seq<EventHandler<'vx, 'vy>> * ScaledShape<'vx, 'vy>
+    | ScaledPadding of (float * float * float * float) * ScaledShape<'vx, 'vy>
 
   and ScaledShape<[<Measure>] 'vx, [<Measure>] 'vy> =
-    Scaled of (Scale<'vx> * Scale<'vy>) * ScaledShapeInner<'vx, 'vy>
+    Scaled of outer:(Scale<'vx> * Scale<'vy>) * inner:(Scale<'vx> * Scale<'vy>) * ScaledShapeInner<'vx, 'vy>
 
 
   [<Fable.Core.Emit("$0.toFixed($1)")>]
   let toFixed (num:float) (decs:float) : string = failwith "JS"
 
-  let generateRange (CO (lo:float<'u>)) (CO (hi:float<'u>)) = 
+  let generateContinuousRange (CO (lo:float<'u>)) (CO (hi:float<'u>)) = 
+    
+    console.log("Range ", lo, hi)        
+
     let lo, hi = unbox lo, unbox hi 
     let mag = 10. ** round (log10 (hi - lo))
     let decimals = max 0. (-(log10 mag))
@@ -170,26 +189,34 @@ module Visualizations =
     let mag, range = if range >= 10. then mag, range else mag/10.0, range * 10.0 // maybe floor log when calculating mag instead?
     let tmag = mag * (floor (range / 5.)) // generate ~5 text labels
     let gmag = mag * (floor (range / 10.)) // generate ~10 grid lines
-    (CO (unbox<float<'u>> alo), CO (unbox<float<'u>> ahi)),
-    [| for v in alo .. gmag .. ahi -> CO (unbox<float<'u>> v) |],
-    [| for v in alo .. tmag .. ahi -> CO (unbox<float<'u>> v), toFixed v decimals |]
+
+    console.log("Retruning ", alo, ahi)        
+
+    Continuous(CO (unbox<float<'u>> alo), CO (unbox<float<'u>> ahi)),
+    [| for v in alo .. gmag .. ahi -> COV(CO (unbox<float<'u>> v)) |],
+    [| for v in alo .. tmag .. ahi -> COV(CO (unbox<float<'u>> v)), toFixed v decimals |]
 
   let unionScales s1 s2 =
     match s1, s2 with
     | Continuous(l1, h1), Continuous(l2, h2) -> Continuous(min l1 l2, max h1 h2)
+    | Categorical(v1), Categorical(v2) -> Categorical(Array.distinct (Array.append v1 v2))
+    | _ -> failwith "Cannot union continuous with categorical"
 
   // Replace scales in all immediately nested things that will
   // share the same scale when combined via Layered
   // (recursively over Interacitve & Layered with Line as leaf)
 
-  let rec replaceScales scales (Scaled(_, shape) as scaled) =
+  let rec replaceScales outer (Scaled(_, inner, shape) as scaled) =
     match shape with
     | ScaledLine _ 
     | ScaledText _
-    | ScaledArea _ -> Scaled(scales, shape)
-    | ScaledStyle(f, shape) -> Scaled(scales, ScaledStyle(f, replaceScales scales shape))
-    | ScaledInteractive(f, shape) -> Scaled(scales, ScaledInteractive(f, replaceScales scales shape))
-    | ScaledLayered(shapes) -> Scaled(scales, ScaledLayered(Array.map (replaceScales scales) shapes))
+    | ScaledBar _
+    | ScaledArea _ -> Scaled(outer, inner, shape)
+    | ScaledStyle(f, shape) -> Scaled(outer, inner, ScaledStyle(f, replaceScales outer shape))
+    | ScaledPadding(pad, shape) -> Scaled(outer, inner, ScaledPadding(pad, replaceScales outer shape))
+    | ScaledInteractive(f, shape) -> Scaled(outer, inner, ScaledInteractive(f, replaceScales outer shape))
+    | ScaledLayered(shapes) -> Scaled(outer, inner, ScaledLayered(Array.map (replaceScales outer) shapes))
+    | ScaledStack(orient, shapes) -> Scaled(outer, inner, ScaledStack(orient, Array.map (replaceScales outer) shapes))
     | ScaledAxes _ -> scaled
 
   // From the leafs to the root, calculate the scales of
@@ -202,50 +229,80 @@ module Visualizations =
     let y0, y1 = Array.min ys, Array.max ys
     Continuous(x0, x1), Continuous(y0, y1)
 
+  // Always returns objects with the same inner and outer scales
+  // but outer scales can be replaced later by replaceScales
   let rec calculateScales<[<Measure>] 'ux, [<Measure>] 'uy> (shape:Shape<'ux, 'uy>) = 
     match shape with
     | Scale(sx, sy, shape) ->
-        let (Scaled((asx, asy), shape)) = calculateScales shape
+        let (Scaled((asx, asy), _, shape)) = calculateScales shape
         let scales = 
           (match sx with Some sx -> Continuous(sx) | _ -> asx), 
           (match sy with Some sy -> Continuous(sy) | _ -> asy) 
-        Scaled(scales, shape) |> replaceScales scales
+        Scaled(scales, scales, shape) |> replaceScales scales
 
     | Style(style, shape) ->
-        let (Scaled(scales, shape)) = calculateScales shape
-        Scaled(scales, ScaledStyle(style, Scaled(scales, shape)))
+        let (Scaled(scales, _, shape)) = calculateScales shape
+        Scaled(scales, scales, ScaledStyle(style, Scaled(scales, scales, shape)))
+
+    | Padding(pads, shape) ->
+        let (Scaled(scales, _, shape)) = calculateScales shape
+        Scaled(scales, scales, ScaledPadding(pads, Scaled(scales, scales, shape)))
+
+    | Bar(x, y) ->
+        let scales = Categorical [| x |], Continuous(CO 0.0<_>, y)
+        Scaled(scales, scales, ScaledBar(x, y))
 
     | Shape.Text(x, y, va, ha, t) ->
-        Scaled((Continuous(x, x), Continuous(y, y)), ScaledText(x, y, va, ha, t))
+        let scales = Continuous(x, x), Continuous(y, y)
+        Scaled(scales, scales, ScaledText(x, y, va, ha, t))    
 
     | Line line -> 
         let line = Seq.toArray line 
-        let sx, sy = calculateLineOrAreaScales line
-        Scaled((sx, sy), ScaledLine(line))
+        let scales = calculateLineOrAreaScales line
+        Scaled(scales, scales, ScaledLine(line))
 
     | Area area -> 
         let area = Seq.toArray area
-        let sx, sy = calculateLineOrAreaScales area
-        Scaled((sx, sy), ScaledArea(area))
+        let scales = calculateLineOrAreaScales area
+        Scaled(scales, scales, ScaledArea(area))
 
     | Axes shape ->
-        let scaled = calculateScales shape        
-        let (Scaled((Continuous(lx, hx), Continuous(ly, hy)), _)) = scaled
-        let (limx, gx , lblx), (limy, gy, lbly) = generateRange lx hx, generateRange ly hy
-        let scales = Continuous(limx), Continuous(limy)
-        Scaled(scales, ScaledAxes((limx, limy), (gx, gy), (lblx, lbly), scaled))
+        let generateRange s = 
+          match s with
+          | Continuous(l, h) -> generateContinuousRange l h
+          | Categorical vs -> 
+              let grid = [| for v in vs -> CAR (v, 0.5) |]
+              let grid = Array.append grid [| CAR(Array.last vs, 1.0) |]
+              s, grid, [| for CA s in vs -> CAR (CA s, 0.5), s |]
+
+        let (Scaled((sx, sy), _, _)) as scaled = calculateScales shape 
+        let sx, gx, lblx = generateRange sx
+        let sy, gy, lbly = generateRange sy
+        Scaled((sx, sy), (sx, sy), ScaledAxes((gx, gy), (lblx, lbly), scaled |> replaceScales (sx, sy)))
+        
+    | Stack(orient, shapes) ->
+        let shapes = shapes |> Array.ofSeq
+        let scaled = shapes |> Array.map calculateScales 
+        let sxs = scaled |> Array.map (fun (Scaled((sx, _), _, _)) -> sx)
+        let sys = scaled |> Array.map (fun (Scaled((_, sy), _, _)) -> sy)
+        let scales = (Array.reduce unionScales sxs, Array.reduce unionScales sys)
+        match orient, scales with 
+        | Horizontal, (Continuous _, _) -> failwith "Horizontal stacking of continuous axes is not supported"
+        | Vertical, (_, Continuous _) -> failwith "Vertical stacking of continuous axes is not supported"
+        | _ -> ()
+        Scaled(scales, scales, ScaledStack(orient, scaled)) |> replaceScales scales 
 
     | Layered shapes ->
         let shapes = shapes |> Array.ofSeq
         let scaled = shapes |> Array.map calculateScales 
-        let sxs = scaled |> Array.map (fun (Scaled((sx, _), _)) -> sx)
-        let sys = scaled |> Array.map (fun (Scaled((_, sy), _)) -> sy)
+        let sxs = scaled |> Array.map (fun (Scaled((sx, _), _, _)) -> sx)
+        let sys = scaled |> Array.map (fun (Scaled((_, sy), _, _)) -> sy)
         let scales = (Array.reduce unionScales sxs, Array.reduce unionScales sys)
-        Scaled(scales, ScaledLayered scaled) |> replaceScales scales 
+        Scaled(scales, scales, ScaledLayered scaled) |> replaceScales scales 
 
     | Interactive(f, shape) ->
-        let (Scaled(scale, shape)) = calculateScales shape
-        Scaled(scale, ScaledInteractive(f, Scaled(scale, shape)))
+        let (Scaled(scales, _, shape)) = calculateScales shape
+        Scaled(scales, scales, ScaledInteractive(f, Scaled(scales, scales, shape)))
 
   // ----------------------------------------------------------------------------------------------
   // Calculate projections
@@ -253,7 +310,13 @@ module Visualizations =
 
   type Projection<[<Measure>] 'vx, [<Measure>] 'vy, [<Measure>] 'ux, [<Measure>] 'uy> = 
     | Scale of (float<'ux> * float<'ux>) * (float<'uy> * float<'uy>)
-    | Padding of float<'uy> * float<'ux> * float<'uy> * float<'ux> * Projection<'vx, 'vy, 'ux, 'uy>
+    | Padding of
+        // padding from top, right, bottom, left 
+        padding:(float<'uy> * float<'ux> * float<'uy> * float<'ux>) * 
+        // points on the scales relative to which the padding is calculated
+        // (essentially the size of the content around which padding is)
+        extremes:(Value<'vx> * Value<'vx> * Value<'vy> * Value<'vy>) * 
+        Projection<'vx, 'vy, 'ux, 'uy>
 
   type ProjectedShapeInner<[<Measure>] 'vx, [<Measure>] 'vy> = 
     | ProjectedStyle of (Style -> Style) * ProjectedShape<'vx, 'vy>
@@ -261,27 +324,41 @@ module Visualizations =
     | ProjectedLine of (continuous<'vx> * continuous<'vy>)[]
     | ProjectedArea of (continuous<'vx> * continuous<'vy>)[]
     | ProjectedLayered of ProjectedShape<'vx, 'vy>[]
+    | ProjectedBar of categorical<'vx> * continuous<'vy>
+    | ProjectedStack of Orientation * ProjectedShape<'vx, 'vy>[]
     | ProjectedAxes of   
-        limits : ((continuous<'vx> * continuous<'vx>) * (continuous<'vy> * continuous<'vy>)) *
-        grid : (continuous<'vx>[] * continuous<'vy>[]) * 
-        labels : ((continuous<'vx>*string)[] * (continuous<'vy>*string)[]) * 
+        grid : (Value<'vx>[] * Value<'vy>[]) * 
+        labels : ((Value<'vx>*string)[] * (Value<'vy>*string)[]) * 
         shape : ProjectedShape<'vx, 'vy>
     | ProjectedInteractive of seq<EventHandler<'vx, 'vy>> * ProjectedShape<'vx, 'vy>
 
   and ProjectedShape<[<Measure>] 'vx, [<Measure>] 'vy> =
     Projected of Projection<'vx, 'vy, 1, 1> * (Scale<'vx> * Scale<'vy>) * ProjectedShapeInner<'vx, 'vy>
 
-
   let scaleOne (tlv:float<_>, thv:float<_>) scale coord = 
     match scale, coord with
-    | Continuous(CO slv, CO shv), (CO v) ->
+    | Categorical(vals), (CAR(CA v,f)) ->
+        let size = (thv - tlv) / float vals.Length
+        let i = vals |> Array.findIndex (fun (CA vv) -> v = vv)
+        let i = float i + f
+        CO(tlv + (i * size))
+    | Continuous(CO slv, CO shv), (COV (CO v)) ->
         CO((v - slv) / (shv - slv) * (thv - tlv) + tlv)
+    | Categorical _, COV _ -> failwith "Cannot project continuous value on a categorical scale."
+    | Continuous _, CAR _ -> failwith "Cannot project categorical value on a continuous scale."
+
+  let getExtremes = function
+    | Continuous(l, h) -> COV l, COV h
+    | Categorical(vals) ->  CAR(vals.[0], 0.0), CAR(vals.[vals.Length-1], 1.0)
 
   let rec project<[<Measure>] 'vx, [<Measure>] 'vy, [<Measure>] 'ux, [<Measure>] 'uy> 
       (sx:Scale<'vx>) (sy:Scale<'vy>) point (projection:Projection<'vx, 'vy, 'ux, 'uy>) : continuous<'ux> * continuous<'uy> = 
     match projection, point with
-    | Padding(t,r,b,l,projection), (CO x, CO y) ->
-        let (Continuous(lx, hx), Continuous(ly, hy)) = sx, sy
+    | Scale(tx, ty), (x, y) ->
+        scaleOne tx sx x, scaleOne ty sy y 
+
+    | Padding((t,r,b,l),(lx,hx,ly,hy),projection), _ ->
+        //let (lx, hx), (ly, hy) = getExtremes sx, getExtremes sy
         let (CO x1, CO y1) = project sx sy (lx, ly) projection
         let (CO x2, CO y2) = project sx sy (hx, hy) projection
         let lx, hx, ly, hy = min x1 x2, max x1 x2, min y1 y2, max y1 y2
@@ -292,32 +369,44 @@ module Visualizations =
         let nx = lx + l + (hx - lx - l - r) / (hx - lx) * (x - lx)
         let ny = ly + t + (hy - ly - t - b) / (hy - ly) * (y - ly)
         (CO nx, CO ny)
-
-    | Scale(tx, ty), (x, y) ->
-        scaleOne tx sx x, scaleOne ty sy y 
+    
 
   let rec calculateProjections<[<Measure>] 'ux, [<Measure>] 'uy> (shape:ScaledShape<'ux, 'uy>) projection = 
     match shape with
-    | Scaled(scales, ScaledStyle(style, shape)) ->
+    | Scaled(scales, _, ScaledStyle(style, shape)) ->
         Projected(projection, scales, ProjectedStyle(style, calculateProjections shape projection))
 
-    | Scaled(scales, ScaledLine line) -> 
+    | Scaled(scales, _, ScaledLine line) -> 
         Projected(projection, scales, ProjectedLine line)
 
-    | Scaled(scales, ScaledText(x, y, va, ha, t)) -> 
+    | Scaled(scales, _, ScaledBar(x,y)) -> 
+        Projected(projection, scales, ProjectedBar(x, y))
+
+    | Scaled(scales, _, ScaledText(x, y, va, ha, t)) -> 
         Projected(projection, scales, ProjectedText(x, y, va, ha, t))
 
-    | Scaled(scales, ScaledArea area) -> 
+    | Scaled(scales, _, ScaledArea area) -> 
         Projected(projection, scales, ProjectedArea area)
 
-    | Scaled(scales, ScaledAxes(lim, grid, lbls, shape)) ->
-        let ppad = Padding(20.0, 20.0, 40.0, 100.0, projection)
-        Projected(ppad, scales, ProjectedAxes(lim, grid, lbls, calculateProjections shape ppad))
+    | Scaled((sx, sy) as scales, _, ScaledPadding((t,r,b,l), shape)) ->
+        let (lx, hx), (ly, hy) = 
+          let (Scaled(_, (sxinner, syinner), _)) = shape 
+          getExtremes sxinner, getExtremes syinner
+        let ppad = Padding((t, r, b, l), (lx, hx, ly, hy), projection)
+        calculateProjections shape ppad
+
+    | Scaled((sx, sy) as scales, _, ScaledAxes(grid, lbls, shape)) ->
+        let (lx, hx), (ly, hy) = getExtremes sx, getExtremes sy
+        let ppad = Padding((20.0, 20.0, 40.0, 100.0), (lx, hx, ly, hy), projection)
+        Projected(ppad, scales, ProjectedAxes(grid, lbls, calculateProjections shape ppad))
+
+    | Scaled(scales, _, ScaledStack(orient, shapes)) ->
+        Projected(projection, scales, ProjectedStack(orient, shapes |> Array.map (fun s -> calculateProjections s projection)))
         
-    | Scaled(scales, ScaledLayered shapes) ->
+    | Scaled(scales, _, ScaledLayered shapes) ->
         Projected(projection, scales, ProjectedLayered(shapes |> Array.map (fun s -> calculateProjections s projection)))
 
-    | Scaled(scales, ScaledInteractive(f, shape)) ->
+    | Scaled(scales, _, ScaledInteractive(f, shape)) ->
         Projected(projection, scales, ProjectedInteractive(f, calculateProjections shape projection))
 
   // ----------------------------------------------------------------------------------------------
@@ -331,40 +420,60 @@ module Visualizations =
 
   let rec drawShape<[<Measure>] 'ux, [<Measure>] 'uy> defs style (shape:ProjectedShape<'ux, 'uy>) = 
     let (Projected(projection, (sx, sy), shape)) = shape
-    let (Continuous(lx, hx), Continuous(ly, hy)) = sx, sy
 
     let projectCont (x, y) = 
       match project sx sy (x, y) projection with
       | (CO x), (CO y) -> x, y
+    let projectContCov (x, y) = projectCont (COV x, COV y)
 
-    match shape with
-    | ProjectedStyle(sf, shape) ->
+    match shape, (sx, sy) with
+    | ProjectedStyle(sf, shape), _ ->
         drawShape defs (sf style) shape
 
-    | ProjectedText(x, y, va, ha, t) -> 
+    | ProjectedText(x, y, va, ha, t), _ -> 
         let va = match va with Baseline -> "baseline" | Hanging -> "hanging" | Middle -> "middle"
         let ha = match ha with Start -> "start" | Center -> "middle" | End -> "end"
-        Text(projectCont (x, y), t, sprintf "alignment-baseline:%s; text-anchor:%s;" va ha + formatStyle defs style)
+        Text(projectContCov (x, y), t, sprintf "alignment-baseline:%s; text-anchor:%s;" va ha + formatStyle defs style)
 
-    | ProjectedLine line -> 
+    | ProjectedLine line, _ -> 
         let path = 
-          [ yield MoveTo(projectCont (Seq.head line)) 
-            for pt in Seq.skip 1 line do yield LineTo (projectCont pt) ]
+          [ yield MoveTo(projectContCov (Seq.head line)) 
+            for pt in Seq.skip 1 line do yield LineTo (projectContCov pt) ]
           |> Array.ofList
         Path(path, formatStyle defs (hideFill style)) 
 
-    | ProjectedArea line -> 
+    | ProjectedBar(x, y), (Continuous _, _)
+    | ProjectedBar(x, y), (_, Categorical _) -> 
+        failwith "Bar can be drawn only on matching scales"
+    | ProjectedBar(x, y), (Categorical sx, Continuous (ly, hy)) ->
+
+        let _, py = projectCont (CAR(x, 0.0), COV y)
+        console.log("Project ", (let (CO y) = y in y), " to ", py, " using ", (let (Continuous(CO l, CO h)) = sy in [| l; h |]) )
+
+        let path = 
+           [| MoveTo(projectCont (CAR(x, 0.0), COV y))
+              LineTo(projectCont (CAR(x, 1.0), COV y))
+              LineTo(projectCont (CAR(x, 1.0), COV ly))
+              LineTo(projectCont (CAR(x, 0.0), COV ly))
+              LineTo(projectCont (CAR(x, 0.0), COV y)) |]           
+        Path(path, formatStyle defs (hideStroke style)) 
+
+    | ProjectedArea line, (Categorical _, _)
+    | ProjectedArea line, (_, Categorical _) -> 
+        failwith "Area can be drawn only on continuous scale"
+    | ProjectedArea line, (Continuous(lx, hx), Continuous(ly, hy)) -> 
         let firstX, lastX = fst (Seq.head line), fst (Seq.last line)
         let path = 
-          [ yield MoveTo(projectCont (firstX, ly))
-            for pt in line do yield LineTo (projectCont pt) 
-            yield LineTo(projectCont (lastX, ly))
-            yield LineTo(projectCont (firstX, ly)) ]
+          [ yield MoveTo(projectContCov (firstX, ly))
+            for pt in line do yield LineTo (projectContCov pt) 
+            yield LineTo(projectContCov (lastX, ly))
+            yield LineTo(projectContCov (firstX, ly)) ]
           |> Array.ofList        
         Path(path, formatStyle defs (hideStroke style)) 
 
-    | ProjectedAxes(((lox, hix), (loy, hiy)), (gridx, gridy), (lblx, lbly), shape) ->
+    | ProjectedAxes((gridx, gridy), (lblx, lbly), shape), (sx, sy) ->
         let offs (dx, dy) (x, y) = (x+dx, y+dy)
+        let (lx, hx), (ly, hy) = getExtremes sx, getExtremes sy 
         Combine   
            [| yield Path(
                 [|yield MoveTo (projectCont (lx, hy)) 
@@ -382,11 +491,14 @@ module Visualizations =
                     yield MoveTo (projectCont (lx, y))
                     yield LineTo (projectCont (hx, y)) |], "fill:transparent; stroke:rgb(228,228,228); stroke-width:1") 
               yield drawShape defs style shape |]     
-
-    | ProjectedLayered shapes ->
+        
+    | ProjectedLayered shapes, _ ->
         Combine(shapes |> Array.map (fun s -> drawShape defs style s))
 
-    | ProjectedInteractive(f, shape) ->
+    | ProjectedStack(_, shapes), _ ->
+        Combine(shapes |> Array.map (fun s -> drawShape defs style s))
+
+    | ProjectedInteractive(f, shape), _ ->
         drawShape defs style shape
 
   // ----------------------------------------------------------------------------------------------
@@ -406,6 +518,8 @@ module Visualizations =
     match scale, coord with
     | Continuous(CO slv, CO shv), (CO v) ->
         CO((v - tlv) / (thv - tlv) * (shv - slv) + slv)
+    | _ ->
+        failwith "TODO: scaleOneInv categorical"
 
    // project:    scales<v> * point<v> * proj<v -> u> -> point<u>   // v = -1 .. 1     u = 0px .. 100px
    // projectInv: scales<v> * point<u> * proj<v -> u> -> point<v>
@@ -415,8 +529,9 @@ module Visualizations =
       (projection:Projection<'vx, 'vy, 'ux, 'uy>) : continuous<'vx> * continuous<'vy> = 
     
     match projection, point with
-    | Padding(t,r,b,l,projection), (CO x, CO y) ->
-        let (Continuous(lx, hx), Continuous(ly, hy)) = sx, sy
+    | Padding((t, r, b, l), (lx, hx, ly, hy), projection), (CO x, CO y) ->
+        //match sx, sy with
+        ///| Continuous(lx, hx), Continuous(ly, hy) ->
         let (CO x1, CO y1) = project sx sy (lx, ly) projection
         let (CO x2, CO y2) = project sx sy (hx, hy) projection
         let lx, hx, ly, hy = min x1 x2, max x1 x2, min y1 y2, max y1 y2
@@ -426,6 +541,8 @@ module Visualizations =
         let nx = (ox - l) / (hx - lx - l - r) * (hx - lx)
         let ny = (oy - t) / (hy - ly - t - b) * (hy - ly)
         projectInv (sx, sy) (CO nx, CO ny) projection
+        //|  _ ->
+          //  failwith "TODO: projectInv for categorical scales"
 
     | Scale(tx, ty), (x, y) ->
         scaleOneInv tx sx x, scaleOneInv ty sy y 
@@ -436,22 +553,27 @@ module Visualizations =
     | TouchEvent(kind, (x, y)) -> TouchEvent(kind, projectInv scales (x, y) projection)
     | MouseLeave -> MouseLeave
 
-  let inScales (Continuous(CO x1, CO x2), Continuous(CO y1, CO y2)) event =
-    match event with
-    | MouseLeave -> true
-    | MouseEvent(_, (CO x, CO y)) 
-    | TouchEvent(_, (CO x, CO y)) -> 
-        x > min x1 x2 && x < max x1 x2 &&
-          y > min y1 y2 && y < max y1 y2 
+  let inScales (sx, sy) event =
+    match sx, sy with
+    | Continuous(CO x1, CO x2), Continuous(CO y1, CO y2) ->
+        match event with
+        | MouseLeave -> true
+        | MouseEvent(_, (CO x, CO y)) 
+        | TouchEvent(_, (CO x, CO y)) -> 
+            x > min x1 x2 && x < max x1 x2 &&
+              y > min y1 y2 && y < max y1 y2 
+    | _ -> failwith "TODO: inScales"
 
   let rec triggerEvent<[<Measure>] 'ux, [<Measure>] 'uy> (shape:ProjectedShape<'ux, 'uy>) (jse:Event) (event:InteractiveEvent<1,1>) = 
     let (Projected(projection, scales, shape)) = shape
     match shape with
     | ProjectedLine _
     | ProjectedText _
+    | ProjectedBar _
     | ProjectedArea _ -> ()
     | ProjectedStyle(_, shape)
-    | ProjectedAxes(_, _, _, shape) -> triggerEvent shape jse event
+    | ProjectedAxes(_, _, shape) -> triggerEvent shape jse event
+    | ProjectedStack(_, shapes)
     | ProjectedLayered shapes -> for shape in shapes do triggerEvent shape jse event
     | ProjectedInteractive(handlers, shape) ->
         let localEvent = projectEvent scales projection event
@@ -499,6 +621,10 @@ module InteractiveHelpers =
   
     handleEvent None
     event.Publish.Add(Some >> handleEvent)
+
+  // ----------------------------------------------------------------------------------------------
+  // You Draw
+  // ----------------------------------------------------------------------------------------------
 
   open Visualizations
 
@@ -647,8 +773,96 @@ module InteractiveHelpers =
         ]
     ]
 
+  // ----------------------------------------------------------------------------------------------
+  // You Guess Bar
+  // ----------------------------------------------------------------------------------------------
+
+  let vega10 = ["#1f77b4"; "#ff7f0e"; "#2ca02c"; "#d62728"; "#9467bd"; "#8c564b"; "#e377c2"; "#7f7f7f"; "#bcbd22"; "#17becf" ]
+
+  let renderBars (width, height) data trigger state = 
+
+    let chart = 
+      Stack
+        ( Horizontal, 
+          [ for clr, (lbl, value) in Seq.zip vega10 data -> 
+              let sh = Style((fun s -> { s with Fill = Solid(1.0, HTML clr) }), Bar(CA lbl, CO value)) 
+              Shape.Padding((0., 10., 0., 10.), sh) ])
+      |> Axes
+
+    //Area [ for x in 0.0 .. 0.1 .. 6.3 -> CO x, CO (sin x) ]
+
+    let scaled = calculateScales chart
+    let master = Scale((0.0, width), (height, 0.0))
+    let projected = calculateProjections scaled master
+    let defstyle = 
+      { Fill = Solid(1.0, RGB(196, 196, 196))
+        StrokeColor = (1.0, RGB(256, 0, 0))
+        StrokeDashArray = []
+        StrokeWidth = Pixels 2
+        Animation = None 
+        Font = "10pt sans-serif" }
+    let defs = ResizeArray<_>()
+    
+    console.log(scaled)
+
+    let svg = drawShape defs defstyle projected
+
+    h?div ["style"=>"text-align:center;padding-top:20px"] [
+      h?div ["style"=>sprintf "width:%dpx;height:%dpx;margin:0px auto 0px auto" (int width) (int height)] [
+        s?svg [
+            "width"=>string (int width); "height"=> string(int height); 
+            (*
+            "mousemove" =!> mouseHandler MouseEventKind.Move
+            "mousedown" =!> mouseHandler MouseEventKind.Down
+            "mouseup" =!> mouseHandler MouseEventKind.Up
+            "mouseleave" =!> fun _ evt -> triggerEvent projected evt MouseLeave
+            "touchmove" =!> touchHandler TouchEventKind.Move
+            "touchdown" =!> touchHandler TouchEventKind.Start
+            "touchup" =!> touchHandler TouchEventKind.End
+            *)
+          ] [
+            yield! defs
+            yield! renderSvg svg
+          ]
+      ]
+      h?div ["style"=>"padding-bottom:20px"] [
+        h?button [
+            yield "click" =!> fun _ _ -> () //trigger ShowResults
+            //if state.Guessed |> Seq.last |> snd = None then
+            yield "disabled" => "disabled"
+          ] [ text "Show me how I did" ]
+        ]
+    ]
+
+
 open TheGamma.Series
 open TheGamma.Common
+
+type YouGuessBar =
+  { data : series<string, float> }
+  member y.show(outputId) =   
+    async { 
+      let id = "container" + System.Guid.NewGuid().ToString().Replace("-", "")
+      h?div ["id" => id] [ ] |> renderTo (document.getElementById(outputId))        
+
+      // Get data & wait until the element is created
+      let! data = y.data.data |> Async.AwaitFuture 
+      let mutable i = 10
+      while i > 0 && document.getElementById(id) = null do
+        do! Async.Sleep(10)
+        i <- i - 1
+      let element = document.getElementById(id)
+      let size = element.clientWidth, max 400. (element.clientWidth / 2.) 
+      let! data = y.data.data |> Async.AwaitFuture 
+      do
+        try
+          InteractiveHelpers.app outputId () (InteractiveHelpers.renderBars size data) (fun st _ -> st)
+        with e ->
+          Log.exn("GUI", "Interactive rendering failed: %O", e) } |> Async.StartImmediate
+
+type youguess = 
+  static member bars(data:series<string, float>) = 
+    { YouGuessBar.data = data }
 
 type youdraw = 
   { data : series<float, float> 
