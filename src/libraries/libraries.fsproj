@@ -56,6 +56,7 @@
     <Compile Include="series.fs" />
     <Compile Include="tables.fs" />
     <Compile Include="maps.fs" />
+    <Compile Include="compost.fs" />
     <Compile Include="interactive.fs" />
     <Compile Include="google/core.fs" />
     <Compile Include="google/options.fs" />

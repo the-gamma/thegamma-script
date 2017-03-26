@@ -172,7 +172,7 @@ let knownTypes =
         "table`2", "table"
         "youdraw", "youdraw"
         "youguess", "youguess"
-        "YouGuessBar", "YouGuessBar"
+        "YouGuessCols", "YouGuessCols"
 
         "placeholder", "placeholder"
         "timeline`2", "timeline"
@@ -196,7 +196,7 @@ let e =
       yield exportType ctx (asm.GetType("TheGamma.Interactive.youdraw")) BindingFlags.Instance 
       yield { exportType ctx (asm.GetType("TheGamma.Interactive.youdraw")) BindingFlags.Static 
                 with instance = [| "youdraw" |] }
-      yield exportType ctx (asm.GetType("TheGamma.Interactive.YouGuessBar")) BindingFlags.Instance 
+      yield exportType ctx (asm.GetType("TheGamma.Interactive.YouGuessCols")) BindingFlags.Instance 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.youguess")) BindingFlags.Instance 
       yield { exportType ctx (asm.GetType("TheGamma.Interactive.youguess")) BindingFlags.Static 
                 with instance = [| "youguess" |] }

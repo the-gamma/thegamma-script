@@ -175,6 +175,11 @@ and series<'k, 'v> =
   member s.skip(count) =
     s |> helpers.lift (fun arr -> slice (min arr.Length count) (arr.Length-1) arr)
 
+  member s.shuffle() =
+    s |> helpers.lift (fun arr -> 
+      let rnd = System.Random()
+      arr |> Array.sortBy (fun _ -> rnd.Next()) )
+
   member s.map(f) =
     s |> helpers.lift (Array.map (fun (k, v) -> k, f v))
 (*
