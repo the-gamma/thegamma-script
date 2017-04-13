@@ -263,6 +263,7 @@ let rec formatType = function
   | Type.Parameter(v) -> v
   | Type.Delayed(g, _) -> "@" + g
   | Type.Primitive PrimitiveType.Bool -> "bool"
+  | Type.Primitive PrimitiveType.Date -> "date"
   | Type.Primitive PrimitiveType.Number -> "number"
   | Type.Primitive PrimitiveType.String -> "string"
   | Type.Primitive PrimitiveType.Unit -> "unit"
@@ -279,7 +280,8 @@ let formatTypeInfo = function
   | Type.Parameter _ -> "unresolved type parameter"
   | Type.App _ -> "unresolved type application"
   | Type.Delayed _ -> "delayed type"
-  | Type.Primitive PrimitiveType.Bool -> "boolean"
+  | Type.Primitive PrimitiveType.Bool -> "bool"
+  | Type.Primitive PrimitiveType.Date -> "date"
   | Type.Primitive PrimitiveType.Number -> "number"
   | Type.Primitive PrimitiveType.String -> "string"
   | Type.Primitive PrimitiveType.Unit -> "unit"

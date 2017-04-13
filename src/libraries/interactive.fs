@@ -98,7 +98,8 @@ module YouDrawHelpers =
                     (fun s -> { s with StrokeColor = (1.0, HTML guessClr); StrokeDashArray = [ Integer 5; Integer 5 ] }), 
                     Line guessed ) 
               ])
-        ))
+        )) 
+    let chart = Scale(Some(CO (fst (Seq.head state.Data)), CO (fst (Seq.last state.Data))), None, chart)
     
     h?div ["style"=>"text-align:center;padding-top:20px"] [
       Compost.createSvg (width, height) chart

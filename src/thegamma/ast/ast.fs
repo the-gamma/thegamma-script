@@ -94,6 +94,7 @@ and ObjectType =
 
 and [<RequireQualifiedAccess>] PrimitiveType = 
   | Number
+  | Date
   | String
   | Bool
   | Unit
