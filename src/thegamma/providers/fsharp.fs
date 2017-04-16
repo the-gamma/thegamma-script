@@ -73,11 +73,13 @@ type GenericType =
 
 and GenericTypeSchema = 
   inherit ObjectType
+  abstract TypeDefinition : GenericTypeDefinition
   abstract TypeArguments : TypeSchema list
   abstract Substitute : (string -> Type option) -> GenericType
 
 and GenericTypeDefinition = 
   inherit ObjectType
+  abstract FullName : string
   abstract TypeParameterCount : int
   abstract Apply : TypeSchema list -> GenericTypeSchema
 
@@ -130,6 +132,7 @@ let rec partiallySubstituteTypeParams (assigns:string -> Type option) schema =
           member x.Members = failwith "Uninstantiated generic type schema"
           member x.TypeEquals _ = failwith "Uninstantiated generic type schema"
           member x.TypeArguments = List.map (partiallySubstituteTypeParams assigns) ts.TypeArguments
+          member x.TypeDefinition = ts.TypeDefinition
           member x.Substitute assigns2 =
             ts.Substitute (fun n ->
               match assigns2 n, assigns n with
@@ -139,7 +142,7 @@ let rec partiallySubstituteTypeParams (assigns:string -> Type option) schema =
    
 
 // Needs to be delayed to avoid calling lookupNamed too early
-let importProvidedType lookupNamed exp = fun () ->
+let importProvidedType url lookupNamed exp = fun () ->
   let rec mapType (t:AnyType) = 
     match getKind t with
     | "primitive" -> 
@@ -178,6 +181,8 @@ let importProvidedType lookupNamed exp = fun () ->
       if getKind m = "method" then
         let m = unbox<MethodMember> m
         let typars = getTypeParameters m.typepars 
+        // Do not substitute bound variables
+        let assigns n = if List.exists ((=) n) typars then None else assigns n
 
         let args = [ for a in m.arguments -> a.name, a.optional, partiallySubstituteTypeParams assigns (mapType a.``type``) ]
         let emitter = { Emit = fun (inst, args) ->
@@ -185,7 +190,7 @@ let importProvidedType lookupNamed exp = fun () ->
             ( MemberExpression(inst, IdentifierExpression(m.name, None), false, None), 
               args, None) }
             
-        let retTyp = mapType m.returns
+        let retTyp = partiallySubstituteTypeParams assigns (mapType m.returns)
         let retFunc tys =
           match unifyTypes [] [ for _, _, t in args -> t ] tys with 
           | None -> None
@@ -196,7 +201,7 @@ let importProvidedType lookupNamed exp = fun () ->
                 |> Seq.map (fun (p, tys) ->
                     p, tys |> Seq.fold (fun st (_, ty2) ->
                       match st with
-                      | Some ty1 -> if Types.typesEqual ty1 ty2 then Some ty1 else None
+                      | Some ty1 -> if Types.typesEqual ty1 ty2 then Some ty2 else None
                       | None -> None) (Some Type.Any) )
                 |> Seq.fold (fun assigns assign ->
                   match assigns, assign with
@@ -222,20 +227,28 @@ let importProvidedType lookupNamed exp = fun () ->
             member x.TypeEquals _ = false }
     | typars ->
         { new GenericTypeDefinition with
-            member x.TypeParameterCount = List.length typars
-            member x.Members = failwith "Uninstantiated generic type definition"
-            member x.TypeEquals _ = failwith "Uninstantiated generic type definition"
-            member x.Apply typars = 
+            member td.TypeParameterCount = List.length typars
+            member td.FullName = TypeProvidersRuntime.concatUrl url exp.name
+            member td.Members = failwith "Uninstantiated generic type definition"
+            member td.TypeEquals _ = failwith "Uninstantiated generic type definition"
+            member td.Apply tyargs = 
               { new GenericTypeSchema with
                   member x.Members = failwith "Uninstantiated generic type schema"
+                  member x.TypeDefinition = td
                   member x.TypeEquals _ = failwith "Uninstantiated generic type schema"
                   member x.Substitute assigns = 
+                    let tyArgLookup = dict (List.zip typars tyargs)
+                    let members = generateMembers (fun n ->
+                      match tyArgLookup.TryGetValue n with
+                      | true, tysch -> Some(substituteTypeParams assigns tysch)
+                      | _ -> None)
+
                     { new GenericType with
-                        member x.TypeArguments = List.map (substituteTypeParams assigns ) typars
-                        member x.IsInstanceOfSchema sch = failwith "TODO"
-                        member x.Members = generateMembers assigns
+                        member x.TypeArguments = List.map (substituteTypeParams assigns ) tyargs
+                        member x.IsInstanceOfSchema sch = sch.TypeDefinition.FullName = td.FullName
+                        member x.Members = members
                         member x.TypeEquals _ = failwith "TODO" }
-                  member x.TypeArguments = typars } } :> _
+                  member x.TypeArguments = tyargs } } :> _
     
   objectType |> Type.Object
 
@@ -247,7 +260,7 @@ let provideFSharpTypes lookupNamed url =
       [ for exp in expTys ->
           let ty = 
             Type.Delayed(Async.CreateNamedFuture exp.name <| async {
-              return importProvidedType lookupNamed exp () })
+              return importProvidedType url lookupNamed exp () })
           if exp.``static`` then           
             let e = exp.instance |> Seq.fold (fun chain s -> 
               match chain with

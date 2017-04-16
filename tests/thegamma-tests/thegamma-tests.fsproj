@@ -67,7 +67,8 @@
     <Compile Include="parser.fs" />
     <Compile Include="formatter.fs" />
     <Compile Include="binder.fs" />
-    <Compile Include="typechecker.fs" />
+    <Compile Include="simpletypes.fs" />
+    <Compile Include="fsharptypes.fs" />
     <None Include="paket.references" />
   </ItemGroup>
   <ItemGroup>

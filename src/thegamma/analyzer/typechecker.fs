@@ -189,7 +189,7 @@ and typeCheckEntity ctx (e:Entity) =
 /// Perform type applications & evaluate delayed types
 let rec evaluateDelayedType topLevel (t:Type) = async {
   match t with
-  | Type.Object(obj) when topLevel ->
+(*  | Type.Object(obj) when topLevel ->
       let! members = obj.Members |> Async.Array.map (fun m -> async {
         match m with
         | Member.Method(n, args, typ, doc, e) -> 
@@ -209,7 +209,7 @@ let rec evaluateDelayedType topLevel (t:Type) = async {
       return Type.Function(t1s, t2)
   | Type.List(t) ->
       let! t = evaluateDelayedType topLevel t
-      return Type.List(t)
+      return Type.List(t) *)
   | Type.Delayed(f) ->
       let! t = Async.AwaitFuture f
       return! evaluateDelayedType topLevel t
@@ -228,9 +228,9 @@ let typeCheckEntityAsync ctx (e:Entity) = async {
       visited.[e.Symbol] <- true
       for a in e.Antecedents do
         do! loop a 
-      Log.trace("typechecker", "Type of entity '%s' (%O) is: %O", e.Name, e.Kind, getType ctx e)
+      Log.trace("typechecker", "Type of entity '%s' (%s) is: %s", e.Name, formatEntityKind e.Kind, formatType (getType ctx e))
       let! t = evaluateDelayedType true (getType ctx e)
-      Log.trace("typechecker", "Type of entity '%s' (%O) reduced to: %O", e.Name, e.Kind, t)
+      Log.trace("typechecker", "Type of entity '%s' (%s) reduced to: %s", e.Name, formatEntityKind e.Kind, formatType t)
       e.Type <- Some t }
 
   do! loop e
