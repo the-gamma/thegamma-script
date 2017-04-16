@@ -36,9 +36,9 @@ let updateBody trigger state =
   Log.trace("live", "Showable - updating body")
   match commandAtLocation state.Location state.Program with
   | Some({ Node = Command.Expr e; Entity = Some { Kind = EntityKind.RunCommand ent } } as cmd) ->
-      match Types.reduceType ent.Type.Value with 
-      | Type.Object { Members = members } ->
-          let hasShow = members |> Array.exists (function 
+      match ent.Type.Value with 
+      | Type.Object obj ->
+          let hasShow = obj.Members |> Array.exists (function 
             | Member.Method(name="show"; arguments=[_, _, Type.Primitive PrimitiveType.String]) -> true
             | _ -> false)
           if hasShow then

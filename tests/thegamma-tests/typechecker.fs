@@ -21,8 +21,11 @@ open NUnit.Framework
 let noEmitter = { Emit = fun _ -> failwith "mock emitter" }
 let prop n t = Member.Property(n, t, [], noEmitter)
 let meth n t a = Member.Method(n, a, t, [], noEmitter)
-let obj membrs = Type.Object { Members = Array.ofList membrs; }
-let delay n f = Type.Delayed(n, Async.CreateNamedFuture n (async { return f () }))
+let delay n f = Type.Delayed(Async.CreateNamedFuture n (async { return f () }))
+let obj membrs = 
+  { new ObjectType with
+      member x.Members = Array.ofList membrs
+      member x.TypeEquals _ = false } |> Type.Object
 
 // Helpers for generating primitive types
 let str = Type.Primitive PrimitiveType.String
@@ -30,9 +33,6 @@ let num = Type.Primitive PrimitiveType.Number
 let bool = Type.Primitive PrimitiveType.Bool
 
 // Helper for generating other types
-let forall n t = Type.Forall([n], t)
-let apply t f = Type.App(f, [t])
-let par n = Type.Parameter(n)
 let list t = Type.List(t)
 let func t1 t2 = Type.Function([t1], t2)
 
@@ -66,7 +66,6 @@ let equal (expected:'T) (actual:'T) = Assert.AreEqual(expected, actual)
 
 /// Assert that two types are equal
 let assertType t1 (t2, _) = 
-  let t1, t2 = Types.reduceType t1, Types.reduceType t2
   equal (Ast.formatType t1) (Ast.formatType t2)
 
 /// Assert that result contains given errors
@@ -92,42 +91,66 @@ let rec testObj () = delay "testObj" (fun () ->
   ])
 
   
-let rec seriesObj () = 
-  obj [
-    meth "make" (forall "b" (series (par "b"))) [
-      "vals", false, apply (par "b") (forall "x" (list (par "x"))) ]
-    meth "makeTwo" (forall "b" (series (par "b"))) [
-      "val1", false, par "b"
-      "val2", false, par "b" ]
-    meth "range" (series num) [
-      "count", false, num ]
-    meth "add" (series (par "a")) [
-      "val", false, par "a" ]
-    meth "map" (forall "b" (series (par "b"))) [
-      "f", false, (func (par "a") (par "b")) ]
-    meth "sort" (series (par "a")) [
-      "fast", true, bool
-      "reverse", true, bool ]
-    prop "head" (par "a")
+open TheGamma.TypeProviders.FSharpProvider
+
+let fpar n = { GenericParameterType.kind = "parameter"; name = n } :> AnyType
+let flist t =  { ArrayType.kind = "array"; element = t } :> AnyType
+let fnum = { PrimitiveType.kind = "parameter"; name = "int" } :> AnyType
+let fbool = { PrimitiveType.kind = "parameter"; name = "bool" } :> AnyType
+let ffunc a b = { FunctionType.kind = "function"; arguments = [| a |]; returns = b } :> AnyType
+
+let fmeth n tya rty args =
+  let args = args |> Array.ofList |> Array.map (fun (n, o, t) ->
+    { name = n; optional = o; ``type`` = t })
+  { MethodMember.kind = "method"; name = n; typepars = Array.ofList tya
+    arguments = args; returns = rty }
+let ftyp n tya mems = 
+  { ExportedType.name = n; typepars = Array.ofList tya; 
+    ``static`` = false; instance = [| |]; members = Array.ofList mems }
+let fnamed n tya = 
+  { NamedType.kind = "named"; name = n; typargs = Array.ofList tya }
+
+let series = 
+  ftyp "series" [fpar "a"] [
+    fmeth "make" [fpar "b"] (fnamed "series" [fpar "b"]) [
+      "vals", false, flist (fpar "b") ]
+    fmeth "makeTwo" [fpar "b"] (fnamed "series" [fpar "b"]) [
+      "val1", false, fpar "b"
+      "val2", false, fpar "b" ]
+    fmeth "range" [] (fnamed "series" [fnum]) [
+      "count", false, fnum ]
+    fmeth "add" [] (fnamed "series" [fpar "a"]) [
+      "val", false, fpar "a" ]
+    fmeth "map" [fpar "b"] (fnamed "series" [fpar "b"]) [
+      "f", false, (ffunc (fpar "a") (fpar "b")) ]
+    fmeth "sort" [] (fnamed "series" [fpar "a"]) [
+      "fast", true, fbool
+      "reverse", true, fbool ]
+    fmeth "head" [] (fpar "a") []
   ]
 
-and series t = apply t (forall "a" (delay "series" (fun () ->
-  seriesObj () )))
-
-let rec tableObj () =
-  obj [
-    meth "make" (forall "b" (table (par "b"))) [
-      "data", false, series (par "b") ]
-    prop "data" (series (par "a"))
+let table =
+  ftyp "table" [fpar "a"] [
+    fmeth "make" [fpar "b"] (fnamed "table" [fpar "b"]) [
+      "data", false, fnamed "series" [fpar "b"] ]
+    fmeth "data" [] (fnamed "series" [fpar "a"]) []
   ]
 
-and table t = apply t (forall "a" (delay "table" (fun () ->
-  tableObj () )))
+let types = System.Collections.Generic.Dictionary<_, _>()
+let lookupNamed n = types.[n]
+types.Add("table", importProvidedType lookupNamed table ())
+types.Add("series", importProvidedType lookupNamed series ())
+
+let fapply n typ =
+  match lookupNamed n with
+  | Type.Object (:? GenericTypeDefinition as gtd) -> 
+      Type.Object(gtd.Apply([TypeSchema.Primitive typ]).Substitute(fun _ -> None))
+  | _ -> failwith "expected GenericTypeDefinition as named type"
 
 let vars = 
-  [ "series", series Type.Any
-    "numbers", series (Type.Primitive PrimitiveType.Number)
-    "table", table (Type.Any)
+  [ "series", fapply "series" Type.Any
+    "numbers", fapply "series" (Type.Primitive PrimitiveType.Number)
+    "table", fapply "table" (Type.Any)
     "test", testObj () ]
 
 

@@ -18,12 +18,12 @@ type CheckingContext =
 let addError ctx ent err = 
   ctx.Errors.Add(err ctx.Ranges.[ent.Symbol])
 
-let (|FindProperty|_|) (name:Name) { Members = membs } = 
-  membs |> Seq.tryPick (function 
+let (|FindProperty|_|) (name:Name) (obj:ObjectType) = 
+  obj.Members |> Seq.tryPick (function 
     Member.Property(name=n; typ=r; meta=m) when n = name.Name -> Some(m, r) | _ -> None) 
 
-let (|FindMethod|_|) (name:Name) { Members = membs } = 
-  membs |> Seq.tryPick (function 
+let (|FindMethod|_|) (name:Name) (obj:ObjectType) = 
+  obj.Members |> Seq.tryPick (function 
     Member.Method(name=n; arguments=args; meta=m; typ=r) when n = name.Name -> Some (m, args, r) | _ -> None) 
 
 /// Given a list of types, find the most frequent type (using Type.Any as the last resort)
@@ -70,34 +70,18 @@ let rec checkMethodCall ctx memTy pars argList args =
         if index < positionBased.Length then Some(positionBased.[index]) 
         else Map.tryFind name nameBased 
       match arg with
-      | Some arg -> name, typ, getType ctx arg, Some arg
-      | None when optional -> name, typ, typ, None
+      | Some arg -> name, getType ctx arg, Some arg
+      | None when optional -> name, typ, None
       | None ->
           Errors.TypeChecker.parameterMissingValue name |> addError ctx argList
-          name, typ, Type.Any, None)
+          name, Type.Any, None)
 
   // Infer assignments for type parameters from actual arguments
-  let tyVars, resTy = match memTy with Type.Forall(tya, resTy) -> tya, resTy | resTy -> [], resTy
-  let assigns = 
-    matchedArguments |> List.collect (fun (name, parTy, argTy, entityOpt) ->
-      let assigns, errors = unifyTypes tyVars parTy argTy
-      if entityOpt.IsSome then
-        for t1, t2 in errors do
-          Errors.TypeChecker.incorrectParameterType name parTy argTy t1 t2 |> addError ctx entityOpt.Value 
-      assigns )
-
-  // Report errors if we inferred conflicting assignments for one variable
-  for _, group in Seq.groupBy fst assigns do
-    match List.ofSeq group with
-    | (v, t1)::(_::_ as ts) ->
-        for _, t in ts do
-          Errors.TypeChecker.inferenceConflict v t1 t |> addError ctx argList
-    | _ -> ()
-  
-  // Substitute in the return type
-  let res = substituteTypes (Map.ofList assigns) resTy
-  //printfn "Result of call: %A" res
-  res
+  match memTy [ for _, typ, _ in matchedArguments -> typ ] with
+  | Some typ -> typ
+  | None -> 
+      Errors.TypeChecker.parameterConflict |> addError ctx argList
+      Type.Any
   
 
 /// Get type of an entity and record errors generated when type checking this entity
@@ -123,26 +107,26 @@ and typeCheckEntity ctx (e:Entity) =
       getType ctx inst      
 
   | EntityKind.ChainElement(true, name, ident, Some inst, _) ->
-      match reduceType (getType ctx inst) with 
+      match getType ctx inst with 
       | Type.Any -> Type.Any
       | Type.Object(FindProperty name (meta, resTyp)) -> 
           e.Meta <- meta
           resTyp
-      | Type.Object { Members = members } ->
-          Errors.TypeChecker.propertyMissing name.Name members |> addError ctx ident
+      | Type.Object obj ->
+          Errors.TypeChecker.propertyMissing name.Name obj.Members |> addError ctx ident
           Type.Any
       | typ ->
           Errors.TypeChecker.notAnObject name.Name typ |> addError ctx inst
           Type.Any
 
   | EntityKind.ChainElement(false, name, ident, Some inst, Some ({ Kind = EntityKind.ArgumentList(ents) } as arglist)) ->
-      match reduceType (getType ctx inst) with 
+      match getType ctx inst with 
       | Type.Any -> Type.Any
       | Type.Object(FindMethod name (meta, args, resTyp)) ->  
           e.Meta <- meta
           checkMethodCall ctx resTyp args arglist ents
-      | Type.Object { Members = members } ->
-          Errors.TypeChecker.methodMissing name.Name members |> addError ctx ident
+      | Type.Object obj ->
+          Errors.TypeChecker.methodMissing name.Name obj.Members |> addError ctx ident
           Type.Any
       | typ ->
           Errors.TypeChecker.notAnObject name.Name typ |> addError ctx inst
@@ -169,13 +153,13 @@ and typeCheckEntity ctx (e:Entity) =
         let elty = getType ctx a
         if not (typesEqual typ elty) then
           Errors.TypeChecker.listElementTypeDoesNotMatch typ elty |> addError ctx a
-      Type.App(Type.Forall(["a"], Type.List (Type.Parameter "a")), [typ])
+      Type.List(typ)
 
   | EntityKind.Binding(name, { Kind = EntityKind.CallSite(inst, methName, parSpec) }) ->
       // Binding node is used to resolve type of a lambda function variable. 
       // Its antecedent is `EntityKind.CallSite` containing reference to the method around it - 
       // assuming lambda appears in something like: `foo(10, fun x -> ...)`
-      match resolveParameterType (reduceType (getType ctx inst)) methName parSpec with
+      match resolveParameterType (getType ctx inst) methName parSpec with
       | Type.Function([tin], _) -> tin
       | _ -> failwith "typeCheckEntity: Expected parameter of function type"
 
@@ -205,12 +189,6 @@ and typeCheckEntity ctx (e:Entity) =
 /// Perform type applications & evaluate delayed types
 let rec evaluateDelayedType topLevel (t:Type) = async {
   match t with
-  | Type.App(t, args) ->
-      let! t = evaluateDelayedType topLevel t 
-      return Type.App(t, args)
-  | Type.Forall(vars, t) ->
-      let! t = evaluateDelayedType topLevel t 
-      return Type.Forall(vars, t)  
   | Type.Object(obj) when topLevel ->
       let! members = obj.Members |> Async.Array.map (fun m -> async {
         match m with
@@ -220,7 +198,11 @@ let rec evaluateDelayedType topLevel (t:Type) = async {
               return n, opt, t }) 
             return Member.Method(n, args, typ, doc, e)
         | prop -> return prop })
-      return Type.Object { obj with Members = members }
+      let obj = 
+        { new ObjectType with 
+            member x.Members = members
+            member x.TypeEquals t2 = obj.TypeEquals t2 }
+      return Type.Object obj
   | Type.Function(t1s, t2) ->
       let! t2 = evaluateDelayedType topLevel t2
       let! t1s = Async.map (evaluateDelayedType topLevel) t1s
@@ -228,7 +210,7 @@ let rec evaluateDelayedType topLevel (t:Type) = async {
   | Type.List(t) ->
       let! t = evaluateDelayedType topLevel t
       return Type.List(t)
-  | Type.Delayed(_, f) ->
+  | Type.Delayed(f) ->
       let! t = Async.AwaitFuture f
       return! evaluateDelayedType topLevel t
   | t -> return t }

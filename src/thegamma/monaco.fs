@@ -63,8 +63,8 @@ let createCompletionProvider (getService:string -> CheckingService) =
                 match ent.Kind with 
                 | EntityKind.NamedMember(_, { Type = Some t }) when loc >= rng.Start && loc <= rng.End + 1 -> 
                     Log.trace("completions", "Antecedant at current location: %O", t)
-                    match Types.reduceType t with
-                    | Type.Object { Members = mems } -> Some(rng, mems)
+                    match t with
+                    | Type.Object obj -> Some(rng, obj.Members)
                     | _ -> None
                 | EntityKind.NamedMember(n, { Type = Some t })  ->
                     Log.trace("completions", "Ignoring '%s' at location %s-%s (current=%s)", n.Name, rng.Start, rng.End, loc)

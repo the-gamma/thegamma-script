@@ -113,6 +113,7 @@ module TypeChecker =
     { Number = 308; Range = rng 
       Message = sprintf "Required parameter `%s` is not given a value." par }
 
+(*
   let incorrectParameterType parName parType actualType err1 err2 rng = 
     { Number = 309; Range = rng 
       Message = 
@@ -124,6 +125,10 @@ module TypeChecker =
       Message = 
         sprintf "The arguments of the call have conflicting types. The type %s assigned to a variable %s does not match the type %s."
           (formatTypeInfo t1) var (formatTypeInfo t2) }
+*)
+  let parameterConflict rng = 
+    { Number = 308; Range = rng 
+      Message = "Invalid argument type" }
 
   let callMissingInstance name rng = 
     { Number = 311; Range = rng 

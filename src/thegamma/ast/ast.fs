@@ -85,12 +85,13 @@ type [<RequireQualifiedAccess>] Documentation =
 
 type [<RequireQualifiedAccess>] Member = 
   | Property of name:string * typ:Type * meta:Metadata list * emitter:Emitter
-  | Method of name:string * arguments:(string * bool * Type) list * typ:Type * meta:Metadata list * emitter:Emitter
+  | Method of name:string * arguments:(string * bool * Type) list * typ:(Type list -> Type option) * meta:Metadata list * emitter:Emitter
   member x.Name = 
     match x with Property(name=s) | Method(name=s) -> s
 
 and ObjectType = 
-  { Members : Member[] }
+  abstract Members : Member[] 
+  abstract TypeEquals : ObjectType -> bool
 
 and [<RequireQualifiedAccess>] PrimitiveType = 
   | Number
@@ -99,16 +100,10 @@ and [<RequireQualifiedAccess>] PrimitiveType =
   | Bool
   | Unit
 
-and TypeVar = string
-
 and [<RequireQualifiedAccess>] Type =
-  | Forall of TypeVar list * Type
-  | Parameter of TypeVar 
-  | App of Type * Type list
-
-  | Delayed of guid:string * Future<Type>
-  | Primitive of PrimitiveType
+  | Delayed of Future<Type>
   | Object of ObjectType
+  | Primitive of PrimitiveType
   | Function of arguments:Type list * returns:Type
   | List of elementType:Type
   | Any

@@ -28,7 +28,7 @@ let rec getMembers typ = async {
   match typ with
   | Type.Object(o) -> 
       return o.Members
-  | Type.Delayed(_, f) ->
+  | Type.Delayed(f) ->
       let! typ = Async.AwaitFuture f
       return! getMembers typ 
   | _ -> 
