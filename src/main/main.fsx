@@ -27,15 +27,9 @@ let buildGlobalsTable provideTypes = Async.StartAsNamedFuture "buildGlobalsTable
   // (because the providers may need to lookup named types), so we define
   // the map as mutable and fill it later.
   let mutable named = Map.empty
-  let lookupNamed n tyargs = 
+  let lookupNamed n = 
     match named.TryFind(n) with
-    | Some(r, tya) -> 
-        if List.length tya <> List.length tyargs then 
-          Log.error("Named type '%s' has mismatching length of type arguments", n)
-          failwith (sprintf "Named type '%s' has mismatching length of type arguments" n)
-        if tya.Length > 0 then 
-          Type.App(r, tyargs)
-        else r 
+    | Some(r) -> r
     | None -> 
         Log.error("Could not find named type '%s'", n)
         failwith (sprintf "Could not find named type '%s'" n)
@@ -44,17 +38,17 @@ let buildGlobalsTable provideTypes = Async.StartAsNamedFuture "buildGlobalsTable
   let allTypes = 
     [ // Pretend we support these - the names appear in the F# provided types
       // and if the functions are not actually used, providing Any type works 
-      yield TypeProviders.NamedType("value", ["a"], Type.Any)
-      yield TypeProviders.NamedType("object", [], Type.Any)
-      yield TypeProviders.NamedType("seq", ["a"], Type.Any) 
-      yield TypeProviders.NamedType("async", ["a"], Type.Any) 
+      yield TypeProviders.NamedType("value", Type.Any)
+      yield TypeProviders.NamedType("object", Type.Any)
+      yield TypeProviders.NamedType("seq", Type.Any) 
+      yield TypeProviders.NamedType("async", Type.Any) 
       yield! provided ]
 
   // Build lookup table from named types and
   // list of global entities (provided global values)
   named <- 
     allTypes
-    |> Seq.choose (function TypeProviders.NamedType(s, tya, t) -> Some(s, (t, tya)) | _ -> None)
+    |> Seq.choose (function TypeProviders.NamedType(s, t) -> Some(s, t) | _ -> None)
     |> Map.ofSeq
   let globalEntities = allTypes |> List.choose (function 
     | TypeProviders.GlobalValue(n, m, e, t) -> 
@@ -76,9 +70,9 @@ type TheGammaContext =
 let callShowMethod outputId (cmd:Node<_>) = 
   match cmd.Node with
   | Command.Expr({ Entity = Some { Type = Some typ } } as inst) ->
-      match Types.reduceType typ with
-      | Type.Object { Members = members } ->
-          let hasShow = members |> Array.exists (function 
+      match typ with
+      | Type.Object obj ->
+          let hasShow = obj.Members |> Array.exists (function 
             | Member.Method(name="show"; arguments=[_, _, Type.Primitive PrimitiveType.String]) -> true
             | _ -> false)
           if hasShow then
@@ -116,7 +110,7 @@ let evaluate ctx code outputId = async {
   TheGamma.Interactive.youdraw.create |> ignore
   return eval code }
 
-type provider = string -> (string -> Type list -> Type) -> Async<list<ProvidedType>>
+type provider = string -> (string -> Type) -> Async<list<ProvidedType>>
 
 let previews = 
   [ Live.Pivot.preview |> unbox<LivePreview<CustomLiveState, CustomLiveEvent>> 

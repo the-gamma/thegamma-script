@@ -6,7 +6,7 @@
 #r "thegamma.dll"
 #else
 [<NUnit.Framework.TestFixture>]
-module TheGamma.Tests.TypeChecker
+module TheGamma.Tests.SimpleTypes
 #endif
 open TheGamma
 open TheGamma.Common
@@ -21,8 +21,11 @@ open NUnit.Framework
 let noEmitter = { Emit = fun _ -> failwith "mock emitter" }
 let prop n t = Member.Property(n, t, [], noEmitter)
 let meth n t a = Member.Method(n, a, t, [], noEmitter)
-let obj membrs = Type.Object { Members = Array.ofList membrs; }
-let delay n f = Type.Delayed(n, Async.CreateNamedFuture n (async { return f () }))
+let delay n f = Type.Delayed(Async.CreateNamedFuture n (async { return f () }))
+let obj membrs = 
+  { new ObjectType with
+      member x.Members = Array.ofList membrs
+      member x.TypeEquals _ = false } |> Type.Object
 
 // Helpers for generating primitive types
 let str = Type.Primitive PrimitiveType.String
@@ -30,9 +33,6 @@ let num = Type.Primitive PrimitiveType.Number
 let bool = Type.Primitive PrimitiveType.Bool
 
 // Helper for generating other types
-let forall n t = Type.Forall([n], t)
-let apply t f = Type.App(f, [t])
-let par n = Type.Parameter(n)
 let list t = Type.List(t)
 let func t1 t2 = Type.Function([t1], t2)
 
@@ -56,17 +56,11 @@ let check (code:string) cond vars =
   ent.Type.Value,
   [ for e in errors -> e.Number, code.Substring(e.Range.Start, e.Range.End - e.Range.Start + 1) ]
 
-
-// ------------------------------------------------------------------------------------------------
-// Assertion helpers & fake types for tests
-// ------------------------------------------------------------------------------------------------
-
 /// Type-safe assertion
 let equal (expected:'T) (actual:'T) = Assert.AreEqual(expected, actual)
 
 /// Assert that two types are equal
 let assertType t1 (t2, _) = 
-  let t1, t2 = Types.reduceType t1, Types.reduceType t2
   equal (Ast.formatType t1) (Ast.formatType t2)
 
 /// Assert that result contains given errors
@@ -75,6 +69,10 @@ let assertErrors expectErrors (_, errs) =
   for (en, ec), (an, ac) in List.zip expectErrors errs do
     equal en an
     equal ec ac
+
+// ------------------------------------------------------------------------------------------------
+// Fake types for tests
+// ------------------------------------------------------------------------------------------------
 
 let rec fieldsObj t = delay "fieldsObj" (fun () ->
   obj [
@@ -91,45 +89,7 @@ let rec testObj () = delay "testObj" (fun () ->
     prop "get the data" num
   ])
 
-  
-let rec seriesObj () = 
-  obj [
-    meth "make" (forall "b" (series (par "b"))) [
-      "vals", false, apply (par "b") (forall "x" (list (par "x"))) ]
-    meth "makeTwo" (forall "b" (series (par "b"))) [
-      "val1", false, par "b"
-      "val2", false, par "b" ]
-    meth "range" (series num) [
-      "count", false, num ]
-    meth "add" (series (par "a")) [
-      "val", false, par "a" ]
-    meth "map" (forall "b" (series (par "b"))) [
-      "f", false, (func (par "a") (par "b")) ]
-    meth "sort" (series (par "a")) [
-      "fast", true, bool
-      "reverse", true, bool ]
-    prop "head" (par "a")
-  ]
-
-and series t = apply t (forall "a" (delay "series" (fun () ->
-  seriesObj () )))
-
-let rec tableObj () =
-  obj [
-    meth "make" (forall "b" (table (par "b"))) [
-      "data", false, series (par "b") ]
-    prop "data" (series (par "a"))
-  ]
-
-and table t = apply t (forall "a" (delay "table" (fun () ->
-  tableObj () )))
-
-let vars = 
-  [ "series", series Type.Any
-    "numbers", series (Type.Primitive PrimitiveType.Number)
-    "table", table (Type.Any)
-    "test", testObj () ]
-
+let vars = [ "test", testObj () ]
 
 // ------------------------------------------------------------------------------------------------
 // Testing the type checker
@@ -164,34 +124,6 @@ let ``Report errors for list with elements of mismatching types`` () =
   actual |> assertErrors [306, "test.'group data'.three.then"; 306, "\"evil\"" ]
 
 [<Test>]
-let ``Type check method call and infer result type from argument`` () =
-  let code = """
-    let res = series.make([1,2,3])
-      .add(4).sort(reverse=true).head
-  """
-  let actual = check code (isVariable "res") vars
-  actual |> assertType (Type.Primitive PrimitiveType.Number)
-  actual |> assertErrors []
-
-[<Test>]
-let ``Type check method call and infer result type from object argument`` () =
-  let code = """
-    let res = table.make(numbers).data.head
-  """
-  let actual = check code (isVariable "res") vars
-  actual |> assertType (Type.Primitive PrimitiveType.Number)
-  actual |> assertErrors []
-
-[<Test>]
-let ``Type check method call with function as an argument`` () =
-  let code = """
-    let res = series.make([1,2,3]).map(fun x -> true).head
-  """
-  let actual = check code (isVariable "res") vars
-  actual |> assertType (Type.Primitive PrimitiveType.Bool)
-  actual |> assertErrors []
-
-[<Test>]
 let ``Report error when property not found`` () = 
   let code = "let res = test.yadda"
   let actual = check code (isVariable "res") vars
@@ -208,38 +140,3 @@ let ``Report error when instance is not an object`` () =
   let code = """let res = test.'get the data'.bar"""
   let actual = check code (isVariable "res") vars
   actual |> assertErrors [305, "test.'get the data'"]
-
-[<Test>]
-let ``Report error when name based param is not last`` () =
-  let code = """
-    let res = numbers.sort(fast=true, false).head
-  """
-  let actual = check code (isVariable "res") vars
-  actual |> assertType (Type.Primitive PrimitiveType.Number)
-  actual |> assertErrors [307,"false"]
-
-[<Test>]
-let ``Report error when required parameter is missing value`` () =
-  let code = """
-    let res = numbers.add().head
-  """
-  let actual = check code (isVariable "res") vars
-  actual |> assertType (Type.Primitive PrimitiveType.Number)
-  actual |> assertErrors [308,"()"]
-
-[<Test>]
-let ``Report error when method parameter is given a wrong value`` () =
-  let code = """
-    let res = numbers.add("yo").head
-  """
-  let actual = check code (isVariable "res") vars
-  actual |> assertType (Type.Primitive PrimitiveType.Number)
-  actual |> assertErrors [309,"\"yo\""]
-
-[<Test>]
-let ``Report error when generic method type cannot be inferred`` () =
-  let code = """
-    let res = series.makeTwo(1, true).head
-  """
-  let actual = check code (isVariable "res") vars
-  actual |> assertErrors [310,"(1, true)"]

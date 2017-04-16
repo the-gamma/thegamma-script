@@ -129,7 +129,9 @@ let concatUrl (a:string) (b:string) =
   (trimRight '/' a) + "/" + (trimLeft '/' b)
 
 let makeObjectType members = 
-  { Members = Array.ofSeq members } |> Type.Object
+  { new ObjectType with 
+      member x.Members = Array.ofSeq members 
+      member x.TypeEquals _ = false } |> Type.Object
 
 let isNumeric fld = fld = PrimitiveType.Number
 let isConcatenable fld = fld = PrimitiveType.String
@@ -182,7 +184,7 @@ let makeDataEmitter isPreview isSeries tfs =
 
 type Context = 
   { Root : string
-    LookupNamed : string -> Type list -> Type
+    LookupNamed : string -> Type
     InputFields : Field list
     Fields : Field list }
 
@@ -195,7 +197,8 @@ and makeMethod ctx name tfs callid args =
   let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box tfs  }
   let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box ctx.Fields  }
   Member.Method
-    ( name, [ for n, t in args -> n, false, Type.Primitive t ], makePivotType ctx tfs, 
+    ( name, [ for n, t in args -> n, false, Type.Primitive t ], 
+      (fun ts -> if ts = List.map (snd >> Type.Primitive) args then Some(makePivotType ctx tfs) else None),  
       [meta1; meta2], makeMethodEmitter callid args )
 
 and makeDataMember ctx name isPreview tfs =
@@ -206,7 +209,7 @@ and makeDataMember ctx name isPreview tfs =
     | (GetSeries _)::_ -> 
         match fields with
         | [kf; vf] ->  
-            ctx.LookupNamed "series" [Type.Primitive kf.Type; Type.Primitive vf.Type], true
+            ctx.LookupNamed "series" (*[Type.Primitive kf.Type; Type.Primitive vf.Type]*), true
         | _ -> failwith "makeDataMember: Series should have key and value"
     | _ -> 
         let membs = 
@@ -214,8 +217,8 @@ and makeDataMember ctx name isPreview tfs =
             let memTy, memConv = getTypeAndEmitter fld.Type
             let emitter = { Emit = fun (inst, _) -> memConv <| (inst /?/ str fld.Name) }
             Member.Property(fld.Name, memTy, [docMeta (Documentation.Text "")], emitter))
-        let recTyp = Type.Object { Members = membs }
-        ctx.LookupNamed "series" [Type.Primitive PrimitiveType.Number; recTyp ], false
+        let recTyp = makeObjectType membs
+        ctx.LookupNamed "series" (*[Type.Primitive PrimitiveType.Number; recTyp ]*), false
 
   let tfs = if isSeries then tfs else GetTheData::tfs
   let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box tfs }
@@ -371,7 +374,7 @@ and withPreview ctx tfs typ =
   match typ with
   | Type.Object(o) -> 
       let preview = makeDataMember ctx "preview" true (adjustForPreview tfs)
-      Type.Object { o with Members = Array.append [| preview |] o.Members }
+      makeObjectType (Array.append [| preview |] o.Members) 
   | typ -> failwith "withPreview: Expected object type"
 
 and makePivotType ctx tfs = 
@@ -383,7 +386,7 @@ and makePivotType ctx tfs =
     with e ->
       Log.exn("providers", "Failed when generating type for %O with exception %O", tfs, e)      
       return raise e }
-  Type.Delayed("pivot: " + guid, Async.CreateNamedFuture guid typ)
+  Type.Delayed(Async.CreateNamedFuture guid typ)
   
 let providePivotType root name lookupNamed fields =
   let fields = [ for f, t in fields -> { Name = f; Type = t }]

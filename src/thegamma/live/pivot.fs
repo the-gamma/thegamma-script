@@ -63,6 +63,7 @@ let transformName = function
   | Pivot.GroupBy _ -> "group by"
   | Pivot.Paging _ -> "paging"
   | Pivot.SortBy _ -> "sort by"
+  | Pivot.GetRange _ | Pivot.Metadata _ -> failwith "Unexpected get range or metadata"
 
 type PivotSection = 
   { Transformation : Pivot.Transformation   
@@ -157,7 +158,7 @@ let withPivotState (pivotState:PivotEditorState) state =
 
 let findPreview trigger globals (ent:Entity) = 
   let nm = { Name.Name="preview" }
-  match FsOption.map Types.reduceType ent.Type with 
+  match ent.Type with 
   | Some(Type.Object(TypeChecker.FindMethod nm _))
   | Some(Type.Object(TypeChecker.FindProperty nm _)) ->
       let res = Interpreter.evaluate globals ent  
@@ -363,6 +364,7 @@ let rec updatePivotState trigger state event =
 
         let firstProperty, properties = 
           match tfs with
+          | Pivot.GetRange _ | Pivot.Metadata _ -> failwith "Unexpected get range or metadata"
           | Pivot.DropColumns _ -> "drop columns", [marker; "then"]
           | Pivot.SortBy _ -> "sort data", [marker; "then"]
           | Pivot.FilterBy _ -> "filter data", [marker; "then"] // TODO

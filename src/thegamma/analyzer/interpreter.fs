@@ -32,12 +32,12 @@ let babel : Babel = Unchecked.defaultof<_>
 type EvaluationContext =
   { Globals : IDictionary<string, Entity> }
 
-let (|FindProperty|_|) (name:Name) { Members = membs } = 
-  membs |> Seq.tryPick (function 
+let (|FindProperty|_|) (name:Name) (obj:ObjectType) = 
+  obj.Members |> Seq.tryPick (function 
     Member.Property(name=n; emitter=e) when n = name.Name -> Some(e) | _ -> None) 
 
-let (|FindMethod|_|) (name:Name) { Members = membs } = 
-  membs |> Seq.tryPick (function 
+let (|FindMethod|_|) (name:Name) (obj:ObjectType) = 
+  obj.Members |> Seq.tryPick (function 
     Member.Method(name=n; arguments=args; emitter=e) when n = name.Name -> Some(args, e) | _ -> None) 
 
 let storeArguments values =
@@ -82,7 +82,7 @@ let evaluateCall emitter inst args =
 
 let evaluatePreview typ value = 
   let previewName = {Name.Name="preview"}
-  match Option.map Types.reduceType typ with
+  match typ with
   | Some(Type.Object(FindProperty previewName e)) -> Some(evaluateCall e value [])
   | Some(Type.Object(FindMethod previewName (_, e))) -> Some(evaluateCall e value [])
   | _ -> None
@@ -111,7 +111,7 @@ and evaluateEntity ctx (e:Entity) =
       | _ -> None
       
   | EntityKind.ChainElement(isProperty=true; name=name; instance=Some inst) ->
-      match Types.reduceType inst.Type.Value with 
+      match inst.Type.Value with 
       | Type.Object(FindProperty name e) -> 
           Some(evaluateCall e (getValue ctx inst) [])
       | _ -> None
@@ -127,7 +127,7 @@ and evaluateEntity ctx (e:Entity) =
           | { Kind = EntityKind.NamedParam(name, value) } -> Some(name.Name, getValue ctx value)
           | _ -> None) |> dict
 
-      match Types.reduceType inst.Type.Value with 
+      match inst.Type.Value with 
       | Type.Object(FindMethod name (pars, e)) -> 
           let args = pars |> List.mapi (fun i (name, _, _) ->
             if i < positionBased.Length then positionBased.[i]
