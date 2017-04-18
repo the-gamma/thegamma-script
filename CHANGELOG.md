@@ -1,3 +1,4 @@
+ * 0.0.15 - Replace generics with provider methods, expose Monaco editor
  * 0.0.14 - Add You Guess for column charts, tweaking visualization
  * 0.0.13 - Make You Draw It more mobile friendly
  * 0.0.12 - SVG based interactive animations (replace You Draw It)
