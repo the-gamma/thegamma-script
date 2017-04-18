@@ -69,7 +69,7 @@ type ExportedType =
 type GenericType =
   inherit ObjectType
   abstract TypeArguments : Type list
-  abstract IsInstanceOfSchema : GenericTypeSchema -> bool
+  abstract TypeDefinition : GenericTypeDefinition
 
 and GenericTypeSchema = 
   inherit ObjectType
@@ -90,11 +90,32 @@ and TypeSchema =
   | Function of TypeSchema list * TypeSchema
   | List of TypeSchema
 
+let rec mapGenericType typ g =
+  match typ with 
+  | Type.Delayed(f) -> 
+      Type.Delayed(Async.CreateNamedFuture "applyTypes" <| async {
+        let! res = Async.AwaitFuture f
+        return mapGenericType res g })
+  | Type.Object(:? GenericTypeDefinition as gtd) -> 
+      Type.Object(gtd.Apply([ for t in g gtd -> TypeSchema.Primitive t]).Substitute(fun _ -> None))
+  | t -> t
+
+let rec applyTypes typ tyargs =
+  match typ with 
+  | Type.Delayed(f) -> 
+      Type.Delayed(Async.CreateNamedFuture "applyTypes" <| async {
+        let! res = Async.AwaitFuture f
+        return applyTypes res tyargs })
+  | Type.Object(:? GenericTypeDefinition as gtd) -> 
+      Type.Object(gtd.Apply([ for t in tyargs -> TypeSchema.Primitive t]).Substitute(fun _ -> None))
+  | _ -> failwith "applyTypes: Expected generic type definition"
+      
 let rec unifyTypes ctx schemas tys = 
   match schemas, tys with
   | [], [] -> Some ctx
   | TypeSchema.GenericType(gs)::ss, Type.Object(:? GenericType as gt)::ts 
-      when gt.IsInstanceOfSchema gs && List.length gs.TypeArguments = List.length gt.TypeArguments ->
+      when gt.TypeDefinition.FullName = gs.TypeDefinition.FullName && 
+        List.length gs.TypeArguments = List.length gt.TypeArguments ->
       unifyTypes ctx (gs.TypeArguments @ ss) (gt.TypeArguments @ ts)
   | TypeSchema.Primitive(t1)::ss, t2::ts when Types.typesEqual t1 t2 -> unifyTypes ctx ss ts
   | TypeSchema.Parameter(n)::ss, t::ts -> unifyTypes ((n,t)::ctx) ss ts
@@ -142,7 +163,7 @@ let rec partiallySubstituteTypeParams (assigns:string -> Type option) schema =
    
 
 // Needs to be delayed to avoid calling lookupNamed too early
-let importProvidedType url lookupNamed exp = fun () ->
+let importProvidedType url lookupNamed exp = 
   let rec mapType (t:AnyType) = 
     match getKind t with
     | "primitive" -> 
@@ -192,6 +213,7 @@ let importProvidedType url lookupNamed exp = fun () ->
             
         let retTyp = partiallySubstituteTypeParams assigns (mapType m.returns)
         let retFunc tys =
+          Log.trace("providers", "F# provider unifying: %O, %O", [| for _, _, t in args -> t |], Array.ofList tys)
           match unifyTypes [] [ for _, _, t in args -> t ] tys with 
           | None -> None
           | Some assigns ->
@@ -229,25 +251,31 @@ let importProvidedType url lookupNamed exp = fun () ->
         { new GenericTypeDefinition with
             member td.TypeParameterCount = List.length typars
             member td.FullName = TypeProvidersRuntime.concatUrl url exp.name
-            member td.Members = failwith "Uninstantiated generic type definition"
-            member td.TypeEquals _ = failwith "Uninstantiated generic type definition"
+            member td.Members = failwithf "Uninstantiated generic type definition (%s)" td.FullName
+            member td.TypeEquals _ = failwithf "Uninstantiated generic type definition (%s)" td.FullName
             member td.Apply tyargs = 
               { new GenericTypeSchema with
                   member x.Members = failwith "Uninstantiated generic type schema"
                   member x.TypeDefinition = td
                   member x.TypeEquals _ = failwith "Uninstantiated generic type schema"
                   member x.Substitute assigns = 
+                    // Lazy so that lookupNamed does not get called too early
                     let tyArgLookup = dict (List.zip typars tyargs)
-                    let members = generateMembers (fun n ->
+                    let members = lazy generateMembers (fun n ->
                       match tyArgLookup.TryGetValue n with
                       | true, tysch -> Some(substituteTypeParams assigns tysch)
                       | _ -> None)
 
                     { new GenericType with
                         member x.TypeArguments = List.map (substituteTypeParams assigns ) tyargs
-                        member x.IsInstanceOfSchema sch = sch.TypeDefinition.FullName = td.FullName
-                        member x.Members = members
-                        member x.TypeEquals _ = failwith "TODO" }
+                        member x.TypeDefinition = td
+                        member x.Members = members.Value
+                        member x.TypeEquals t2 = 
+                          match t2 with
+                          | :? GenericType as gt ->
+                              gt.TypeDefinition.FullName = x.TypeDefinition.FullName &&
+                                Types.listsEqual x.TypeArguments gt.TypeArguments Types.typesEqual
+                          | _ -> false }
                   member x.TypeArguments = tyargs } } :> _
     
   objectType |> Type.Object
@@ -258,20 +286,13 @@ let provideFSharpTypes lookupNamed url =
     let expTys = jsonParse<ExportedType[]> json
     return
       [ for exp in expTys ->
-          let ty = 
-            Type.Delayed(Async.CreateNamedFuture exp.name <| async {
-              return importProvidedType url lookupNamed exp () })
+          let ty = importProvidedType url lookupNamed exp
           if exp.``static`` then           
             let e = exp.instance |> Seq.fold (fun chain s -> 
               match chain with
               | None -> Some(IdentifierExpression(s, None))
               | Some e -> Some(MemberExpression(e, IdentifierExpression(s, None), false, None)) ) None |> Option.get
-            let ty = 
-              match ty with
-              | Type.Object(:? GenericTypeDefinition as gtd) ->
-                  let ts = [ for i in 1 .. gtd.TypeParameterCount -> TypeSchema.Primitive Type.Any ]
-                  Type.Object(gtd.Apply(ts).Substitute(fun _ -> None))
-              | _ -> ty
+            let ty = mapGenericType ty (fun gtd -> [ for i in 1 .. gtd.TypeParameterCount -> Type.Any ])
             ProvidedType.GlobalValue(exp.name, [], e, ty)
           else
             ProvidedType.NamedType(exp.name, ty) ] }

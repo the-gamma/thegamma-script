@@ -31,7 +31,7 @@ let buildGlobalsTable provideTypes = Async.StartAsNamedFuture "buildGlobalsTable
     match named.TryFind(n) with
     | Some(r) -> r
     | None -> 
-        Log.error("Could not find named type '%s'", n)
+        Log.error("typechecker", "Could not find named type '%s'", n)
         failwith (sprintf "Could not find named type '%s'" n)
 
   let! provided = provideTypes lookupNamed
@@ -135,6 +135,7 @@ let defaultEditorOptions =
   { width = None; height = None; maxHeight = None; autoHeight = None; monacoOptions = None }
 
 type editor(ed:monaco.editor.ICodeEditor) = 
+  member x.getMonacoEditor() = ed
   member x.getValue() = 
     ed.getModel().getValue(monaco.editor.EndOfLinePreference.LF, false)
   member x.setValue(text) = 

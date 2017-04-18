@@ -101,8 +101,8 @@ let table =
 
 let types = System.Collections.Generic.Dictionary<_, _>()
 let lookupNamed n = types.[n]
-types.Add("table", importProvidedType "http://demo" lookupNamed table ())
-types.Add("series", importProvidedType "http://demo" lookupNamed series ())
+types.Add("table", importProvidedType "http://demo" lookupNamed table)
+types.Add("series", importProvidedType "http://demo" lookupNamed series)
 
 let fapply n typ =
   match lookupNamed n with

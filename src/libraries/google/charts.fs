@@ -45,7 +45,7 @@ type chart =
     { Line.data = ChartDataOperations.oneKeyValue "number" data; 
       typeName = "LineChart"; options = LineChartOptions.empty }
 
-  static member lines(data:series<'a, series<int, float>>) = 
+  static member lines(data:series<'a, series<'b, float>>) = 
     { Line.data = ChartDataOperations.oneKeyNValues "number" data; 
       typeName = "LineChart"; options = LineChartOptions.empty }
 (*

@@ -265,9 +265,11 @@ let rec formatType = function
   | Type.Primitive PrimitiveType.String -> "string"
   | Type.Primitive PrimitiveType.Unit -> "unit"
   | Type.Object obj ->  
-      let mem = obj.Members
-      let mems = mem |> Seq.truncate 5 |> Seq.map (fun m -> m.Name) |> String.concat ", "
-      "{ " + if mem.Length > 5 then mems + ", ..." else mems + " }"
+      try 
+        let mem = obj.Members
+        let mems = mem |> Seq.truncate 5 |> Seq.map (fun m -> m.Name) |> String.concat ", "
+        "{ " + if mem.Length > 5 then mems + ", ..." else mems + " }"
+      with _ -> "{ members }"
   | Type.Function(tin, tout) -> "(" + String.concat ", " (List.map formatType tin) + ") -> " + formatType tout
   | Type.List t -> "list<" + formatType t + ">"
   | Type.Any -> "any"

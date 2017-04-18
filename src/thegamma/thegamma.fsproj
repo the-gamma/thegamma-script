@@ -77,8 +77,8 @@
     <Compile Include="analyzer/typechecker.fs" />
     <Compile Include="analyzer/interpreter.fs" />
     <Compile Include="providers/providers.fs" />
-    <Compile Include="providers/rest.fs" />
     <Compile Include="providers/fsharp.fs" />
+    <Compile Include="providers/rest.fs" />
     <Compile Include="providers/pivot.fs" />
     <Compile Include="live/live.fs" />
     <Compile Include="live/pivot.fs" />

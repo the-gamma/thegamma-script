@@ -209,7 +209,7 @@ and makeDataMember ctx name isPreview tfs =
     | (GetSeries _)::_ -> 
         match fields with
         | [kf; vf] ->  
-            ctx.LookupNamed "series" (*[Type.Primitive kf.Type; Type.Primitive vf.Type]*), true
+            FSharpProvider.applyTypes (ctx.LookupNamed "series") [Type.Primitive kf.Type; Type.Primitive vf.Type], true
         | _ -> failwith "makeDataMember: Series should have key and value"
     | _ -> 
         let membs = 
@@ -218,7 +218,7 @@ and makeDataMember ctx name isPreview tfs =
             let emitter = { Emit = fun (inst, _) -> memConv <| (inst /?/ str fld.Name) }
             Member.Property(fld.Name, memTy, [docMeta (Documentation.Text "")], emitter))
         let recTyp = makeObjectType membs
-        ctx.LookupNamed "series" (*[Type.Primitive PrimitiveType.Number; recTyp ]*), false
+        FSharpProvider.applyTypes (ctx.LookupNamed "series") [Type.Primitive PrimitiveType.Number; recTyp ], false
 
   let tfs = if isSeries then tfs else GetTheData::tfs
   let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box tfs }

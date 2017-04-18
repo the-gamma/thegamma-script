@@ -47,7 +47,7 @@ let resolveParameterType instTy methName parSpec =
   | _ -> failwith "resolveParameterType: Instance is not an object"
 
 
-let rec checkMethodCall ctx memTy pars argList args = 
+let rec checkMethodCall (name:string) ctx memTy pars argList args = 
 
   // Split arguments into position & name based and report 
   // error if there is non-named argument after named argument
@@ -79,7 +79,8 @@ let rec checkMethodCall ctx memTy pars argList args =
   // Infer assignments for type parameters from actual arguments
   match memTy [ for _, typ, _ in matchedArguments -> typ ] with
   | Some typ -> typ
-  | None -> 
+  | None ->   
+      Log.trace("typechecker", "Invalid argument type when calling '%s'. Argument types: %O", name, [| for _, typ, _ in matchedArguments -> typ |])
       Errors.TypeChecker.parameterConflict |> addError ctx argList
       Type.Any
   
@@ -124,7 +125,7 @@ and typeCheckEntity ctx (e:Entity) =
       | Type.Any -> Type.Any
       | Type.Object(FindMethod name (meta, args, resTyp)) ->  
           e.Meta <- meta
-          checkMethodCall ctx resTyp args arglist ents
+          checkMethodCall name.Name ctx resTyp args arglist ents
       | Type.Object obj ->
           Errors.TypeChecker.methodMissing name.Name obj.Members |> addError ctx ident
           Type.Any

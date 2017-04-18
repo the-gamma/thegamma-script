@@ -118,7 +118,7 @@ let rec getTypeAndEmitter (lookupNamed:string -> TheGamma.Type) ty =
   | Generic("seq", [|Generic("tuple", [|t1; t2|])|]) -> 
       let t1, e1 = getTypeAndEmitter lookupNamed t1
       let t2, e2 = getTypeAndEmitter lookupNamed t2
-      let typ = lookupNamed "series" // TODO: [t1; t2]
+      let typ = FSharpProvider.applyTypes (lookupNamed "series") [t1; t2]
       typ, 
       fun d -> 
         ident("series")?create /@/ 
@@ -126,7 +126,7 @@ let rec getTypeAndEmitter (lookupNamed:string -> TheGamma.Type) ty =
             str "key"; str "value"; str "" ] // TODO: We don't have any info - that sucks
   | Generic("seq", [|ty|]) ->
       let elTy, emitter = getTypeAndEmitter lookupNamed ty
-      let serTy = lookupNamed "series" // TODO: [Type.Primitive PrimitiveType.Number; elTy]
+      let serTy = FSharpProvider.applyTypes (lookupNamed "series") [Type.Primitive PrimitiveType.Number; elTy]
       serTy, 
       // This is over async, but the child `emitter` is not over async
       fun d -> 
