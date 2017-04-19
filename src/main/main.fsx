@@ -9,6 +9,7 @@ open Fable.Helpers
 open Fable.Import.Browser
 
 open TheGamma
+open TheGamma.Ast
 open TheGamma.Html
 open TheGamma.Common
 open TheGamma.TypeChecker
@@ -134,6 +135,67 @@ type error =
 let defaultEditorOptions = 
   { width = None; height = None; maxHeight = None; autoHeight = None; monacoOptions = None }
 
+type thenable<'R>(work:Async<'R>) = 
+  member x.``then``(onValue, onError) = 
+    async { 
+      try 
+        let! res = work 
+        onValue res 
+      with e ->
+        onError e } |> Async.StartImmediate
+
+let rec serializeType typ = 
+  match typ with
+  | Type.Any -> box "any"
+  | Type.Delayed(_) -> box "delayed"
+  | Type.Primitive(PrimitiveType.Unit) -> box "unit"
+  | Type.Primitive(PrimitiveType.Bool) -> box "bool"
+  | Type.Primitive(PrimitiveType.Date) -> box "date"
+  | Type.Primitive(PrimitiveType.Number) -> box "number"
+  | Type.Primitive(PrimitiveType.String) -> box "string"
+  | Type.Function(args, res) -> 
+      [ "kind", box "function"
+        "arguments", args |> List.map serializeType |> Array.ofList |> box
+        "result", serializeType res ] |> JsInterop.createObj 
+  | Type.List(t) -> 
+      [ "kind", box "array"
+        "type", serializeType t ] |> JsInterop.createObj
+  | Type.Object(obj) -> 
+      [ "kind", box "object"
+        "members", obj.Members |> Array.map (fun m -> 
+          match m with Member.Method(name=n) | Member.Property(name=n) -> n) |> box ] 
+      |> JsInterop.createObj
+
+let rec serializeEntity (rng:Range option) (ent:Entity) =
+  let kind = 
+    match ent.Kind with
+    | EntityKind.Root -> "root"
+    | EntityKind.Program _ -> "program"
+    | EntityKind.RunCommand _ -> "do"
+    | EntityKind.LetCommand _ -> "let"
+    | EntityKind.Operator _ -> "operator"
+    | EntityKind.List _ -> "list"
+    | EntityKind.Constant _ -> "constant"
+    | EntityKind.Function _ -> "function"
+    | EntityKind.GlobalValue _ -> "global"
+    | EntityKind.Variable _ -> "variable"
+    | EntityKind.Binding _ -> "binding"
+    | EntityKind.ArgumentList _ -> "args"
+    | EntityKind.CallSite _ -> "callsite"
+    | EntityKind.NamedParam _ -> "named"
+    | EntityKind.NamedMember _ -> "member"
+    | EntityKind.ChainElement _ -> "chain"
+  [ yield "kind", box kind
+    if rng.IsSome then yield "range", JsInterop.createObj [ "start", box rng.Value.Start; "end", box rng.Value.End ]
+    yield "children", ent.Antecedents |> List.toArray |> Array.map (serializeEntity None) |> box
+    yield "type", match ent.Type with Some t -> serializeType t | _ -> box "unknown" ]
+  |> JsInterop.createObj
+
+type checkingResult(_wellTyped:bool, _bindingResult:Binder.BindingResult, _program:Program) = 
+  member x.wellTyped = _wellTyped
+  member x.getEntities() = _bindingResult.Entities |> Array.map (fun (rng, ent) ->
+    serializeEntity (Some rng) ent)
+
 type editor(ed:monaco.editor.ICodeEditor) = 
   member x.getMonacoEditor() = ed
   member x.getValue() = 
@@ -146,6 +208,11 @@ type gamma(ctx:TheGammaContext) =
     // Initialize and return services
     let checkingSvc = CheckingService("", providers.globals)
     gamma({ checkingService = checkingSvc; providers = providers })
+
+  member x.check(code) = 
+    async {
+      let! res = ctx.checkingService.TypeCheck(code)
+      return checkingResult(res) } |> thenable
 
   member x.evaluate(code, ?outputId) = 
     async {
