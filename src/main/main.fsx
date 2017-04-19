@@ -161,8 +161,12 @@ let rec serializeType typ =
       [ "kind", box "array"
         "type", serializeType t ] |> JsInterop.createObj
   | Type.Object(obj) -> 
-      [ "kind", box "object"
-        "members", obj.Members |> Array.map (fun m -> 
+      [ yield "kind", box "object"
+        match obj with
+        | :? FSharpProvider.GenericType as gt -> 
+            yield "generics", gt.TypeArguments |> Seq.map serializeType |> Array.ofSeq |> box
+        | _ -> ()
+        yield "members", obj.Members |> Array.map (fun m -> 
           match m with Member.Method(name=n) | Member.Property(name=n) -> n) |> box ] 
       |> JsInterop.createObj
 
