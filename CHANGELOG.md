@@ -1,4 +1,5 @@
- * 0.0.17 - Return child entities on demand
+ * 0.0.18 - Return child entities on demand
+ * 0.0.17 - Expose generics for generic types
  * 0.0.16 - Expose experimental API for type-checking and reading entities
  * 0.0.15 - Replace generics with provider methods, expose Monaco editor
  * 0.0.14 - Add You Guess for column charts, tweaking visualization
