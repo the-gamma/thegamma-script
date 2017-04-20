@@ -191,7 +191,7 @@ let rec serializeEntity (rng:Range option) (ent:Entity) =
     | EntityKind.ChainElement _ -> "chain"
   [ yield "kind", box kind
     if rng.IsSome then yield "range", JsInterop.createObj [ "start", box rng.Value.Start; "end", box rng.Value.End ]
-    yield "children", ent.Antecedents |> List.toArray |> Array.map (serializeEntity None) |> box
+    yield "getChildren", box (fun () -> ent.Antecedents |> List.toArray |> Array.map (serializeEntity None))
     yield "type", match ent.Type with Some t -> serializeType t | _ -> box "unknown" ]
   |> JsInterop.createObj
 
