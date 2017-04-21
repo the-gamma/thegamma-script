@@ -105,6 +105,7 @@ module YouDrawHelpers =
       Compost.createSvg (width, height) chart
       h?div ["style"=>"padding-bottom:20px"] [
         h?button [
+            yield "type" => "button"
             yield "click" =!> fun _ _ -> trigger ShowResults
             if state.Guessed |> Seq.last |> snd = None then
               yield "disabled" => "disabled"
@@ -262,6 +263,7 @@ module YouGuessColsHelpers =
       Compost.createSvg (width, height) chart
       h?div ["style"=>"padding-bottom:20px"] [
         h?button [
+            yield "type" => "button"
             yield "click" =!> fun _ _ -> trigger ShowResults
             if state.Guesses.Count <> state.Data.Length then
               yield "disabled" => "disabled"
