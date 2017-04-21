@@ -12,6 +12,7 @@ open Fable.Import
 
 type AnyType = { kind:string }
 type TypeNested = { kind:string (* = nested *); endpoint:string }
+type TypeProvider = { kind:string (* = provider *); provider:string; endpoint:string }
 type TypePrimitive = { kind:string (* = primitive *); ``type``:obj; endpoint:string }
 
 [<Fable.Core.Emit("typeof($0)")>]
@@ -158,7 +159,7 @@ let mapParamType = function
 
 let restTypeCache = System.Collections.Generic.Dictionary<_, _>()
 
-let rec createRestType lookupNamed root cookies url = 
+let rec createRestType lookupNamed resolveProvider root cookies url = 
   let guid = (concatUrl root url) + cookies
   match restTypeCache.TryGetValue guid with
   | true, res -> res
@@ -171,9 +172,13 @@ let rec createRestType lookupNamed root cookies url =
           | Some s -> [{ Type = getProperty s "@type"; Context = "http://schema.org"; Data = s }]
           | _ -> []
         match m.returns.kind with
+        | "provider" ->
+            let returns = unbox<TypeProvider> m.returns 
+            let typ, emitter = resolveProvider returns.provider returns.endpoint
+            Member.Property(m.name, typ, (docMeta (parseDoc m.documentation))::schema, emitter)
         | "nested" ->
             let returns = unbox<TypeNested> m.returns 
-            let retTyp = createRestType lookupNamed root cookies returns.endpoint
+            let retTyp = createRestType lookupNamed resolveProvider root cookies returns.endpoint
             match m.parameters with 
             | Some parameters ->
                 let args = [ for p in parameters -> p.name, false, Type.Primitive (mapParamType p.``type``)] // TODO: Check this is OK type
@@ -198,9 +203,9 @@ let rec createRestType lookupNamed root cookies url =
     restTypeCache.[guid] <- ty
     ty
 
-let rec provideRestType lookupNamed name root cookies = 
+let rec provideRestType lookupNamed resolveProvider name root cookies = 
   let ctx = ident("RuntimeContext")
   ProvidedType.GlobalValue
     ( name, [],
       NewExpression(ctx, [str root; str cookies; str ""], None),
-      createRestType lookupNamed root cookies "/")
+      createRestType lookupNamed resolveProvider root cookies "/")

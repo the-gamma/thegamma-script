@@ -57,6 +57,24 @@ let buildGlobalsTable provideTypes = Async.StartAsNamedFuture "buildGlobalsTable
     | _ -> None)
   return globalEntities } 
 
+let rec resolveProvider lookup kind endpoint = 
+  match kind with
+  | "rest" ->
+      match TypeProviders.RestProvider.provideRestType lookup (resolveProvider lookup) "anonymous" endpoint "" with
+      | ProvidedType.GlobalValue(_, _, e, t) -> t, { Emit = fun _ -> e }
+      | _ -> failwith "resolveProvider: Expected global value"
+  | "pivot" ->
+      let pivotType = async {
+        let! typ = TypeProviders.Pivot.providePivotType endpoint "anonymous" lookup
+        match typ with 
+        | ProvidedType.GlobalValue(_, _, _, t) -> return t 
+        | _ -> return failwith "resolveProvider: Expected global value" }
+      Type.Delayed(Async.StartAsNamedFuture ("pivotType:" + endpoint) pivotType),
+      { Emit = fun _ -> TypeProviders.Pivot.makePivotExpression endpoint }
+  | _ ->
+    Log.error("providers", "Cannot resolve provider '%s' (%s)", kind, endpoint) 
+    failwith "resolveProvider: Cannot resolve type provider"
+
 // ------------------------------------------------------------------------------------------------
 // JavaScript API
 // ------------------------------------------------------------------------------------------------
@@ -291,7 +309,10 @@ type providers =
 
   static member rest(url, ?cookies) : provider = 
     (fun name lookup -> async {
-      return [TypeProviders.RestProvider.provideRestType lookup name url (defaultArg cookies "")] })
+      let provider = 
+        TypeProviders.RestProvider.provideRestType 
+          lookup (resolveProvider lookup) name url (defaultArg cookies "")
+      return [ provider ] })
 
   static member library(url) : provider = 
     (fun _ lookup ->
@@ -299,13 +320,5 @@ type providers =
 
   static member pivot(url) : provider = 
     (fun name lookup -> async {
-      let! membersJson = Http.Request("GET", url + "?metadata")
-      let members = JsHelpers.properties(jsonParse<obj> membersJson) |> Array.map (fun kv -> 
-        let typ = 
-          match unbox kv.value with
-          | "string" -> PrimitiveType.String
-          | "bool" -> PrimitiveType.Bool
-          | "number" -> PrimitiveType.Number
-          | s -> failwith (sprintf "The property '%s' has invalid type '%s'. Only 'string', 'number' and 'bool' are supported." kv.key s)
-        kv.key, typ)
-      return [TypeProviders.Pivot.providePivotType url name lookup members] })
+      let! t = TypeProviders.Pivot.providePivotType url name lookup 
+      return [t] })

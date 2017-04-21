@@ -388,12 +388,24 @@ and makePivotType ctx tfs =
       return raise e }
   Type.Delayed(Async.CreateNamedFuture guid typ)
   
-let providePivotType root name lookupNamed fields =
+let makePivotExpression root = 
+  NewExpression(ident("PivotContext"), [str root; ArrayExpression([], None)], None)
+
+let makePivotGlobalValue root name lookupNamed fields =
   let fields = [ for f, t in fields -> { Name = f; Type = t }]
   let typ = makePivotType { Fields = fields; InputFields = fields; LookupNamed = lookupNamed; Root = root } []
-  let ctx = ident("PivotContext")
   let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box []  }
   let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box fields  }
-  ProvidedType.GlobalValue
-    ( name, [meta1; meta2],
-      NewExpression(ctx, [str root; ArrayExpression([], None)], None), typ)
+  ProvidedType.GlobalValue( name, [meta1; meta2], makePivotExpression root, typ)
+
+let providePivotType root name lookupNamed = async {
+  let! membersJson = Http.Request("GET", root + "?metadata")
+  let fields = JsHelpers.properties(jsonParse<obj> membersJson) |> Array.map (fun kv -> 
+    let typ = 
+      match unbox kv.value with
+      | "string" -> PrimitiveType.String
+      | "bool" -> PrimitiveType.Bool
+      | "number" -> PrimitiveType.Number
+      | s -> failwith (sprintf "The property '%s' has invalid type '%s'. Only 'string', 'number' and 'bool' are supported." kv.key s)
+    kv.key, typ)
+  return makePivotGlobalValue root name lookupNamed fields }
