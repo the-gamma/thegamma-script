@@ -561,20 +561,20 @@ module Drawing =
         let (lx, hx), (ly, hy) = getExtremes sx, getExtremes sy 
         Combine   
            [| yield Path(
-                [|yield MoveTo (projectCont (lx, hy)) 
-                  yield LineTo (projectCont (lx, ly))
-                  yield LineTo (projectCont (hx, ly)) |], "fill:transparent; stroke:rgb(0,0,0); stroke-width:2");
-              for x, xl in lblx do 
-                yield Text(offs (0., 10.0) (projectCont (x, ly)), xl, "alignment-baseline:hanging;text-anchor:middle;font:9pt sans-serif")
-              for y, yl in lbly do 
-                yield Text(offs (-10., 0.0) (projectCont (lx, y)), yl, "alignment-baseline:middle;text-anchor:end;font:9pt sans-serif")
-              yield Path(
                 [|for x in gridx do
                     yield MoveTo (projectCont (x, ly))
                     yield LineTo (projectCont (x, hy))
                   for y in gridy do
                     yield MoveTo (projectCont (lx, y))
                     yield LineTo (projectCont (hx, y)) |], "fill:transparent; stroke:rgb(228,228,228); stroke-width:1") 
+              yield Path(
+                [|yield MoveTo (projectCont (lx, hy)) 
+                  yield LineTo (projectCont (lx, ly))
+                  yield LineTo (projectCont (hx, ly)) |], "fill:transparent; stroke:rgb(0,0,0); stroke-width:2");
+              for x, xl in lblx do 
+                yield Text(offs (0., 10.0) (projectCont (x, ly)), xl, "alignment-baseline:hanging;text-anchor:middle;font:11pt sans-serif")
+              for y, yl in lbly do 
+                yield Text(offs (-10., 0.0) (projectCont (lx, y)), yl, "alignment-baseline:middle;text-anchor:end;font:9pt sans-serif")
               yield drawShape defs style shape |]     
         
     | ProjectedLayered shapes, _ ->
