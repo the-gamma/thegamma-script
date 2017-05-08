@@ -12,6 +12,14 @@ open TheGamma.Interactive.Compost
 // You Draw
 // ------------------------------------------------------------------------------------------------
 
+module CompostHelpers = 
+  let (|Cont|) = function COV(CO x) -> x | _ -> failwith "Expected continuous value"
+  let (|Cat|) = function CAR(CA x, r) -> x, r | _ -> failwith "Expected categorical value"
+  let Cont x = COV(CO x)
+  let Cat(x, r) = CAR(CA x, r)
+
+open CompostHelpers
+
 module YouDrawHelpers = 
   type YouDrawEvent = 
     | ShowResults
@@ -41,15 +49,15 @@ module YouDrawHelpers =
 
   let render (width, height) (topLbl, leftLbl, rightLbl) (leftClr,rightClr,guessClr) (loy, hiy) trigger state = 
     let all = 
-      [| for x, y in state.Data -> COV(CO x), COV(CO y) |]
+      [| for x, y in state.Data -> Cont x, Cont y |]
     let known = 
-      [| for x, y in state.Data do if x <= state.Clip then yield COV(CO x), COV(CO y) |]
+      [| for x, y in state.Data do if x <= state.Clip then yield Cont x, Cont y |]
     let right = 
       [| yield Array.last known
-         for x, y in state.Data do if x > state.Clip then yield COV(CO x), COV(CO y) |]
+         for x, y in state.Data do if x > state.Clip then yield Cont x, Cont y |]
     let guessed = 
       [| yield Array.last known
-         for x, y in state.Guessed do if y.IsSome then yield COV(CO x), COV(CO y.Value) |]
+         for x, y in state.Guessed do if y.IsSome then yield Cont x, Cont y.Value |]
 
     let lx, ly = (fst (Seq.head state.Data) + float state.Clip) / 2., loy + (hiy - loy) / 10.
     let rx, ry = (fst (Seq.last state.Data) + float state.Clip) / 2., loy + (hiy - loy) / 10.
@@ -63,16 +71,16 @@ module YouDrawHelpers =
       ]
 
     let chart = 
-      Axes
-        (Interactive(
+      Axes(true, true,
+        Interactive(
           ( if state.Completed then []
             else
-              [ MouseMove(fun evt (COV (CO x), COV (CO y)) -> 
+              [ MouseMove(fun evt (Cont x, Cont y) -> 
                   if (int evt.buttons) &&& 1 = 1 then trigger(Draw(x, y)) )
-                TouchMove(fun evt (COV (CO x), COV (CO y)) -> 
+                TouchMove(fun evt (Cont x, Cont y) -> 
                   trigger(Draw(x, y)) )
-                MouseDown(fun evt (COV (CO x), COV (CO y)) -> trigger(Draw(x, y)) )
-                TouchStart(fun evt (COV (CO x), COV (CO y)) -> trigger(Draw(x, y)) ) ]),
+                MouseDown(fun evt (Cont x, Cont y) -> trigger(Draw(x, y)) )
+                TouchStart(fun evt (Cont x, Cont y) -> trigger(Draw(x, y)) ) ]),
           Shape.Scale
             ( None, Some(CO loy, CO hiy), 
               Layered [
@@ -130,6 +138,11 @@ type youdraw =
       clip = None; min = None; max = None 
       guessLabel = None; topLabel = None; knownLabel = None;
       knownColor = None; unknownColor = None; drawColor = None }
+  static member createAny<'a>(data:series<'a, float>) =
+    { youdraw.data = data.mapKeys(unbox)
+      clip = None; min = None; max = None 
+      guessLabel = None; topLabel = None; knownLabel = None;
+      knownColor = None; unknownColor = None; drawColor = None }
   member y.setRange(min, max) = { y with min = Some min; max = Some max }
   member y.setClip(clip) = { y with clip = Some clip }
   member y.setColors(known, unknown) = { y with knownColor = Some known; unknownColor = Some unknown }
@@ -183,9 +196,10 @@ module YouGuessColsHelpers =
     | Animate 
     | Update of string * float
 
-  let initState data =     
+  let initState data maxValue =     
+    let max = match maxValue with Some m -> m | _ -> Seq.max (Seq.map snd data)
     let max = 
-      match Scales.generateContinuousRange (CO 0.0) (CO (Seq.max (Seq.map snd data))) with
+      match Scales.generateContinuousRange (CO 0.0) (CO max) with
       | Scales.Continuous(_, CO max), _, _ -> max
       | _ -> failwith "Failed to calculate maximum"
     { Completed = false
@@ -203,21 +217,21 @@ module YouGuessColsHelpers =
 
   let vega10 = ["#1f77b4"; "#ff7f0e"; "#2ca02c"; "#d62728"; "#9467bd"; "#8c564b"; "#e377c2"; "#7f7f7f"; "#bcbd22"; "#17becf" ]
 
-  let renderBars (width, height) topLabel trigger state = 
+  let renderCols (width, height) topLabel trigger state = 
     if state.Completed && state.CompletionStep < 1.0 then
       window.setTimeout((fun () -> trigger Animate), 50) |> ignore
     let chart = 
-      Axes(
+      Axes(true, true,
         Interactive
           ( ( if state.Completed then []
               else
-                [ EventHandler.MouseMove(fun evt (CAR(CA x, _), COV(CO y)) ->
+                [ EventHandler.MouseMove(fun evt (Cat(x, _), Cont y) ->
                     if (int evt.buttons) &&& 1 = 1 then trigger (Update(x, y)) )
-                  EventHandler.MouseDown(fun evt (CAR(CA x, _), COV(CO y)) ->
+                  EventHandler.MouseDown(fun evt (Cat(x, _), Cont y) ->
                     trigger (Update(x, y)) )
-                  EventHandler.TouchStart(fun evt (CAR(CA x, _), COV(CO y)) ->
+                  EventHandler.TouchStart(fun evt (Cat(x, _), Cont y) ->
                     trigger (Update(x, y)) )
-                  EventHandler.TouchMove(fun evt (CAR(CA x, _), COV(CO y)) ->
+                  EventHandler.TouchMove(fun evt (Cat(x, _), Cont y) ->
                     trigger (Update(x, y)) ) ] ),
             Style
               ( (fun s -> if state.Completed then s else { s with Cursor = "row-resize" }),
@@ -272,13 +286,95 @@ module YouGuessColsHelpers =
     ]
 
 
+  let renderBars (width, height) topLabel trigger state = 
+    if state.Completed && state.CompletionStep < 1.0 then
+      window.setTimeout((fun () -> trigger Animate), 50) |> ignore
+    let chart = 
+      Axes(true, false, 
+        Interactive
+          ( ( if state.Completed then []
+              else
+                [ EventHandler.MouseMove(fun evt (Cont x, Cat(y, _)) ->
+                    if (int evt.buttons) &&& 1 = 1 then trigger (Update(y, x)) )
+                  EventHandler.MouseDown(fun evt (Cont x, Cat(y, _)) ->
+                    trigger (Update(y, x)) )
+                  EventHandler.TouchStart(fun evt (Cont x, Cat(y, _)) ->
+                    trigger (Update(y, x)) )
+                  EventHandler.TouchMove(fun evt (Cont x, Cat(y, _)) ->
+                    trigger (Update(y, x)) ) ] ),
+            Style
+              ( (fun s -> if state.Completed then s else { s with Cursor = "col-resize" }),
+                (Layered [
+                  yield Scale(Some(CO 0., CO state.Maximum), None, 
+                    Stack
+                      ( Vertical, 
+                        [ for clr, (lbl, value) in Seq.zip vega10 state.Data -> 
+                            let sh = Style((fun s -> { s with Fill = Solid(0.2, HTML "#a0a0a0") }), Bar(CO state.Maximum, CA lbl)) 
+                            Shape.Padding((10., 0., 10., 0.), sh) ]))
+                  yield Stack
+                    ( Vertical, 
+                      [ for clr, (lbl, value) in Seq.zip vega10 state.Data -> 
+                          let alpha, value = 
+                            match state.Completed, state.Guesses.TryFind lbl with
+                            | true, Some guess -> 0.6, state.CompletionStep * value + (1.0 - state.CompletionStep) * guess
+                            | _, Some v -> 0.6, v
+                            | _, None -> 0.2, state.Default
+                          let sh = Style((fun s -> { s with Fill = Solid(alpha, HTML clr) }), Bar(CO value, CA lbl)) 
+                          Shape.Padding((10., 0., 10., 0.), sh) ])
+
+                  for clr, (lbl, _) in Seq.zip vega10 state.Data do 
+                      let x = COV(CO (state.Maximum * 0.95))
+                      let y = CAR(CA lbl, 0.5)
+                      yield Style(
+                        (fun s -> { s with Font = "13pt sans-serif"; Fill=Solid(1.0, HTML clr); StrokeColor=(0.0, RGB(0,0,0)) }),
+                        Text(x, y, VerticalAlign.Baseline, HorizontalAlign.End, lbl) )
+
+                  for clr, (lbl, value) in Seq.zip vega10 state.Data do
+                    match state.Guesses.TryFind lbl with
+                    | None -> () 
+                    | Some guess ->
+                        let line = Line [ COV (CO guess), CAR(CA lbl, 0.0); COV (CO guess), CAR(CA lbl, 1.0) ]
+                        yield Style(
+                          (fun s -> 
+                            { s with
+                                StrokeColor = (1.0, HTML clr)
+                                StrokeWidth = Pixels 4
+                                StrokeDashArray = [ Integer 5; Integer 5 ] }), 
+                          Shape.Padding((10., 0., 10., 0.), line))
+                  match topLabel with
+                  | None -> ()
+                  | Some lbl ->
+                      let x = COV(CO (state.Maximum * 0.9))
+                      let y = CAR(CA (fst state.Data.[state.Data.Length/2]), if state.Data.Length % 2 = 0 then 0.0 else 0.5)
+                      yield Style(
+                        (fun s -> { s with Font = "13pt sans-serif"; Fill=Solid(1.0, HTML "#808080"); StrokeColor=(0.0, RGB(0,0,0)) }),
+                        Text(x, y, VerticalAlign.Baseline, HorizontalAlign.Center, lbl) )
+                ]) )))
+
+    h?div ["style"=>"text-align:center;padding-top:20px"] [
+      Compost.createSvg (width, height) chart
+      h?div ["style"=>"padding-bottom:20px"] [
+        h?button [
+            yield "type" => "button"
+            yield "click" =!> fun _ _ -> trigger ShowResults
+            if state.Guesses.Count <> state.Data.Length then
+              yield "disabled" => "disabled"
+          ] [ text "Show me how I did" ]
+        ]
+    ]
+
+
 open TheGamma.Series
 open TheGamma.Common
 
-type YouGuessCols =
-  { data : series<string, float> 
+type YouGuessColsBarsKind = Cols | Bars
+type YouGuessColsBars =
+  { kind : YouGuessColsBarsKind
+    data : series<string, float> 
+    maxValue : float option
     topLabel : string option }
   member y.setLabel(top) = { y with topLabel = Some top }
+  member y.setMaximum(max) = { y with maxValue = Some max }
   member y.show(outputId) =   
     async { 
       let id = "container" + System.Guid.NewGuid().ToString().Replace("-", "")
@@ -295,11 +391,14 @@ type YouGuessCols =
       let! data = y.data.data |> Async.AwaitFuture 
       do
         try
+          let render = match y.kind with Bars -> YouGuessColsHelpers.renderBars | Cols -> YouGuessColsHelpers.renderCols
           Compost.app outputId 
-            (YouGuessColsHelpers.initState data) (YouGuessColsHelpers.renderBars size y.topLabel) YouGuessColsHelpers.update
+            (YouGuessColsHelpers.initState data y.maxValue) (render size y.topLabel) YouGuessColsHelpers.update
         with e ->
           Log.exn("GUI", "Interactive rendering failed: %O", e) } |> Async.StartImmediate
 
 type youguess = 
   static member columns(data:series<string, float>) = 
-    { YouGuessCols.data = data; topLabel = None }
+    { YouGuessColsBars.data = data; topLabel = None; kind = Cols; maxValue = None }
+  static member bars(data:series<string, float>) = 
+    { YouGuessColsBars.data = data; topLabel = None; kind = Bars; maxValue = None  }

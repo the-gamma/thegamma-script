@@ -67,7 +67,7 @@ type Shape<[<Measure>] 'vx, [<Measure>] 'vy> =
   | Column of categorical<'vx> * continuous<'vy>
   | Stack of Orientation * seq<Shape<'vx, 'vy>>
   | Layered of seq<Shape<'vx, 'vy>>
-  | Axes of Shape<'vx, 'vy>
+  | Axes of bool * bool * Shape<'vx, 'vy>
   | Interactive of seq<EventHandler<'vx, 'vy>> * Shape<'vx, 'vy>
   | Padding of (float * float * float * float) * Shape<'vx, 'vy>
 
@@ -186,6 +186,7 @@ module Scales =
     let lo, hi = unbox lo, unbox hi 
     let mag = 10. ** round (log10 (hi - lo))
     let decimals = max 0. (-(log10 mag))
+    let mag = mag / 2.0                       // This way, we can also generate e.g. 0 .. 150 
     let alo, ahi = floor (lo / mag) * mag, ceil (hi / mag) * mag
     let range = (ahi - alo) / mag
     let mag, range = if range >= 10. then mag, range else mag/10.0, range * 10.0 // maybe floor log when calculating mag instead?
@@ -292,7 +293,7 @@ module Scales =
         let scales = calculateLineOrAreaScales area
         Scaled(scales, scales, ScaledArea(area))
 
-    | Axes shape ->
+    | Axes(showX, showY, shape) ->
         let generateRange s = 
           match s with
           | Continuous(l, h) -> generateContinuousRange l h
@@ -304,6 +305,7 @@ module Scales =
         let (Scaled((sx, sy), _, _)) as scaled = calculateScales shape 
         let sx, gx, lblx = generateRange sx
         let sy, gy, lbly = generateRange sy
+        let lblx, lbly = (if showX then lblx else [||]), (if showY then lbly else [||])
         Scaled((sx, sy), (sx, sy), ScaledAxes((gx, gy), (lblx, lbly), scaled |> replaceScales (sx, sy)))
         
     | Stack(orient, shapes) ->
@@ -410,6 +412,7 @@ module Projections =
         let size = (thv - tlv) / float cats.Length
         let i = floor (v / size)
         let f = (v / size) - i
+        let i = if i < 0. then (float cats.Length) + i else i // Negative when thv < tlv
         if int i < 0 || int i >= cats.Length then CAR(CA "<outside-of-range>", f)
         else CAR(cats.[int i], f)
 
@@ -467,10 +470,10 @@ module Projections =
         let ppad = Padding((t, r, b, l), (lx, hx, ly, hy), projection)
         calculateProjections shape ppad
 
-    | Scaled((sx, sy) as scales, _, ScaledAxes(grid, lbls, shape)) ->
+    | Scaled((sx, sy) as scales, _, ScaledAxes(grid, (lblsx, lblsy), shape)) ->
         let (lx, hx), (ly, hy) = getExtremes sx, getExtremes sy
-        let ppad = Padding((20.0, 20.0, 40.0, 100.0), (lx, hx, ly, hy), projection)
-        Projected(ppad, scales, ProjectedAxes(grid, lbls, calculateProjections shape ppad))
+        let ppad = Padding((20.0, 20.0, (if lblsx.Length = 0 then 20.0 else 40.0), (if lblsy.Length = 0 then 20.0 else 100.0)), (lx, hx, ly, hy), projection)
+        Projected(ppad, scales, ProjectedAxes(grid, (lblsx, lblsy), calculateProjections shape ppad))
 
     | Scaled(scales, _, ScaledStack(orient, shapes)) ->
         Projected(projection, scales, ProjectedStack(orient, shapes |> Array.map (fun s -> calculateProjections s projection)))
@@ -610,7 +613,7 @@ module Events =
     | TouchEvent _ -> failwith "TODO: projectEvent - not continuous"
     | MouseLeave -> MouseLeave
 
-  let inScale s v =
+  let inScale s v = 
     match s, v with
     | Continuous(CO l, CO h), COV(CO v) -> v >= min l h && v <= max l h
     | Categorical(cats), CAR(v, _) -> cats |> Seq.exists ((=) v)
