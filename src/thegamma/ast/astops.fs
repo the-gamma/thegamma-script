@@ -33,6 +33,7 @@ let formatToken = function
   | TokenKind.Equals -> "="
   | TokenKind.Dot -> "."
   | TokenKind.Comma -> ","
+  | TokenKind.Colon -> ":"
   | TokenKind.Let -> "let"
   | TokenKind.LSquare -> "["
   | TokenKind.RSquare -> "]"
@@ -58,7 +59,6 @@ let formatToken = function
   | TokenKind.Newline -> "\n"
   | TokenKind.Error(c) -> string c
   | TokenKind.EndOfFile -> ""
-  | TokenKind.By | TokenKind.To -> failwith "Unsupported token"
 
 /// Return human readable description of a token
 let formatTokenInfo = function
@@ -67,6 +67,7 @@ let formatTokenInfo = function
   | TokenKind.Equals -> "equals sign `=`"
   | TokenKind.Dot -> "dot character `.`"
   | TokenKind.Comma -> "comma character `,`"
+  | TokenKind.Colon -> "colon character `:`"
   | TokenKind.Let -> "`let` keyword"
   | TokenKind.LSquare -> "left square bracket `[`"
   | TokenKind.RSquare -> "right square bracket `]`"
@@ -93,7 +94,6 @@ let formatTokenInfo = function
   | TokenKind.Error('`') -> "back-tick character"
   | TokenKind.Error(c) -> sprintf "other character `%s`" (string c)
   | TokenKind.EndOfFile -> "end of file"
-  | TokenKind.By | TokenKind.To -> failwith "Unsupported token"
 
 /// Turns series of tokens into string, using their Token value
 let formatTokens (tokens:seq<Token>) = 
@@ -127,14 +127,12 @@ and formatExpression (ctx:FormattingContext) expr =
   match expr with
   | Expr.Variable(n) -> 
       formatNode ctx formatName n
-  | Expr.Property(inst, n) -> 
+  | Expr.Member(inst, mem) -> 
       formatNode ctx formatExpression inst
       ctx.Add(TokenKind.Dot)
-      formatNode ctx formatName n
-  | Expr.Call(inst, n, args) ->
-      match inst with Some inst -> formatNode ctx formatExpression inst | _ -> ()
-      ctx.Add(TokenKind.Dot)
-      formatNode ctx formatName n
+      formatNode ctx formatExpression mem
+  | Expr.Call(inst, args) ->
+      formatNode ctx formatExpression inst
       ctx.Add(TokenKind.LParen)
       args |> formatNode ctx (fun ctx args -> 
         args |> List.iteri (fun i arg ->
@@ -187,8 +185,7 @@ let formatProgram (prog:Program) =
 let formatWhiteAfterExpr nd = 
   let wa = 
     match nd.Node with 
-    | Expr.Variable(n)
-    | Expr.Property(_, n) -> n.WhiteAfter @ nd.WhiteAfter 
+    | Expr.Variable(n) -> n.WhiteAfter @ nd.WhiteAfter 
     | _ -> nd.WhiteAfter
   String.concat "" [ for t in wa -> formatToken t.Token ]
 
@@ -197,8 +194,6 @@ let formatWhiteBeforeExpr nd =
   let wa = 
     match nd.Node with 
     | Expr.Variable(n) -> nd.WhiteBefore @ n.WhiteBefore 
-    | Expr.Call(_, n, _)
-    | Expr.Property(_, n) -> n.WhiteBefore
     | _ -> nd.WhiteBefore
   String.concat "" [ for t in wa -> formatToken t.Token ]
 
@@ -293,20 +288,19 @@ let rebuildExprNode e es ns =
   match e, es, ns with
   | Expr.List(_), els, [] -> Expr.List(els)
   | Expr.Function(_), [e], [n] -> Expr.Function(n, e)
-  | Expr.Property(_, _), [e], [n] -> Expr.Property(e, n)
+  | Expr.Member(_, _), [e1; e2], [] -> Expr.Member(e1, e2)
   | Expr.Binary(_, op, _), [e1; e2], [] -> Expr.Binary(e1, op, e2)
-  | Expr.Call(inst, _, args), e::es, n::ns ->
-      let e, es = if inst.IsSome then Some e, es else None, e::es
+  | Expr.Call(_, args), e::es, ns ->
       let rec rebuildArgs args es ns =
         match args, es, ns with
         | { Argument.Name = None }::args, e::es, ns -> { Value = e; Name = None }::(rebuildArgs args es ns)
         | { Argument.Name = Some _ }::args, e::es, n::ns -> { Value = e; Name = Some n }::(rebuildArgs args es ns)
         | [], [], [] -> []
         | _ -> failwith "rebuildExprNode: Wrong call length"
-      Expr.Call(e, n, { args with Node = rebuildArgs args.Node es ns })
+      Expr.Call(e, { args with Node = rebuildArgs args.Node es ns })
   | Expr.Variable _, [], [n] -> Expr.Variable(n)
   | Expr.Variable _, _, _ -> failwith "rebuildExprNode: Wrong variable length"
-  | Expr.Property _, _, _ -> failwith "rebuildExprNode: Wrong property length"
+  | Expr.Member _, _, _ -> failwith "rebuildExprNode: Wrong member length"
   | Expr.Call _, _, _ -> failwith "rebuildExprNode: Wrong call length"
   | Expr.List _, _, _ -> failwith "rebuildExprNode: Wrong list length"
   | Expr.Function _, _, _ -> failwith "rebuildExprNode: Wrong function length"
@@ -320,9 +314,8 @@ let rebuildExprNode e es ns =
 /// ExprLeaf matches when an expression is a primitive (number, bool, etc..)
 let (|ExprLeaf|ExprNode|) e = 
   match e with
-  | Expr.Property(e, n) -> ExprNode([e], [n])
-  | Expr.Call(Some e, n, args) -> ExprNode(e::[for a in args.Node -> a.Value ], n::(args.Node |> List.choose (fun a -> a.Name)))
-  | Expr.Call(None, n, args) -> ExprNode([for a in args.Node -> a.Value ], n::(args.Node |> List.choose (fun a -> a.Name)))
+  | Expr.Member(e1, e2) -> ExprNode([e1; e2], [])
+  | Expr.Call(e, args) -> ExprNode(e::[for a in args.Node -> a.Value ], (args.Node |> List.choose (fun a -> a.Name)))
   | Expr.Variable(n) -> ExprNode([], [n])
   | Expr.List(els) -> ExprNode(els, [])
   | Expr.Function(n, b) -> ExprNode([b], [n])

@@ -1,5 +1,5 @@
 ﻿module TheGamma.Editors
-
+(*
 open Fable.Import
 
 open TheGamma
@@ -302,3 +302,4 @@ let renderEditor typeCheck (setValue:string -> string -> string -> unit) origTex
                   h?option sel [ text name ] ]
           ]
         ]
+        *)

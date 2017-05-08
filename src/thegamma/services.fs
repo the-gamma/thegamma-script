@@ -1,5 +1,5 @@
 ﻿module TheGamma.Services
-
+(*
 open Fable.Import
 open TheGamma.Html
 open TheGamma.Editors
@@ -326,3 +326,4 @@ type PreviewService(checker:CheckingService, globals:Future<list<Entity>>, ed:mo
   member x.ZoneHeight = 
     if currentZone <> None then zoneHeight 
     else 0.0
+    *)

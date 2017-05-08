@@ -1,5 +1,5 @@
 ﻿module TheGamma.TypeChecker
-
+(*
 open TheGamma
 open TheGamma.Ast
 open TheGamma.Types
@@ -262,4 +262,4 @@ let typeCheckProgram (globals:Entity list) (bound:Binder.BindingResult) prog = a
     let! _ = typeCheckEntityAsync ctx prog 
     Log.trace("typechecker", "Completed type checking")
   with e ->
-    Log.exn("typechecker", "Type checking program failed: %O", e) }
+    Log.exn("typechecker", "Type checking program failed: %O", e) } *)

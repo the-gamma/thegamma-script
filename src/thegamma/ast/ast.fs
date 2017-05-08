@@ -46,10 +46,9 @@ type [<RequireQualifiedAccess>] TokenKind =
   | Let
   | LSquare
   | RSquare
+  | Colon
   | Fun
   | Arrow
-  | To
-  | By
   | Operator of Operator
   | Boolean of bool
   | Number of string * float
@@ -209,8 +208,8 @@ and Command =
 /// An expression (does not include let binding, which is a command)
 and [<RequireQualifiedAccess>] Expr = 
   | Variable of Node<Name>
-  | Property of Node<Expr> * Node<Name>
-  | Call of Node<Expr> option * Node<Name> * Node<Argument list>
+  | Member of Node<Expr> * Node<Expr>
+  | Call of Node<Expr> * Node<Argument list>
   | Function of Node<Name> * Node<Expr>
   | String of string
   | Number of float

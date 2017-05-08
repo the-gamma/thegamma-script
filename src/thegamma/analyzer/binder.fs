@@ -3,7 +3,7 @@
 // Entities are reused when possible and contain inferred types etc.
 // ------------------------------------------------------------------------------------------------
 module TheGamma.Binder
-
+(*
 open TheGamma.Ast
 open TheGamma.Common
 
@@ -151,3 +151,4 @@ let createContext (globals:list<Entity>) name =
     Bound = ResizeArray<_>(); Variables = Map.empty; 
     GlobalValues = Map.ofList [ for e in globals -> { Name = e.Name }, e ]
     Root = root }
+    *)

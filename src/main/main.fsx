@@ -16,7 +16,7 @@ open TheGamma.TypeChecker
 open TheGamma.Services
 open TheGamma.TypeProviders 
 open TheGamma.Live.Common
-
+(*
 module FsOption = Microsoft.FSharp.Core.Option
 
 // ------------------------------------------------------------------------------------------------
@@ -322,3 +322,4 @@ type providers =
     (fun name lookup -> async {
       let! t = TypeProviders.Pivot.providePivotType url name lookup 
       return [t] })
+*)

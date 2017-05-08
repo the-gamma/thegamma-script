@@ -1,5 +1,5 @@
 ﻿module TheGamma.CodeGenerator
-
+(*
 open TheGamma
 open TheGamma.Babel
 open TheGamma.Common
@@ -152,3 +152,4 @@ let compile globals (text:string) prog = async {
   with e ->
     Log.exn("codegen", "Evaluating code failed: %O", e)
     return "" }
+    *)

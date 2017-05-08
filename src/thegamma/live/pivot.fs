@@ -1,5 +1,5 @@
 ﻿module TheGamma.Live.Pivot
-
+(*
 open Fable.Core
 open Fable.Import
 open Fable.Import.Browser
@@ -687,3 +687,4 @@ let preview =
         SelectedEntity = Unchecked.defaultof<_>
         Preview = text "not created"
         Sections = []; Menus = Hidden; Focus = None } }
+        *)

@@ -1,4 +1,4 @@
-﻿#if INTERACTIVEZ
+﻿#if INTERACTIVE
 #r "../../src/thegamma/bin/Debug/thegamma.dll"
 #r "../../packages/NUnit/lib/net45/nunit.framework.dll"
 #else
@@ -81,7 +81,7 @@ let isFun name bf = function
 
 /// Sub-expression contains property with given name
 let isProperty name = function 
-  | Expr.Property(_, n) -> n.Node.Name = name | _ -> false
+  | Expr.Member(_, { Node = Expr.Variable n }) -> n.Node.Name = name | _ -> false
 
 /// Sub-expression contains empty expression
 let isEmpty = function 
@@ -89,7 +89,8 @@ let isEmpty = function
 
 /// Sub-expression contains call with given name and arguments match function
 let isCall name ac = function 
-  | Expr.Call(_, n, args) -> n.Node.Name = name && ac args | _ -> false
+  | Expr.Call({ Node = Expr.Member(_, { Node = Expr.Variable n }) }, args) -> 
+      n.Node.Name = name && ac args | _ -> false
 
 /// Sub-expression is a list with elements matching specified functions
 let isList conds = function 
@@ -371,6 +372,25 @@ let ``Report error and skip over unexpected tokens in list`` () =
 // --------------------------------------------------------------------------------------
 // TESTS: Commands
 // --------------------------------------------------------------------------------------
+(*
+let zzz () = 
+  let actual = parse """
+    1 2
+    let b = 3"""
+  actual |> assertErrors [216, "2"]
+  actual |> assertLet "b" (hasSubExpr (isVal 3.0))
+  actual |> assertSubExpr (isVal 1.0)
+
+  let actual = parse """
+    1 
+    : 2
+    let b = 3"""
+  actual |> assertErrors [216, ":"]
+  actual |> assertLet "b" (hasSubExpr (isVal 3.0))
+  actual |> assertSubExpr (isVal 1.0)
+*)
+// [1,2,]
+// [1,,2]
 
 [<Test>]
 let ``Report error on unifinished let and continue parsing`` () =

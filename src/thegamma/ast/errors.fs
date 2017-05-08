@@ -13,10 +13,10 @@ module Parser =
   let unexpectedTokenAfterDot rng tok =
     { Number = 201; Range = rng; Message = sprintf "Unexpected %s after '.' in method chain" (formatTokenInfo tok) }
 
-  let unexpectedScopeEndAfterDot rng chainRng tok =
+  let unexpectedScopeEndAfterDot rng tok =
     { Number = 202; Range = rng; Message = sprintf "Unexpected end of scope after '.' in method chain before %s" (formatTokenInfo tok) }
 
-  let unindentedIdentifierAfterDot rng chainRng id =
+  let unindentedIdentifierAfterDot rng id =
     { Number = 203; Range = rng; Message = sprintf "Unexpected end of scope after '.' and before '%s'. Indent the identifier?" id }
 
   let unindentedDotAfterIdentifier rng dotRng =
@@ -25,20 +25,20 @@ module Parser =
   let unindentedBlock rng tok =
     { Number = 205; Range = rng; Message = sprintf "Token following %s needs to be indented further" (formatTokenInfo tok) }
 
-  let unexpectedTokenAfterOperator rng op tok =
-    { Number = 206; Range = rng; Message = sprintf "Unexpected token '%s' after operator '%s'" (formatTokenInfo tok) (formatTokenInfo op) }
+  let unexpectedEndAfterOperator rng op =
+    { Number = 206; Range = rng; Message = sprintf "Unexpected token after operator '%s'. Expected an expression or closing parenthesis." (formatTokenInfo op) }
 
   let unexpectedTokenInArgList rng tok =
     { Number = 207; Range = rng; Message = sprintf "Unexpected token '%s' in list of call arguments" (formatTokenInfo tok) }
 
   let unexpectedScopeEndInArgList rng =
-    { Number = 208; Range = rng; Message = "Unexpected end of scope in argument list" }
+    { Number = 208; Range = rng; Message = "Unexpected end of argument list. Did you forget to indent the arguments?" }
 
   let unexpectedTokenInParenthesizedExpr rng tok =
     { Number = 209; Range = rng; Message = sprintf "Unexpected token '%s' in parenthesized expression. Are you missing ')'?" (formatTokenInfo tok) }
 
-  let unindentedTokenInParenthesizedExpr rng =
-    { Number = 210; Range = rng; Message = "Unexpected end of nested expression in `(`" }
+  let unexpectedScopeEndInParenthesizedExpr rng =
+    { Number = 210; Range = rng; Message = "Unexpected end of nested expression in `(`. Did you forget to indent the body of the expression?" }
 
   let missingParenthesizedExpr rng =
     { Number = 211; Range = rng; Message = "The parenthesized expression (...) is missing body!" }
@@ -47,16 +47,16 @@ module Parser =
     { Number = 212; Range = rng; Message = sprintf "Unexpected token '%s' in list expression" (formatTokenInfo tok) }
 
   let unexpectedScopeEndInList rng =
-    { Number = 213; Range = rng; Message = "Unexpected end of scope in list expression" }
+    { Number = 213; Range = rng; Message = "Unexpected end of list expression. Did youu forget to indent the elements of the list?" }
 
   let unexpectedTokenInLetBinding rng tok =
-    { Number = 214; Range = rng; Message = sprintf "Unexpected token '%s' in let declaration (should be let name = expr)" (formatTokenInfo tok) }
+    { Number = 214; Range = rng; Message = sprintf "Unexpected token '%s' in let declaration (should be `let name = expr`)" (formatTokenInfo tok) }
 
   let missingBodyInLetBinding rng =
-    { Number = 215; Range = rng; Message = "This let binding is missing body after equals" }
+    { Number = 215; Range = rng; Message = "This let binding is missing body after equals (should be `let name = expr`" }
 
-  let nestedExpressionInCommand rng =
-    { Number = 216; Range = rng; Message = "Unexpected expression" }
+  let unexpectedNestedTokenInCommand rng tok =
+    { Number = 216; Range = rng; Message = sprintf "Unexpected indented token '%s' in command list. Try removing the indentation before the token." (formatTokenInfo tok) }
 
   let unexpectedTokenAfterFun rng tok =
     { Number = 217; Range = rng; Message = sprintf "Unexpected token '%s' after `fun`. Expected variable name." (formatTokenInfo tok) }
@@ -65,10 +65,13 @@ module Parser =
     { Number = 218; Range = rng; Message = "Missing arrow after variable in function definition" }
 
   let unexpectedScopeEndInFunc rng =
-    { Number = 219; Range = rng; Message = "Unexpected end of scope in function declaration" }
+    { Number = 219; Range = rng; Message = "Unexpected end of function declaration. Did you forget to indent the body of the function?" }
 
   let missingBodyOfFunc rng =
-    { Number = 220; Range = rng; Message = "The function is missing body. If it is on the next line, you need to indent it further." }
+    { Number = 220; Range = rng; Message = "The function is missing body. Did you forget to indent the body of the function?" }
+
+  let unexpectedScopeEndInLet rng =
+    { Number = 221; Range = rng; Message = "Unexpected end of let declaration. Did you forget to indent the body of the let declaration?" }
 
   let exceptionWhileParsing rng msg = 
     { Number = 299; Range = rng; Message = "Unexpected exception while parsing: " + msg }

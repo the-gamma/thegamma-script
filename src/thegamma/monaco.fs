@@ -1,5 +1,5 @@
 ﻿module TheGamma.Monaco
-
+(*
 open Fable.Core
 open Fable.Import.monaco
 open Fable.Import.Browser
@@ -153,3 +153,4 @@ let createMonacoEditor id code svc customize =
   ed
 
 
+*)

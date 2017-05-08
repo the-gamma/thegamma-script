@@ -8,7 +8,7 @@ module TheGamma.Tests.Binder
 open TheGamma
 open TheGamma.Common
 open NUnit.Framework
-
+(*
 // --------------------------------------------------------------------------------------
 // Binder tests
 // --------------------------------------------------------------------------------------
@@ -78,3 +78,4 @@ let ``Binder binds all names in a sample program`` () =
       "'sort data'"; "'by Gold descending'"; "paging"; "take"; "10"; "then"
       "data2"; "'get the data'"; "table"; "create"; "set"; "title"; "\"yadda\"" ]
   equal true (Set.isSubset (set names) (set bound))
+  *)
