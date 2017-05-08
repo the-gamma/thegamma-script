@@ -16,15 +16,6 @@ module Parser =
   let unexpectedScopeEndAfterDot rng tok =
     { Number = 202; Range = rng; Message = sprintf "Unexpected end of scope after '.' in method chain before %s" (formatTokenInfo tok) }
 
-  let unindentedIdentifierAfterDot rng id =
-    { Number = 203; Range = rng; Message = sprintf "Unexpected end of scope after '.' and before '%s'. Indent the identifier?" id }
-
-  let unindentedDotAfterIdentifier rng dotRng =
-    { Number = 204; Range = rng; Message = "Dot after this identifier is not correctly nested" }
-
-  let unindentedBlock rng tok =
-    { Number = 205; Range = rng; Message = sprintf "Token following %s needs to be indented further" (formatTokenInfo tok) }
-
   let unexpectedEndAfterOperator rng op =
     { Number = 206; Range = rng; Message = sprintf "Unexpected token after operator '%s'. Expected an expression or closing parenthesis." (formatTokenInfo op) }
 
