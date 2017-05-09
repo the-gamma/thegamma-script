@@ -14,7 +14,7 @@ module Parser =
     { Number = 201; Range = rng; Message = sprintf "Unexpected %s after '.' in method chain" (formatTokenInfo tok) }
 
   let unexpectedScopeEndAfterDot rng tok =
-    { Number = 202; Range = rng; Message = sprintf "Unexpected end of scope after '.' in method chain before %s" (formatTokenInfo tok) }
+    { Number = 202; Range = rng; Message = sprintf "Unexpected end of scope after %s. Did you forget to indent the rest of the member chain?" (formatTokenInfo tok) }
 
   let unexpectedEndAfterOperator rng op =
     { Number = 206; Range = rng; Message = sprintf "Unexpected token after operator '%s'. Expected an expression or closing parenthesis." (formatTokenInfo op) }

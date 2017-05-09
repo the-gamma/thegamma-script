@@ -69,6 +69,18 @@ module Context =
   let rec tokenNonIndent ctx = 
     match ctx.Tokens.[ctx.Position] with
     | { Token = TokenKind.Newline } as t1 ->
+
+        // Find next Newline that is followed by non-whitespace (indented or not)
+        let mutable newNonEmptyLinePos = ctx.Position
+        let mutable i = ctx.Position
+        while i < ctx.Tokens.Length do
+          match ctx.Tokens.[i].Token with
+          | TokenKind.Newline -> newNonEmptyLinePos <- i; i <- i + 1
+          | TokenKind.White _ -> i <- i + 1
+          | _ -> i <- ctx.Tokens.Length          
+        ctx.Position <- newNonEmptyLinePos
+
+        // If it was indented, then bad luck...
         match ctx.Tokens.[ctx.Position + 1] with
         | { Token = TokenKind.White _ } -> None
         | t -> 
@@ -77,6 +89,7 @@ module Context =
             let white = ctx.Whitespace |> Seq.toList
             ctx.Whitespace.Clear()
             Some(white, t)
+
     | { Token = TokenKind.White _ } when ctx.Position = 0 -> None
     | t when ctx.Position = 0 || ctx.Position = ctx.Tokens.Length - 1 -> 
         Some([], t)
@@ -202,16 +215,24 @@ and parseIdentAfterDot body prevDotRng prevDotTok ctx =
       let body = Expr.Member(body, node id.Range (Expr.Variable id)) |> node (unionRanges body.Range id.Range)
       parseCallOrMember body ctx
 
+  | Some(_, { Token = TokenKind.EndOfFile })
+  | None ->
+      // RECOVERY: Nothing after dot - return body so far
+      Errors.Parser.unexpectedScopeEndAfterDot prevDotRng prevDotTok |> Context.error ctx 
+      let emptyRng = { End = prevDotRng.End; Start = prevDotRng.End }
+      Expr.Member(body, node emptyRng (Expr.Variable(node emptyRng {Name=""})))
+      |> node (unionRanges body.Range emptyRng)
+
   | Some(white, t) ->
       // RECOVERY: Wrong token after dot - skip and try next
       Context.next ctx
       Errors.Parser.unexpectedTokenAfterDot t.Range t.Token |> Context.error ctx 
+      let emptyRng = { End = prevDotRng.End; Start = prevDotRng.End }
+      let body =
+        Expr.Member(body, node emptyRng (Expr.Variable(node emptyRng {Name=""})))
+        |> node (unionRanges body.Range emptyRng)
       Context.silent ctx (parseIdentAfterDot body prevDotRng prevDotTok)
 
-  | None ->
-      // RECOVERY: Nothing after dot - return body so far
-      Errors.Parser.unexpectedScopeEndAfterDot prevDotRng prevDotTok |> Context.error ctx 
-      body
 
 
 /// Parse `.ident` or `(args)` after we parsed an expression specified as body
@@ -220,7 +241,15 @@ and parseCallOrMember body ctx =
   | Some(white, { Token = TokenKind.LParen; Range = firstRng }) ->
       Context.next ctx
       let lastRng, white, args = parseCallArgList false firstRng [] ctx
-      Expr.Call(body, whiteAfter white (node (unionRanges firstRng lastRng) args)) |> node (unionRanges body.Range lastRng)
+      let body = 
+        Expr.Call(body, whiteAfter white (node (unionRanges firstRng lastRng) args)) 
+        |> node (unionRanges body.Range lastRng)
+      // Parse more chain elements after `(args).`
+      match Context.tokenIndent ctx with
+      | Some(white, t & { Token = TokenKind.Dot }) ->
+          Context.next ctx
+          parseIdentAfterDot body t.Range t.Token ctx
+      | _ -> body
             
   | Some(white, t & { Token = TokenKind.Dot }) ->
       Context.next ctx
@@ -419,6 +448,18 @@ let rec parseLetBindingBody lastRng ctx =
           Context.silent ctx (fun ctx -> parseLetBindingBody t.Range ctx)
 
 
+/// Skip all remaining nested tokens after a command
+let rec skipNestedTokens firstTok white ctx = 
+  match Context.tokenIndent ctx with 
+  | None -> firstTok, white
+  | Some(whiteBefore, t & { Token = TokenKind.EndOfFile }) ->
+      (if firstTok = None then Some t else firstTok), white @ whiteBefore
+  | Some(whiteBefore, t) ->
+      Context.next ctx
+      let firstTok = if firstTok = None then Some t else firstTok
+      skipNestedTokens firstTok (white @ whiteBefore @ [t]) ctx
+      
+
 /// Parse the rest of the let binding after `let`, handling all sorts of errors
 /// This returns parsed command together with all nested expressions after the command
 /// (those should not be nested, but we accept them anyway & report error)
@@ -454,7 +495,13 @@ let parseLetBinding whiteBeforeLet rngLet ctx =
       // RECOVERY: Unexpected token after let - try to parse body as expression & assume emtpy identifier
       Errors.Parser.unexpectedTokenInLetBinding t.Range t.Token |> Context.error ctx
       let letEndRng = { Start = rngLet.End; End = rngLet.End }
-      let body = node { Start = t.Range.End; End = t.Range.End } Expr.Empty
+      let body = 
+        match parseExpression [] ctx with 
+        | Some e -> e
+        | None -> 
+            let firstSkipped, white = skipNestedTokens None [] ctx
+            let skipRng = t::white |> List.map (fun t -> t.Range) |> List.reduce unionRanges
+            node skipRng Expr.Empty |> whiteAfter (t::white)
       Command.Let(whiteBefore whiteAfterLet (node letEndRng { Name = "" } ), body)
       |> node (unionRanges rngLet body.Range) 
       |> whiteBefore whiteBeforeLet
@@ -466,18 +513,6 @@ let parseLetBinding whiteBeforeLet rngLet ctx =
       Command.Let(node rng { Name = "" }, node rng Expr.Empty)
       |> node rng |> whiteBefore whiteBeforeLet
 
-
-/// Skip all remaining nested tokens after a command
-let rec skipNestedTokens firstTok white ctx = 
-  match Context.tokenIndent ctx with 
-  | None -> firstTok, white
-  | Some(whiteBefore, t & { Token = TokenKind.EndOfFile }) ->
-      (if firstTok = None then Some t else firstTok), white @ whiteBefore
-  | Some(whiteBefore, t) ->
-      Context.next ctx
-      let firstTok = if firstTok = None then Some t else firstTok
-      skipNestedTokens firstTok (white @ whiteBefore @ [t]) ctx
-      
 
 /// A command is either top-level expression or let binding
 let rec parseCommands acc ctx = 
