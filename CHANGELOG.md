@@ -1,3 +1,4 @@
+ * 0.0.19 - Nesting of providers, yougess bars, compost tweaks
  * 0.0.18 - Return child entities on demand
  * 0.0.17 - Expose generics for generic types
  * 0.0.16 - Expose experimental API for type-checking and reading entities
