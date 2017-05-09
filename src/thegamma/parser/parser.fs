@@ -207,6 +207,57 @@ and parseCallArgList afterComma lastRng acc ctx =
       lastRng, [], List.rev acc
 
 
+and parsePlaceholderRecovery silent lastTokRng lastTokOpt whiteAcc ctx =
+  match Context.tokenIndent ctx with
+  | Some(white, { Token = TokenKind.RSquare; Range = lastTokRng }) ->
+      Context.next ctx
+      if not silent then Errors.Parser.unexpectedEndOfPlaceholder lastTokRng |> Context.error ctx
+      lastTokRng, whiteAcc @ white
+
+  | Some(white, t) when t.Token <> TokenKind.EndOfFile ->
+      // Skip over unexpected, but correctly nested tokens
+      Context.next ctx
+      if not silent then Errors.Parser.unexpectedTokenInPlaceholder t.Range t.Token |> Context.error ctx
+      parsePlaceholderRecovery true t.Range (Some t.Token) (whiteAcc @ white @ [t]) ctx
+
+  | _ ->
+      // Unexpected end of placeholder - end placeholder now
+      if not silent then Errors.Parser.unexpectedScopeEndInPlaceholder lastTokRng lastTokOpt |> Context.error ctx
+      lastTokRng, whiteAcc
+
+
+///
+and parsePlaceholder rngLSQuare ctx = 
+  match Context.tokenIndent ctx with
+  | Some(Identifier id & (_, tokId)) ->
+      Context.next ctx
+      match Context.tokenIndent ctx with
+      | Some(whiteBeforeColon, { Token = TokenKind.Colon; Range = rngColon }) ->
+          Context.next ctx
+          match parseExpression [] ctx with
+          | Some body ->
+              match Context.tokenIndent ctx with
+              | Some(whiteBeforeSquare, { Token = TokenKind.RSquare; Range = rngRSquare }) ->
+                  Context.next ctx
+                  rngRSquare, Expr.Placeholder(whiteAfter whiteBeforeColon id, whiteAfter whiteBeforeSquare body)
+              | _ ->
+                  // RECOVERY: Skip everything until `]` or end of indentation
+                  let rng, white = parsePlaceholderRecovery false body.Range None [] ctx
+                  rng, Expr.Placeholder(id, whiteAfter white body)
+          | _ ->
+              // RECOVERY: Skip everything until `]` or end of indentation
+              let rng, white = parsePlaceholderRecovery false rngColon (Some TokenKind.Colon) [] ctx
+              rng, Expr.Placeholder(id, whiteAfter white (node rng Expr.Empty))
+      | _ ->
+          // RECOVERY: Skip everything until `]` or end of indentation
+          let rng, white = parsePlaceholderRecovery false id.Range (Some tokId.Token) [] ctx
+          rng, Expr.Placeholder(id, whiteAfter white (node rng Expr.Empty))
+    | _ ->
+        // RECOVERY: Skip everything until `]` or end of indentation
+        let rng, white = parsePlaceholderRecovery false rngLSQuare (Some TokenKind.LSquare) [] ctx
+        rng, Expr.Placeholder(node rngLSQuare { Name = "" }, whiteAfter white (node rng Expr.Empty))
+
+      
 /// Parse `ident` after `.` in `.ident`; skips over non-idents after dot until it finds ident
 and parseIdentAfterDot body prevDotRng prevDotTok ctx =
   match Context.tokenIndent ctx with
@@ -214,7 +265,11 @@ and parseIdentAfterDot body prevDotRng prevDotTok ctx =
       Context.next ctx
       let body = Expr.Member(body, node id.Range (Expr.Variable id)) |> node (unionRanges body.Range id.Range)
       parseCallOrMember body ctx
-
+  | Some(white, { Token = TokenKind.LSquare; Range = rngLSQuare }) ->
+      Context.next ctx
+      let rngRSquare, body = parsePlaceholder rngLSQuare ctx 
+      let body = body |> node (unionRanges rngLSQuare rngRSquare) |> whiteBefore white 
+      parseCallOrMember body ctx
   | Some(_, { Token = TokenKind.EndOfFile })
   | None ->
       // RECOVERY: Nothing after dot - return body so far

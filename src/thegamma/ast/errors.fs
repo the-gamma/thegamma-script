@@ -16,6 +16,16 @@ module Parser =
   let unexpectedScopeEndAfterDot rng tok =
     { Number = 202; Range = rng; Message = sprintf "Unexpected end of scope after %s. Did you forget to indent the rest of the member chain?" (formatTokenInfo tok) }
 
+  let unexpectedTokenInPlaceholder rng tok =
+    { Number = 203; Range = rng; Message = sprintf "Unexpected token '%s' in placeholder expression. Shold be `[ident: <expr>]`" (formatTokenInfo tok) }
+
+  let unexpectedScopeEndInPlaceholder rng tok =
+    if Option.isSome tok then { Number = 204; Range = rng; Message = sprintf "Unexpected end of scope in placeholder after %s. Did you forget to indent the body of the plceholder?" (formatTokenInfo tok.Value) }
+    else { Number = 204; Range = rng; Message = "Unexpected end of scope in placeholder after expression. Did you forget to indent the body of the plceholder?" }
+
+  let unexpectedEndOfPlaceholder rng =
+    { Number = 205; Range = rng; Message = "Incomplete placeholder expression. Shold be `[ident: <expr>]`" }
+
   let unexpectedEndAfterOperator rng op =
     { Number = 206; Range = rng; Message = sprintf "Unexpected token after operator '%s'. Expected an expression or closing parenthesis." (formatTokenInfo op) }
 
@@ -79,9 +89,8 @@ module TypeChecker =
     { Number = 302; Range = rng 
       Message = sprintf "Variable '%s' is not in scope." name }
 
-  let private formatMembers members = 
-    [ for Member.Method(name=n) | Member.Property(name=n) in members -> n ] 
-    |> String.concat ", " 
+  let private formatMembers (members:seq<Member>) = 
+    [ for m in members -> m.Name ] |> String.concat ", " 
 
   let propertyMissing name members rng = 
     { Number = 303; Range = rng 

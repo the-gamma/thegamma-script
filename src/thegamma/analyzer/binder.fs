@@ -3,7 +3,7 @@
 // Entities are reused when possible and contain inferred types etc.
 // ------------------------------------------------------------------------------------------------
 module TheGamma.Binder
-(*
+
 open TheGamma.Ast
 open TheGamma.Common
 
@@ -15,6 +15,12 @@ type BindingContext =
   { Variables : Map<Name, Entity>  
     GlobalValues : Map<Name, Entity>
     Root : Entity
+
+    /// When we are in `foo(fun x -> ...)` the `x` is linked to the call site 
+    CallSite : Entity option
+    /// When we are in `foo.[name:x].bar` the Chain represents `foo` so that `x` can be a member
+    Chain : Entity option
+
     /// Table with previously created entities. This is a mutable mapping from 
     /// list of symbols (antecedent entities) together with entity kind & name
     /// to the actual entity. Antecedents capture dependencies (if dependency 
@@ -65,52 +71,65 @@ let setEntity ctx node entity =
 
 /// Bind entities to expressions in the parse tree
 /// (See `EntityKind` for explanation of how the entity tree looks like)
-let rec bindExpression callSite ctx node = 
-  let bindCallArgExpression site = bindExpression (Some site)
-  let bindExpression = bindExpression None
+let rec bindExpression ctx node = 
+  let bindCallArgExpression site ctx = bindExpression { ctx with CallSite = Some site; Chain = None }
+  let bindMemberExpression chain ctx = bindExpression { ctx with CallSite = None; Chain = Some chain }
+  let bindPlaceExpression ctx = bindExpression { ctx with CallSite = None }
+  let bindExpression ctx = bindExpression { ctx with CallSite = None; Chain = None }
+
   match node.Node with
+  | Expr.Placeholder(name, body) ->
+      // Keep `ctx.Chain` in case the plceholder contains member access
+      let bodyEnt = bindPlaceExpression ctx body
+      bindEntity ctx (EntityKind.Placeholder(name.Node, bodyEnt)) |> setEntity ctx node
+
   | Expr.Variable(name) ->
+      // Variable is actually member access inside chain or placeholder inside chain
+      match ctx.Chain with
+      | Some chain -> bindEntity ctx (EntityKind.Member(chain, name.Node)) |> setEntity ctx node 
+      | _ -> 
+      // Variable is a local variable defined somewhere in context
       match ctx.Variables.TryFind name.Node with 
       | Some decl -> bindEntity ctx (EntityKind.Variable(name.Node, decl)) |> setEntity ctx node
       | _ ->
+      // Variable is a global, known or unknown variable
       match ctx.GlobalValues.TryFind name.Node with 
       | Some glob -> glob |> setEntity ctx node
-      | None -> bindEntity ctx (EntityKind.GlobalValue(name.Node, None)) |> setEntity ctx node
+      | _ -> bindEntity ctx (EntityKind.GlobalValue(name.Node, None)) |> setEntity ctx node
 
-  | Expr.Call(instExpr, name, argsNode) ->
+  | Expr.Call(instExpr, argsNode) ->
       // Bind instance & create call site that depends on it
-      let inst = defaultArg (Option.map (bindExpression ctx) instExpr) ctx.Root
-      let site arg = bindEntity ctx (EntityKind.CallSite(inst, name.Node, arg))
+      let inst = bindExpression ctx instExpr
+      let site arg = bindEntity ctx (EntityKind.CallSite(inst, arg))
       // Bind arguments - which depend on the call site
       let args = argsNode.Node |> List.mapi (fun idx arg -> 
-        let site = site (match arg.Name with Some n -> Choice1Of2 n.Node.Name | _ -> Choice2Of2 idx)
-        let expr = bindCallArgExpression site ctx arg.Value
-        match arg.Name with 
-        | Some n -> bindEntity ctx (EntityKind.NamedParam(n.Node, expr)) |> setEntity ctx n
-        | None -> expr)
+          let site = site (match arg.Name with Some n -> Choice1Of2 n.Node.Name | _ -> Choice2Of2 idx)
+          let expr = bindCallArgExpression site ctx arg.Value
+          match arg.Name with 
+          | Some n -> bindEntity ctx (EntityKind.NamedParam(n.Node, expr)) |> setEntity ctx n
+          | None -> expr)
       let args = bindEntity ctx (EntityKind.ArgumentList(args)) |> setEntity ctx argsNode
-      let named = bindEntity ctx (EntityKind.NamedMember(name.Node, inst)) |> setEntity ctx name
-      bindEntity ctx (EntityKind.ChainElement(false, name.Node, named, Some inst, Some args)) |> setEntity ctx node 
+      bindEntity ctx (EntityKind.Call(inst, args)) |> setEntity ctx node 
 
-  | Expr.Property(expr, name) ->
-      let inst = bindExpression ctx expr
-      let named = bindEntity ctx (EntityKind.NamedMember(name.Node, inst)) |> setEntity ctx name      
-      bindEntity ctx (EntityKind.ChainElement(true, name.Node, named, Some inst, None)) |> setEntity ctx node 
+  | Expr.Member(instExpr, memExpr) ->
+      let instEnt = bindExpression ctx instExpr
+      let memEnt = bindMemberExpression instEnt ctx memExpr
+      setEntity ctx node memEnt
 
-  | Expr.Binary(l, op, r) ->
-      let lentity = bindExpression ctx l
-      let rentity = bindExpression ctx r
-      bindEntity ctx (EntityKind.Operator(lentity, op.Node, rentity)) |> setEntity ctx node
+  | Expr.Binary(lExpr, op, rExpr) ->
+      let lEnt = bindExpression ctx lExpr
+      let rEnt = bindExpression ctx rExpr
+      bindEntity ctx (EntityKind.Operator(lEnt, op.Node, rEnt)) |> setEntity ctx node
 
-  | Expr.List(els) ->
-      let entities = els |> List.map (bindExpression ctx)      
-      bindEntity ctx (EntityKind.List(entities)) |> setEntity ctx node
+  | Expr.List(elExprs) ->
+      let elEnts = elExprs |> List.map (bindExpression ctx)
+      bindEntity ctx (EntityKind.List(elEnts)) |> setEntity ctx node
 
-  | Expr.Function(v, e) ->
-      let callSite = match callSite with Some s -> s | None -> failwith "bindExpression: Function missing call site"
-      let var = bindEntity ctx (EntityKind.Binding(v.Node, callSite)) |> setEntity ctx v
-      let body = bindExpression { ctx with Variables = Map.add v.Node var ctx.Variables } e
-      bindEntity ctx (EntityKind.Function(var, body)) |> setEntity ctx node
+  | Expr.Function(var, bodyExpr) ->
+      let callSite = match ctx.CallSite with Some s -> s | None -> failwith "bindExpression: Function missing call site"
+      let varEnt = bindEntity ctx (EntityKind.Binding(var.Node, callSite)) |> setEntity ctx var
+      let bodyEnt = bindExpression { ctx with Variables = Map.add var.Node varEnt ctx.Variables } bodyExpr
+      bindEntity ctx (EntityKind.Function(varEnt, bodyEnt)) |> setEntity ctx node
 
   | Expr.Boolean b -> bindEntity ctx (EntityKind.Constant(Constant.Boolean b)) |> setEntity ctx node
   | Expr.String s -> bindEntity ctx (EntityKind.Constant(Constant.String s)) |> setEntity ctx node
@@ -123,13 +142,13 @@ let rec bindExpression callSite ctx node =
 let bindCommand ctx node =
   match node.Node with
   | Command.Let(v, e) ->
-      let body = bindExpression None ctx e 
+      let body = bindExpression ctx e 
       let var = bindEntity ctx (EntityKind.Variable(v.Node, body)) |> setEntity ctx v
       let node = bindEntity ctx (EntityKind.LetCommand(var, body)) |> setEntity ctx node
       { ctx with Variables = Map.add v.Node var ctx.Variables }, node
 
   | Command.Expr(e) ->
-      let body = bindExpression None ctx e 
+      let body = bindExpression ctx e 
       let node = bindEntity ctx (EntityKind.RunCommand(body)) |> setEntity ctx node
       ctx, node
 
@@ -150,5 +169,4 @@ let createContext (globals:list<Entity>) name =
   { Table = System.Collections.Generic.Dictionary<_, _>(); 
     Bound = ResizeArray<_>(); Variables = Map.empty; 
     GlobalValues = Map.ofList [ for e in globals -> { Name = e.Name }, e ]
-    Root = root }
-    *)
+    Root = root; CallSite = None; Chain = None }

@@ -1,4 +1,4 @@
-﻿#if INTERACTIVEZ
+﻿#if INTERACTIVE
 #r "../../src/thegamma/bin/Debug/thegamma.dll"
 #r "../../packages/NUnit/lib/net45/nunit.framework.dll"
 #else
@@ -31,10 +31,10 @@ let randomString (s:string) =
 let constantTokens = 
   [ TokenKind.LParen; TokenKind.RParen; TokenKind.Equals; TokenKind.Dot; TokenKind.Comma
     TokenKind.Let; TokenKind.LSquare; TokenKind.RSquare; TokenKind.Fun; TokenKind.Arrow
-    TokenKind.Operator Operator.Divide; TokenKind.Operator Operator.GreaterThan
+    TokenKind.Colon; TokenKind.Operator Operator.Divide; TokenKind.Operator Operator.GreaterThan
     TokenKind.Operator Operator.GreaterThanOrEqual; TokenKind.Operator Operator.LessThan
     TokenKind.Operator Operator.LessThanOrEqual; TokenKind.Operator Operator.Minus
-    TokenKind.Operator Operator.Multiply; TokenKind.Operator Operator.Plus; TokenKind.Newline 
+    TokenKind.Operator Operator.Multiply; TokenKind.Operator Operator.Plus; TokenKind.Newline     
     TokenKind.Boolean true; TokenKind.Boolean false ]
 
 /// Generate random token - takes last token to avoid generating token pairs that

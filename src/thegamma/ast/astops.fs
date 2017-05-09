@@ -151,6 +151,12 @@ and formatExpression (ctx:FormattingContext) expr =
       formatNode ctx formatName n
       ctx.Add(TokenKind.Arrow)
       formatNode ctx formatExpression e
+  | Expr.Placeholder(n, e) ->
+      ctx.Add(TokenKind.LSquare)
+      formatNode ctx formatName n
+      ctx.Add(TokenKind.Colon)
+      formatNode ctx formatExpression e
+      ctx.Add(TokenKind.RSquare)
   | Expr.List els ->
       ctx.Add(TokenKind.LSquare)
       for e in els do formatNode ctx formatExpression e
@@ -216,35 +222,34 @@ let formatEntityKind = function
   | EntityKind.Root _ -> "root"
   | EntityKind.CallSite _ -> "call site"
   | EntityKind.NamedParam _ -> "named param"
-  | EntityKind.ChainElement _ -> "chain element"
+  | EntityKind.Call _ -> "call"
   | EntityKind.ArgumentList _ -> "argument list"
-  | EntityKind.NamedMember _ -> "property or method"
-
-/// Used for entities with no name
-let anonymous = ""
+  | EntityKind.Member _ -> "member access"
+  | EntityKind.Placeholder _ -> "placeholder"
 
 /// Return entity name (or anonymous) and all its antecedants
 let entityCodeNameAndAntecedents = function
-  | EntityKind.Root -> 0, [], anonymous
-  | EntityKind.Program(ans) -> 1, ans, anonymous
-  | EntityKind.RunCommand(an) -> 2, [an], anonymous
-  | EntityKind.LetCommand(an1, an2) -> 3, [an1; an2], anonymous
+  | EntityKind.Root -> 0, [], "<root>"
+  | EntityKind.Program(ans) -> 1, ans, "<program>"
+  | EntityKind.RunCommand(an) -> 2, [an], "<do>"
+  | EntityKind.LetCommand(an1, an2) -> 3, [an1; an2], "<let>"
   | EntityKind.Operator(an1, op, an2) -> 4, [an1; an2], (formatToken (TokenKind.Operator op))
-  | EntityKind.List(ans) -> 5, ans, anonymous
+  | EntityKind.List(ans) -> 5, ans, "<list>"
   | EntityKind.Constant(Constant.String s) -> 6, [], s
   | EntityKind.Constant(Constant.Number n) -> 7, [], (string n)
   | EntityKind.Constant(Constant.Boolean b) -> 8, [], (string b)
-  | EntityKind.Constant(Constant.Empty) -> 9, [], anonymous
-  | EntityKind.Function(an1, an2) -> 10, [an1; an2], anonymous
+  | EntityKind.Constant(Constant.Empty) -> 9, [], "<empty>"
+  | EntityKind.Function(an1, an2) -> 10, [an1; an2], "<function>"
   | EntityKind.GlobalValue(n, _) -> 11, [], n.Name
   | EntityKind.Variable(n, an) -> 12, [an], n.Name
   | EntityKind.Binding(n, an) -> 13, [an], n.Name
-  | EntityKind.ArgumentList(ans) -> 14, ans, anonymous
-  | EntityKind.CallSite(an1, n, Choice1Of2 s) -> 15, [an1], (n.Name + "." + s)
-  | EntityKind.CallSite(an1, n, Choice2Of2 m) -> 16, [an1], (n.Name + "." + string m)
+  | EntityKind.ArgumentList(ans) -> 14, ans, "<args>"
+  | EntityKind.Call(an1, an2) -> 15, [an1; an2], "<call>"
+  | EntityKind.Member(an, n) -> 16, [an], n.Name
   | EntityKind.NamedParam(n, an) -> 17, [an], n.Name
-  | EntityKind.NamedMember(n, an) -> 18, [an], n.Name
-  | EntityKind.ChainElement(b, n, an1, an2, an3) -> 19, List.choose id [Some an1; an2; an3], (n.Name + "." + string b)
+  | EntityKind.Placeholder(n, an) -> 18, [an], n.Name
+  | EntityKind.CallSite(an, Choice1Of2 s) -> 19, [an], s
+  | EntityKind.CallSite(an, Choice2Of2 m) -> 20, [an], string m
 
 // Provide easy access to entity's antecedents
 type Entity with
@@ -265,7 +270,10 @@ let rec formatType = function
         let mems = mem |> Seq.truncate 5 |> Seq.map (fun m -> m.Name) |> String.concat ", "
         "{ " + if mem.Length > 5 then mems + ", ..." else mems + " }"
       with _ -> "{ members }"
-  | Type.Function(tin, tout) -> "(" + String.concat ", " (List.map formatType tin) + ") -> " + formatType tout
+  | Type.Method(tin, tout) -> 
+      let tout = match tout [for _, _, t in tin -> t] with Some t -> formatType t | _ -> "?"
+      let tin = String.concat ", " [for n, o, t in tin -> sprintf "%s%s:%s" (if o then "?" else "") n (formatType t) ]
+      "(" + tin + ") -> " + tout
   | Type.List t -> "list<" + formatType t + ">"
   | Type.Any -> "any"
 
@@ -278,7 +286,7 @@ let formatTypeInfo = function
   | Type.Primitive PrimitiveType.String -> "string"
   | Type.Primitive PrimitiveType.Unit -> "unit"
   | Type.Object _ -> "object type"
-  | Type.Function _ -> "function type"
+  | Type.Method _ -> "method type"
   | Type.List _ -> "list type"
   | Type.Any _ -> "unknown"
 
@@ -286,6 +294,7 @@ let formatTypeInfo = function
 /// the original node from the original expression, new expressions & names
 let rebuildExprNode e es ns =
   match e, es, ns with
+  | Expr.Placeholder(_, _), [e], [n] -> Expr.Placeholder(n, e)
   | Expr.List(_), els, [] -> Expr.List(els)
   | Expr.Function(_), [e], [n] -> Expr.Function(n, e)
   | Expr.Member(_, _), [e1; e2], [] -> Expr.Member(e1, e2)
@@ -299,6 +308,7 @@ let rebuildExprNode e es ns =
         | _ -> failwith "rebuildExprNode: Wrong call length"
       Expr.Call(e, { args with Node = rebuildArgs args.Node es ns })
   | Expr.Variable _, [], [n] -> Expr.Variable(n)
+  | Expr.Placeholder _, _, _ -> failwith "rebuildExprNode: Wrong placeholder length"
   | Expr.Variable _, _, _ -> failwith "rebuildExprNode: Wrong variable length"
   | Expr.Member _, _, _ -> failwith "rebuildExprNode: Wrong member length"
   | Expr.Call _, _, _ -> failwith "rebuildExprNode: Wrong call length"
@@ -314,6 +324,7 @@ let rebuildExprNode e es ns =
 /// ExprLeaf matches when an expression is a primitive (number, bool, etc..)
 let (|ExprLeaf|ExprNode|) e = 
   match e with
+  | Expr.Placeholder(n, e) -> ExprNode([e], [n])
   | Expr.Member(e1, e2) -> ExprNode([e1; e2], [])
   | Expr.Call(e, args) -> ExprNode(e::[for a in args.Node -> a.Value ], (args.Node |> List.choose (fun a -> a.Name)))
   | Expr.Variable(n) -> ExprNode([], [n])

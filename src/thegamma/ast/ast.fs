@@ -82,11 +82,11 @@ type [<RequireQualifiedAccess>] Documentation =
   | Details of string * string
   | None 
 
-type [<RequireQualifiedAccess>] Member = 
-  | Property of name:string * typ:Type * meta:Metadata list * emitter:Emitter
-  | Method of name:string * arguments:(string * bool * Type) list * typ:(Type list -> Type option) * meta:Metadata list * emitter:Emitter
-  member x.Name = 
-    match x with Property(name=s) | Method(name=s) -> s
+type Member = 
+  { Name : string 
+    Type : Type 
+    Metadata : Metadata list 
+    Emitter : Emitter }
 
 and ObjectType = 
   abstract Members : Member[] 
@@ -103,8 +103,8 @@ and [<RequireQualifiedAccess>] Type =
   | Delayed of Future<Type>
   | Object of ObjectType
   | Primitive of PrimitiveType
-  | Function of arguments:Type list * returns:Type
   | List of elementType:Type
+  | Method of arguments:(string * bool * Type) list * typ:(Type list -> Type option) 
   | Any
 
 // ------------------------------------------------------------------------------------------------
@@ -135,30 +135,36 @@ type [<RequireQualifiedAccess>] EntityKind =
   | LetCommand of variable:Entity * assignment:Entity
 
   // Standard constructs of the language
-  | Operator of left:Entity * operator:Operator * right:Entity
   | List of elements:Entity list
   | Constant of Constant
   | Function of variable:Entity * body:Entity
+  | Operator of left:Entity * operator:Operator * right:Entity
 
-  /// Reference to a global symbol
+  /// Reference to a global symbol or a local variable
   | GlobalValue of name:Name * Babel.Expression option 
-  /// Reference to a local variable
   | Variable of name:Name * value:Entity
+
   /// Variable binding in lambda abstraction
   | Binding of name:Name * callSite:Entity
+  /// Call site in which a lambda function appears. Marks method reference & argument
+  /// (the argument is the name or the index of the parameter in the list)
+  | CallSite of instance:Entity * parameter:Choice<string, int>
 
   /// Represents all arguments passed to method; Antecedants are individual arguments
   /// (a mix of named parameter & ordinary expression entities)
   | ArgumentList of arguments:Entity list
-  /// Call site in which a lambda function appears. Marks instance, method name & argument
-  /// (the argument is the name or the index of the parameter in the list)
-  | CallSite of instance:Entity * name:Name * parameter:Choice<string, int>
   /// Named param in a call site with an expression assigned to it
   | NamedParam of name:Name * assignment:Entity
-  /// Named member (property or call) with reference to the instance (or Root if no instance)
-  | NamedMember of name:Name * instance:Entity
-  /// Call or property access; `named` is `NamedMember` and `arguments` is `ArgumentList`
-  | ChainElement of isProperty:bool * name:Name * named:Entity * instance:Entity option * arguments:Entity option
+
+  /// Placeholder with its name and the body entity
+  | Placeholder of name:Name * body:Entity
+
+  /// Member access and call with arguments (call has member access 
+  /// as the instance; second argument of Member is MemberName)
+  | Call of instance:Entity * arguments:Entity
+  | Member of instance:Entity * name:Entity
+  | MemberName of name:Name
+
 
   
 /// An entity represents a thing in the source code to which we attach additional info.
@@ -211,6 +217,7 @@ and [<RequireQualifiedAccess>] Expr =
   | Member of Node<Expr> * Node<Expr>
   | Call of Node<Expr> * Node<Argument list>
   | Function of Node<Name> * Node<Expr>
+  | Placeholder of Node<Name> * Node<Expr>
   | String of string
   | Number of float
   | Boolean of bool

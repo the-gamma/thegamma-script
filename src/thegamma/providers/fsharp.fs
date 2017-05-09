@@ -1,5 +1,5 @@
 ﻿module TheGamma.TypeProviders.FSharpProvider
-
+(*
 open TheGamma
 open TheGamma.Babel
 open TheGamma.Common
@@ -296,4 +296,4 @@ let provideFSharpTypes lookupNamed url =
             ProvidedType.GlobalValue(exp.name, [], e, ty)
           else
             ProvidedType.NamedType(exp.name, ty) ] }
-    
+  *)  

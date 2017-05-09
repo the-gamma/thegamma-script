@@ -12,7 +12,7 @@ open TheGamma
 open TheGamma.Common
 open TheGamma.TypeChecker
 open NUnit.Framework
-(*
+
 // ------------------------------------------------------------------------------------------------
 // Helper functions for type-checking code & producing fake types
 // ------------------------------------------------------------------------------------------------
@@ -139,4 +139,4 @@ let ``Report error when method not found`` () =
 let ``Report error when instance is not an object`` () = 
   let code = """let res = test.'get the data'.bar"""
   let actual = check code (isVariable "res") vars
-  actual |> assertErrors [305, "test.'get the data'"]*)
+  actual |> assertErrors [305, "test.'get the data'"]

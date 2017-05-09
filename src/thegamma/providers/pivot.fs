@@ -1,5 +1,5 @@
 ﻿module TheGamma.TypeProviders.Pivot
-
+(*
 open Fable.Core
 open Fable.Import
 
@@ -408,4 +408,4 @@ let providePivotType root name lookupNamed = async {
       | "number" -> PrimitiveType.Number
       | s -> failwith (sprintf "The property '%s' has invalid type '%s'. Only 'string', 'number' and 'bool' are supported." kv.key s)
     kv.key, typ)
-  return makePivotGlobalValue root name lookupNamed fields }
+  return makePivotGlobalValue root name lookupNamed fields }*)

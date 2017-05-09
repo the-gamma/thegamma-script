@@ -1,5 +1,5 @@
 ﻿module TheGamma.Live.Showable
-
+(*
 open Fable.Core
 open Fable.Import
 open Fable.Import.Browser
@@ -89,3 +89,4 @@ let preview =
   { Update = updateShowableState
     Render = renderShowable
     InitialState = { PreviewID = 0; PreviewSymbol = createSymbol(); EndLocation = 0; Preview = text "not created" } }
+    *)

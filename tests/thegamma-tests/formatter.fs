@@ -1,4 +1,4 @@
-﻿#if INTERACTIVEZ
+﻿#if INTERACTIVE
 #r "../../src/thegamma/bin/Debug/thegamma.dll"
 #r "../../packages/NUnit/lib/net45/nunit.framework.dll"
 #else

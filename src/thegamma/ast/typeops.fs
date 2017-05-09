@@ -11,11 +11,19 @@ let rec listsEqual l1 l2 f =
   | x::xs, y::ys when f x y -> listsEqual xs ys f
   | _ -> false 
 
+let optionsEqual o1 o2 f = 
+  match o1, o2 with
+  | None, None -> true
+  | Some v1, Some v2 -> f v1 v2
+  | _ -> false
+
 let rec typesEqual t1 t2 = 
   match t1, t2 with
   | Type.Any, _ | _, Type.Any -> true
   | Type.List t1, Type.List t2 -> typesEqual t1 t2
-  | Type.Function(a1, r1), Type.Function(a2, r2) -> listsEqual (r1::a1) (r2::a2) typesEqual
+  | Type.Method(a1, r1), Type.Method(a2, r2) -> 
+      optionsEqual (r1 [for _, _, t in a1 -> t]) (r2 [for _, _, t in a2 -> t]) typesEqual &&
+      listsEqual a1 a2 (fun (s1,b1,t1) (s2,b2,t2) -> s1 = s2 && b1 = b2 && typesEqual t1 t2)
   | Type.Object(o1), Type.Object(o2) -> o1.TypeEquals(o2)
   | Type.Primitive n1, Type.Primitive n2 -> n1 = n2  
   | _ -> false

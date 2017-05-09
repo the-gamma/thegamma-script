@@ -1,5 +1,5 @@
 ﻿module TheGamma.Interpreter
-
+(*
 open TheGamma
 open TheGamma.Ast
 open TheGamma.Common
@@ -205,3 +205,4 @@ let evaluate (globals:seq<Entity>) (e:Entity) =
   let res = evaluateEntityTree ctx e
   Log.trace("interpreter", "Evaluated entity %s (%O) = %O", e.Name, e.Kind, res)
   res
+  *)

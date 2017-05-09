@@ -1,5 +1,5 @@
 ﻿module TheGamma.TypeProviders.RestProvider
-
+(*
 open TheGamma
 open TheGamma.Babel
 open TheGamma.Common
@@ -209,3 +209,4 @@ let rec provideRestType lookupNamed resolveProvider name root cookies =
     ( name, [],
       NewExpression(ctx, [str root; str cookies; str ""], None),
       createRestType lookupNamed resolveProvider root cookies "/")
+      *)

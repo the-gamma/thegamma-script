@@ -83,6 +83,10 @@ let isFun name bf = function
 let isProperty name = function 
   | Expr.Member(_, { Node = Expr.Variable n }) -> n.Node.Name = name | _ -> false
 
+/// Sub-expression contains property a placeholder
+let isPlaceholder name checkBody = function 
+  | Expr.Placeholder(id, body) -> id.Node.Name = name && checkBody body.Node | _ -> false
+
 /// Sub-expression contains empty expression
 let isEmpty = function 
   | Expr.Empty -> true | _ -> false
@@ -578,6 +582,54 @@ let ``Report error when function is missing arrow``() =
   actual |> assertSubExpr (isFun "x" (hasSubExpr (isVal 2.0)))
 
 // --------------------------------------------------------------------------------------
+// TESTS: Placeholders
+// --------------------------------------------------------------------------------------
+
+[<Test>]
+let ``Can parse placeholder in member chain``() =
+  let actual = parse """
+    foo.[bar:'some name'].goo"""
+  actual |> assertErrors []
+  actual |> assertSubExpr (isProperty "goo")
+  actual |> assertSubExpr (isPlaceholder "bar" (isVariable "some name"))
+
+[<Test>]
+let ``Can parse placeholder containing a chain``() =
+  let actual = parse """
+    foo.[bar:'some name'.'another name'].goo"""
+  actual |> assertErrors []
+  actual |> assertSubExpr (isProperty "goo")
+  actual |> assertSubExpr (isPlaceholder "bar" (hasSubExpr (isVariable "some name")))
+  actual |> assertSubExpr (isPlaceholder "bar" (hasSubExpr (isProperty "another name")))
+
+[<Test>]
+let ``Can parse placeholder in multi-line member chain``() =
+  let actual = parse """
+    foo
+      .[bar:
+        'some name']
+      .goo"""
+  actual |> assertErrors []
+  actual |> assertSubExpr (isProperty "goo")
+  actual |> assertSubExpr (isPlaceholder "bar" (isVariable "some name"))
+
+[<Test>]
+let ``Report error when placeholder is missing body``() =
+  let actual = parse """
+    foo.[bar:].goo"""
+  actual |> assertErrors [205, "]"]
+  actual |> assertSubExpr (isProperty "goo")
+  actual |> assertSubExpr (isPlaceholder "bar" any)
+
+[<Test>]
+let ``Report error when placeholder is missing body and ident``() =
+  let actual = parse """
+    foo.[].goo"""
+  actual |> assertErrors [205, "]"]
+  actual |> assertSubExpr (isProperty "goo")
+  actual |> assertSubExpr (isPlaceholder "" any)
+
+// --------------------------------------------------------------------------------------
 // TESTS: Ranges of identifiers
 // --------------------------------------------------------------------------------------
 
@@ -585,7 +637,7 @@ let ``Report error when function is missing arrow``() =
 let ``Ranges of identifiers in Olympic sample are correct`` = 
   let actual = parse """
     let phelp =
-      olympics.'by athlete'.'United States'.'Michael Phelps'.data
+      olympics.'by athlete'.[athlete:'United States'.'Michael Phelps'].data
         .'group data'.'by Athlete'.'sum Gold'.then
         .'get series'.'with key Athlete'.'and value Gold'
 
