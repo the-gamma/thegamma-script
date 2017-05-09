@@ -248,12 +248,12 @@ and parseCallOrMember body ctx =
       match Context.tokenIndent ctx with
       | Some(white, t & { Token = TokenKind.Dot }) ->
           Context.next ctx
-          parseIdentAfterDot body t.Range t.Token ctx
+          parseIdentAfterDot (whiteAfter white body) t.Range t.Token ctx
       | _ -> body
             
   | Some(white, t & { Token = TokenKind.Dot }) ->
       Context.next ctx
-      parseIdentAfterDot body t.Range t.Token ctx
+      parseIdentAfterDot (whiteAfter white body) t.Range t.Token ctx
 
   | _ -> body      
 

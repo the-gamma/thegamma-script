@@ -41,8 +41,8 @@ let ``Whitespace preserved in sample call chain (dot at the start)``() =
 let ``Whitespace preserved in sample call chain (dot at the end)``() =
   let code, prog = parse """
     let z = olympics.
-      'by athlete'
-        .'United States'.'Michael Phelps'.data.
+      'by athlete'.
+         'United States'.'Michael Phelps'.data.
       'group data'.'by Athlete'.'sum Gold'.then.
       paging.skip(10).take(10).
       'get series'.
