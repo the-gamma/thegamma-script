@@ -134,7 +134,7 @@ let ``Report error when method not found`` () =
   let code = "let res = test.yadda()"
   let actual = check code (isVariable "res") vars
   actual |> assertErrors [303, "yadda"]
-
+  
 [<Test>]
 let ``Report error when instance is not an object`` () = 
   let code = """let res = test.'get the data'.bar"""

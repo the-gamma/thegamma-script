@@ -199,27 +199,6 @@ and typeCheckEntity ctx (e:Entity) =
 /// Perform type applications & evaluate delayed types
 let rec evaluateDelayedType topLevel (t:Type) = async {
   match t with
-(*  | Type.Object(obj) when topLevel ->
-      let! members = obj.Members |> Async.Array.map (fun m -> async {
-        match m with
-        | Member.Method(n, args, typ, doc, e) -> 
-            let! args = args |> Async.map (fun (n, opt, t) -> async {
-              let! t = evaluateDelayedType false t
-              return n, opt, t }) 
-            return Member.Method(n, args, typ, doc, e)
-        | prop -> return prop })
-      let obj = 
-        { new ObjectType with 
-            member x.Members = members
-            member x.TypeEquals t2 = obj.TypeEquals t2 }
-      return Type.Object obj
-  | Type.Function(t1s, t2) ->
-      let! t2 = evaluateDelayedType topLevel t2
-      let! t1s = Async.map (evaluateDelayedType topLevel) t1s
-      return Type.Function(t1s, t2)
-  | Type.List(t) ->
-      let! t = evaluateDelayedType topLevel t
-      return Type.List(t) *)
   | Type.Delayed(f) ->
       let! t = Async.AwaitFuture f
       return! evaluateDelayedType topLevel t

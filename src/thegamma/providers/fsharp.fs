@@ -1,5 +1,8 @@
-﻿module TheGamma.TypeProviders.FSharpProvider
-(*
+﻿// ------------------------------------------------------------------------------------------------
+// F# provider makes it possible to use Fable-compiled F# types (even with generics!)
+// ------------------------------------------------------------------------------------------------
+module TheGamma.TypeProviders.FSharpProvider
+
 open TheGamma
 open TheGamma.Babel
 open TheGamma.Common
@@ -7,15 +10,11 @@ open Fable.Import
 open ProviderHelpers
 
 // ------------------------------------------------------------------------------------------------
-// F# provider
+// Records that represent the JSON with metadata about the F# types
 // ------------------------------------------------------------------------------------------------
 
+/// AnyType has `kind` property accessible via `getKind`
 type AnyType = obj
-  //{ kind : string }
-  
-[<Emit("$0.kind")>]
-let getKind (o:AnyType) : string = 
-  o.GetType().GetProperty("kind").GetValue(o) :?> string
 
 type GenericParameterType = 
   { kind : string 
@@ -38,9 +37,9 @@ type NamedType =
   { kind : string 
     name : string
     typargs : AnyType[] }
-  
+
+/// Member has `kind` property accessible via `getKind`
 type Member = obj
-  //{ kind : string }
 
 type Argument = 
   { name : string
@@ -66,29 +65,41 @@ type ExportedType =
     instance : string[]
     members : Member[] }
 
+// ------------------------------------------------------------------------------------------------
+// Special-case `ObjectTypes` for handling of generics 
+// ------------------------------------------------------------------------------------------------
+
+/// Represents a fully applied generic type such as `Series<string, int>`
 type GenericType =
   inherit ObjectType
   abstract TypeArguments : Type list
   abstract TypeDefinition : GenericTypeDefinition
 
+/// Represents an applied generic type that may contain type parameters e.g. `Series<string, 'V>`
 and GenericTypeSchema = 
   inherit ObjectType
   abstract TypeDefinition : GenericTypeDefinition
   abstract TypeArguments : TypeSchema list
   abstract Substitute : (string -> Type option) -> GenericType
 
+/// Represents a generic type definition such as `Series'2`
 and GenericTypeDefinition = 
   inherit ObjectType
   abstract FullName : string
   abstract TypeParameterCount : int
   abstract Apply : TypeSchema list -> GenericTypeSchema
 
+/// Representation of types that may contain type parameters e.g. `Series<string, 'v>[]`
 and TypeSchema = 
   | Primitive of Type
   | GenericType of GenericTypeSchema
   | Parameter of string
   | Function of TypeSchema list * TypeSchema
   | List of TypeSchema
+
+// ------------------------------------------------------------------------------------------------
+// Operations on types and type schemas
+// ------------------------------------------------------------------------------------------------
 
 let rec mapGenericType typ g =
   match typ with 
@@ -120,7 +131,9 @@ let rec unifyTypes ctx schemas tys =
   | TypeSchema.Primitive(t1)::ss, t2::ts when Types.typesEqual t1 t2 -> unifyTypes ctx ss ts
   | TypeSchema.Parameter(n)::ss, t::ts -> unifyTypes ((n,t)::ctx) ss ts
   | TypeSchema.List(s)::ss, Type.List(t)::ts -> unifyTypes ctx (s::ss) (t::ts)
-  | TypeSchema.Function(sa, sr)::ss, Type.Function(ta, tr)::ts when List.length sa = List.length ta -> 
+  | TypeSchema.Function(sa, sr)::ss, Type.Method(ta, tr)::ts when List.length sa = List.length ta -> 
+      let ta = [ for _, _, t in ta -> t]
+      let tr = defaultArg (tr ta) Type.Any // TODO: This should probably never be None
       unifyTypes ctx (sr::(sa @ ss)) (tr::(ta @ ts)) 
   | TypeSchema.GenericType(_)::_, _ 
   | TypeSchema.Primitive(_)::_, _ 
@@ -136,7 +149,8 @@ let rec substituteTypeParams assigns schema =
   | TypeSchema.List s -> Type.List (substituteTypeParams assigns s)
   | TypeSchema.Parameter n -> match assigns n with Some t -> t | _ -> failwith "substituteTypeParams: unresolved type parameter"
   | TypeSchema.Function(is, rs) -> 
-      Type.Function(List.map (substituteTypeParams assigns) is, substituteTypeParams assigns rs)
+      let args = is |> List.map (fun it -> "", false, substituteTypeParams assigns it)
+      Type.Method(args, fun _ -> Some(substituteTypeParams assigns rs)) // TODO: This should check input arguments
 
 let rec partiallySubstituteTypeParams (assigns:string -> Type option) schema = 
   match schema with
@@ -161,6 +175,11 @@ let rec partiallySubstituteTypeParams (assigns:string -> Type option) schema =
               | _, Some t -> Some t
               | _ -> None) } |> TypeSchema.GenericType    
    
+/// This way of accessing `kind` of `AnyType` or `Member` works both in .NET and in JS
+[<Emit("$0.kind")>]
+let getKind (o:obj) : string = 
+  o.GetType().GetProperty("kind").GetValue(o) :?> string
+
 
 // Needs to be delayed to avoid calling lookupNamed too early
 let importProvidedType url lookupNamed exp = 
@@ -238,7 +257,7 @@ let importProvidedType url lookupNamed exp =
 
         // How to show type parameters before they are eliminated?
         let args = [ for n, o, t in args -> n, o, substituteTypeParams (fun _ -> Some Type.Any) t ] 
-        Some(Member.Method(m.name, args, retFunc, [docMeta (Documentation.Text "")], emitter))
+        Some { Member.Name = m.name; Type = Type.Method(args, retFunc); Metadata = []; Emitter = emitter }
       else None)
 
   let objectType = 
@@ -296,4 +315,3 @@ let provideFSharpTypes lookupNamed url =
             ProvidedType.GlobalValue(exp.name, [], e, ty)
           else
             ProvidedType.NamedType(exp.name, ty) ] }
-  *)  

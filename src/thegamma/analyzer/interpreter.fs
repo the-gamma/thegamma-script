@@ -1,34 +1,18 @@
-﻿module TheGamma.Interpreter
+﻿// ------------------------------------------------------------------------------------------------
+// Interpreter is used to partially evaluate parts of program as needed
+// ------------------------------------------------------------------------------------------------
+module TheGamma.Interpreter
 
 open TheGamma
 open TheGamma.Ast
 open TheGamma.Common
 open TheGamma.Babel
 open System.Collections.Generic
-(*
+
 // ------------------------------------------------------------------------------------------------
 // 
 // ------------------------------------------------------------------------------------------------
-
-[<Emit("eval($0)")>]
-let eval (s:string) : RuntimeValue = failwith "JS only"
-
-type BabelOptions = 
-  { presets : string[] }
-
-type BabelResult = 
-  { code : string }
-type Babel =
-  abstract transformFromAst : obj * string * BabelOptions -> BabelResult
-
-[<Emit("Babel")>]
-let babel : Babel = Unchecked.defaultof<_> 
-
-
-
-
-// Above copy paste from CodeGen
-
+(*
 type EvaluationContext =
   { Globals : IDictionary<string, Entity> }
 
