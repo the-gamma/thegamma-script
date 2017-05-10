@@ -1,16 +1,20 @@
-﻿module TheGamma.TypeProviders.Pivot
-(*
+﻿// ------------------------------------------------------------------------------------------------
+// Pivot type provider - for expressing data aggregation queries over a table
+// ------------------------------------------------------------------------------------------------
+module TheGamma.TypeProviders.Pivot
+
 open Fable.Core
 open Fable.Import
 
 open TheGamma
 open TheGamma.Babel
+open TheGamma.Babel.BabelOperators
 open TheGamma.Common
 open TheGamma.TypeProviders
 
-// ----------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
 // Operations that we can do on the table
-// ----------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
 
 type Aggregation = 
   | GroupKey
@@ -116,9 +120,9 @@ module Transform =
   let transformFields fields tfs = 
     tfs |> List.fold singleTransformFields (List.ofSeq fields) |> List.ofSeq
 
-// ------------------------------------------------------------------------------------------------
+// --------------------------------------------------------------------------------------------------------------------
 // Pivot provider
-// ------------------------------------------------------------------------------------------------
+// --------------------------------------------------------------------------------------------------------------------
 
 open TheGamma.TypeProviders.ProviderHelpers
 
@@ -144,15 +148,15 @@ let getTypeAndEmitter = function
   | PrimitiveType.Unit -> Type.Primitive(PrimitiveType.Unit), fun e -> NullLiteral(None)
 
 let propertyEmitter = 
-  { Emit = fun (this, _) -> this }
+  { Emit = fun this -> this }
 
 let makeMethodEmitter callid pars =
-  { Emit = fun (this, args) -> 
+  { Emit = fun this -> funcN (Seq.length pars) (fun args ->
       let args = arr [ for v in args -> v ]
-      this?addCall /@/ [str callid; args] }
+      this?addCall /@/ [str callid; args]) }
 
 let makeDataEmitter isPreview isSeries tfs = 
-  { Emit = fun (this, _) -> 
+  { Emit = fun this -> 
       // TODO: This is not properly recursively transforming values, but they're just int/string, so it's OK
       if isSeries then
         ident("series")?create /@/ 
@@ -164,9 +168,9 @@ let makeDataEmitter isPreview isSeries tfs =
             str "key"; str "value"; str "" ] }
 
 
-// ----------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
 // Transformations
-// ----------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
 
 type Context = 
   { Root : string
@@ -177,15 +181,19 @@ type Context =
 let rec makeProperty ctx name tfs = 
   let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box tfs  }
   let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box ctx.Fields  }
-  Member.Property(name, makePivotType ctx tfs, [meta1; meta2], propertyEmitter)
+  { Member.Name = name; Type = makePivotType ctx tfs; Metadata = [meta1; meta2]; Emitter = propertyEmitter }
   
 and makeMethod ctx name tfs callid args = 
   let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box tfs  }
   let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box ctx.Fields  }
-  Member.Method
-    ( name, [ for n, t in args -> n, false, Type.Primitive t ], 
-      (fun ts -> if ts = List.map (snd >> Type.Primitive) args then Some(makePivotType ctx tfs) else None),  
-      [meta1; meta2], makeMethodEmitter callid args )
+  { Member.Name = name; Metadata = [meta1; meta2]
+    Type = 
+      Type.Method
+        ( [ for n, t in args -> n, false, Type.Primitive t ],       
+          (fun ts -> 
+              if Types.listsEqual ts args (fun t1 (_, t2) -> Types.typesEqual t1 (Type.Primitive t2)) 
+                then Some(makePivotType ctx tfs) else None) )
+    Emitter = makeMethodEmitter callid args }
 
 and makeDataMember ctx name isPreview tfs =
   let fields = Transform.transformFields ctx.InputFields (List.rev tfs)
@@ -201,15 +209,15 @@ and makeDataMember ctx name isPreview tfs =
         let membs = 
           fields |> Array.ofSeq |> Array.map (fun fld ->
             let memTy, memConv = getTypeAndEmitter fld.Type
-            let emitter = { Emit = fun (inst, _) -> memConv <| (inst /?/ str fld.Name) }
-            Member.Property(fld.Name, memTy, [docMeta (Documentation.Text "")], emitter))
+            let emitter = { Emit = fun inst -> memConv <| (inst /?/ str fld.Name) }
+            { Member.Name = fld.Name; Type = memTy; Metadata = [docMeta (Documentation.Text "")]; Emitter = emitter })
         let recTyp = makeObjectType membs
         FSharpProvider.applyTypes (ctx.LookupNamed "series") [Type.Primitive PrimitiveType.Number; recTyp ], false
 
   let tfs = if isSeries then tfs else GetTheData::tfs
   let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box tfs }
   let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box ctx.Fields  }
-  Member.Property(name, dataTyp, [meta1; meta2], makeDataEmitter isPreview isSeries tfs)
+  { Member.Name = name; Type = dataTyp; Metadata = [meta1; meta2]; Emitter = makeDataEmitter isPreview isSeries tfs }
 
 and handleGetSeriesRequest ctx rest k v = 
   match k, v with
@@ -394,4 +402,4 @@ let providePivotType root name lookupNamed = async {
       | "number" -> PrimitiveType.Number
       | s -> failwith (sprintf "The property '%s' has invalid type '%s'. Only 'string', 'number' and 'bool' are supported." kv.key s)
     kv.key, typ)
-  return makePivotGlobalValue root name lookupNamed fields }*)
+  return makePivotGlobalValue root name lookupNamed fields }

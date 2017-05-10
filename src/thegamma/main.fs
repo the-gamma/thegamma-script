@@ -14,7 +14,7 @@ open TheGamma.TypeChecker
 open TheGamma.Services
 open TheGamma.TypeProviders 
 open TheGamma.Live.Common
-(*
+
 module FsOption = Microsoft.FSharp.Core.Option
 
 // ------------------------------------------------------------------------------------------------
@@ -90,13 +90,14 @@ let callShowMethod outputId (cmd:Node<_>) =
       match typ with
       | Type.Object obj ->
           let hasShow = obj.Members |> Array.exists (function 
-            | Member.Method(name="show"; arguments=[_, _, Type.Primitive PrimitiveType.String]) -> true
+            | { Name = "show"; Type = Type.Method([_, _, Type.Primitive PrimitiveType.String], _) } -> true
             | _ -> false)
           if hasShow then
             let rng = { Range.Start = cmd.Range.End; End = cmd.Range.End }
             let outExpr = Ast.node rng (Expr.String(outputId))
             let args = [{ Argument.Name = None; Argument.Value = outExpr }]
-            let expr = Ast.node rng (Expr.Call(Some inst, Ast.node rng { Name = "show" }, Ast.node rng args))
+            let showMember = Expr.Member(inst, Ast.node rng (Expr.Variable(Ast.node rng { Name = "show" })))
+            let expr = Ast.node rng (Expr.Call(Ast.node rng showMember, Ast.node rng args))
             Ast.node cmd.Range (Command.Expr(expr))
           else cmd
       | _ -> cmd
@@ -169,10 +170,10 @@ let rec serializeType typ =
   | Type.Primitive(PrimitiveType.Date) -> box "date"
   | Type.Primitive(PrimitiveType.Number) -> box "number"
   | Type.Primitive(PrimitiveType.String) -> box "string"
-  | Type.Function(args, res) -> 
+  | Type.Method(args, res) -> 
       [ "kind", box "function"
-        "arguments", args |> List.map serializeType |> Array.ofList |> box
-        "result", serializeType res ] |> JsInterop.createObj 
+        "arguments", args |> List.map (fun (_, _, t) -> serializeType t) |> Array.ofList |> box
+        "result", serializeType (res [for _, _, t in args  -> t]).Value ] |> JsInterop.createObj 
   | Type.List(t) -> 
       [ "kind", box "array"
         "type", serializeType t ] |> JsInterop.createObj
@@ -182,8 +183,7 @@ let rec serializeType typ =
         | :? FSharpProvider.GenericType as gt -> 
             yield "generics", gt.TypeArguments |> Seq.map serializeType |> Array.ofSeq |> box
         | _ -> ()
-        yield "members", obj.Members |> Array.map (fun m -> 
-          match m with Member.Method(name=n) | Member.Property(name=n) -> n) |> box ] 
+        yield "members", obj.Members |> Array.map (fun m -> m.Name) |> box ] 
       |> JsInterop.createObj
 
 let rec serializeEntity (rng:Range option) (ent:Entity) =
@@ -202,9 +202,11 @@ let rec serializeEntity (rng:Range option) (ent:Entity) =
     | EntityKind.Binding _ -> "binding"
     | EntityKind.ArgumentList _ -> "args"
     | EntityKind.CallSite _ -> "callsite"
-    | EntityKind.NamedParam _ -> "named"
-    | EntityKind.NamedMember _ -> "member"
-    | EntityKind.ChainElement _ -> "chain"
+    | EntityKind.NamedParam _ -> "param"
+    | EntityKind.Member _ -> "member"
+    | EntityKind.MemberName _ -> "name"
+    | EntityKind.Placeholder _ -> "placeholder"
+    | EntityKind.Call _ -> "call"
   [ yield "kind", box kind
     if rng.IsSome then yield "range", JsInterop.createObj [ "start", box rng.Value.Start; "end", box rng.Value.End ]
     yield "getChildren", box (fun () -> ent.Antecedents |> List.toArray |> Array.map (serializeEntity None))
@@ -320,4 +322,3 @@ type providers =
     (fun name lookup -> async {
       let! t = TypeProviders.Pivot.providePivotType url name lookup 
       return [t] })
-*)

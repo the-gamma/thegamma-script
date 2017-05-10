@@ -1,5 +1,8 @@
-﻿module TheGamma.Live.Showable
-(*
+﻿// ------------------------------------------------------------------------------------------------
+// Live preview for anything with 'show' method
+// ------------------------------------------------------------------------------------------------
+module TheGamma.Live.Showable
+
 open Fable.Core
 open Fable.Import
 open Fable.Import.Browser
@@ -39,7 +42,7 @@ let updateBody trigger state =
       match ent.Type.Value with 
       | Type.Object obj ->
           let hasShow = obj.Members |> Array.exists (function 
-            | Member.Method(name="show"; arguments=[_, _, Type.Primitive PrimitiveType.String]) -> true
+            | { Name="show"; Type=Type.Method([_, _, Type.Primitive PrimitiveType.String], _) } -> true
             | _ -> false)
           if hasShow then
             let res = Interpreter.evaluate state.Globals ent        
@@ -89,4 +92,3 @@ let preview =
   { Update = updateShowableState
     Render = renderShowable
     InitialState = { PreviewID = 0; PreviewSymbol = createSymbol(); EndLocation = 0; Preview = text "not created" } }
-    *)

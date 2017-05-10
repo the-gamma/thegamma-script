@@ -221,9 +221,11 @@ module BabelOperators =
   let func v f = 
     let body = BlockStatement([ReturnStatement(f (ident v), None)], None)
     FunctionExpression(None, [IdentifierPattern(v, None)], body, false, false, None)
-  let funcN v f = 
-    let body = BlockStatement([ReturnStatement(f (ident v), None)], None)
-    FunctionExpression(None, [IdentifierPattern(v, None)], body, false, false, None)
+  
+  let funcN n f = 
+    let args = List.init n (fun i -> "_arg" + string i)
+    let body = BlockStatement([ReturnStatement(f (List.map ident args), None)], None)
+    FunctionExpression(None, List.map (fun s -> IdentifierPattern(s, None)) args, body, false, false, None)
 
 
 

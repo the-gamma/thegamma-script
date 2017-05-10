@@ -1,5 +1,5 @@
 ﻿module TheGamma.Services
-(*
+
 open Fable.Import
 open TheGamma.Html
 open TheGamma.Editors
@@ -10,7 +10,7 @@ module FsOption = Microsoft.FSharp.Core.Option
 // ------------------------------------------------------------------------------------------------
 // Editors
 // ------------------------------------------------------------------------------------------------
-
+(*
 type EditorWorkerMessage = 
   | Update of string
   | UpdateNow of string
@@ -63,7 +63,7 @@ type EditorService(article, checker:string -> Async<bool * Binder.BindingResult 
     if immediately = Some true then agent.Post(UpdateNow text)
     else agent.Post(Update text)
   member x.EditorsUpdated = renderEditors.Publish
-
+  *)
 
 // ------------------------------------------------------------------------------------------------
 // Type checker
@@ -326,4 +326,3 @@ type PreviewService(checker:CheckingService, globals:Future<list<Entity>>, ed:mo
   member x.ZoneHeight = 
     if currentZone <> None then zoneHeight 
     else 0.0
-    *)

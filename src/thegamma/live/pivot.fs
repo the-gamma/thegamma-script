@@ -1,5 +1,8 @@
-﻿module TheGamma.Live.Pivot
-(*
+﻿// ------------------------------------------------------------------------------------------------
+// Live preview for pivot type provider
+// ------------------------------------------------------------------------------------------------
+module TheGamma.Live.Pivot
+
 open Fable.Core
 open Fable.Import
 open Fable.Import.Browser
@@ -28,7 +31,7 @@ let pickMetaByType ctx typ metas =
 
 let pickPivotFields expr =
   match expr.Entity with
-  | Some { Kind = EntityKind.ChainElement _; Meta = m } 
+  | Some { Kind = EntityKind.Member _; Meta = m } 
   | Some { Kind = EntityKind.GlobalValue _; Meta = m } 
   | Some { Kind = EntityKind.Variable(_, { Meta = m }) } -> 
       match pickMetaByType "http://schema.thegamma.net/pivot" "Fields" m with
@@ -38,7 +41,7 @@ let pickPivotFields expr =
 
 let pickPivotTransformations expr =
   match expr.Entity with
-  | Some { Kind = EntityKind.ChainElement _; Meta = m } -> 
+  | Some { Kind = EntityKind.Member _; Meta = m } -> 
       match pickMetaByType "http://schema.thegamma.net/pivot" "Transformations" m with
       | Some m -> Some(unbox<TypeProviders.Pivot.Transformation list> m)
       | _ -> None
@@ -94,8 +97,8 @@ let createPivotSections tfss =
 
 let rec collectChain acc node =
   match node.Node with
-  | Expr.Call(Some e, n, _) 
-  | Expr.Property(e, n) -> collectChain ((n.Range.Start, node)::acc) e
+  | Expr.Call(e, _) -> collectChain acc e
+  | Expr.Member(e, n) -> collectChain ((n.Range.Start, node)::acc) e
   | Expr.Variable(n) -> Some((n.Range.Start, node)::acc)
   | _ -> None
 
@@ -159,8 +162,7 @@ let withPivotState (pivotState:PivotEditorState) state =
 let findPreview trigger globals (ent:Entity) = 
   let nm = { Name.Name="preview" }
   match ent.Type with 
-  | Some(Type.Object(TypeChecker.FindMethod nm _))
-  | Some(Type.Object(TypeChecker.FindProperty nm _)) ->
+  | Some(Type.Object(FindMember nm _)) ->
       let res = Interpreter.evaluate globals ent  
       let res = res |> FsOption.bind (fun p -> p.Preview.Value)
       match res with
@@ -211,7 +213,7 @@ let editorLocation (mapper:LocationMapper) startIndex endIndex =
 let selectName nd state = 
   let rng =
     match nd with
-    | { Node = Expr.Call(_, n, _) | Expr.Property(_, n) } -> n.Range
+    | { Node = Expr.Member(_, n) } -> n.Range
     | _ -> nd.Range
   let loc = editorLocation state.Mapper rng.Start (rng.End+1)
   { state with Selection = Some loc }
@@ -237,8 +239,9 @@ let reconstructChain state (body:Node<_>) newNodes =
     List.tail newNodes 
     |> List.fold (fun prev part ->
       match part.Node with 
-      | Expr.Property(_, n) -> { part with Node = Expr.Property(prev, n) }
-      | Expr.Call(_, n, args) -> { part with Node = Expr.Call(Some prev, n, args) }
+      | Expr.Member(_, n) -> { part with Node = Expr.Member(prev, n) }
+      // TODO
+      //| Expr.Call(_, n, args) -> { part with Node = Expr.Call(Some prev, n, args) }
       | _ -> failwith "Unexpected node in call chain") (List.head newNodes)
 
   let newCode = (Ast.formatSingleExpression newBody).Trim()
@@ -248,10 +251,13 @@ let reconstructChain state (body:Node<_>) newNodes =
 let createChainNode args name = 
   let node nd = Ast.node {Start=0; End=0} nd
   match args with
-  | None -> node (Expr.Property(node Expr.Empty, node {Name=name}))
+  | None -> node (Expr.Member(node Expr.Empty, node (Expr.Variable(node {Name=name}))))
   | Some args -> 
-      let args = args |> List.map (fun a -> { Name = None; Value = node a })
-      node (Expr.Call(None, node {Name=name}, node args))
+      // TODO
+      failwith "?"
+      //let args = args |> List.map (fun a -> { Name = None; Value = node a })
+      //node (Expr.Call(None, node {Name=name}, node args))
+
 
 let getWhiteBeforeAndAfterSections firstNode sections =
   let dominantWhite whites = 
@@ -271,10 +277,12 @@ let insertWhiteAroundSection before after section =
       section.Nodes |> List.mapi (fun i node ->
         let node = 
           match before, node with
+          (* TODO
           | Some before, { Node = Expr.Property(inst, n) } when i = 0 -> 
               { node with Node = Expr.Property(inst, { n with WhiteBefore = before }) }
           | Some before, { Node = Expr.Call(inst, n, args) } when i = 0 -> 
               { node with Node = Expr.Call(inst, { n with WhiteBefore = before }, args) }
+              *)
           | _ -> node
         let node = 
           match after, node with
@@ -386,8 +394,9 @@ let rec updatePivotState trigger state event =
           | section::sections -> 
               let section =
                 match section.Transformation, List.last section.Nodes with
-                | Pivot.Paging _, { Node = Expr.Call(_, n, _) } when n.Node.Name = "take" -> section 
-                | _, { Node = Expr.Property(_, n) } when n.Node.Name = "then" -> section 
+                // TODO
+                //| Pivot.Paging _, { Node = Expr.Call(_, n, _) } when n.Node.Name = "take" -> section 
+                //| _, { Node = Expr.Property(_, n) } when n.Node.Name = "then" -> section 
                 | _ -> { section with Nodes = section.Nodes @ [createChainNode None "then"] }
               (insertWhiteAroundSection None (Some whiteAfter) section) :: sections
           | [] -> []
@@ -411,7 +420,7 @@ let rec updatePivotState trigger state event =
 let renderNodeList trigger nodes =
   [ for nd in nodes do
       match nd.Node with
-      | Expr.Property(_, n) when n.Node.Name <> "then" ->
+      | Expr.Member(_, { Node = Expr.Variable n }) when n.Node.Name <> "then" ->
           yield h?span [] [
             h?a ["click" =!> trigger (SelectRange(n.Range)) ] [
               text n.Node.Name 
@@ -428,12 +437,14 @@ let renderContextMenu trigger =
   ]
 
 let renderAddPropertyMenu trigger f nodes =
-  [ let lastNode = nodes |> List.rev |> List.find (function { Node = Expr.Property(_, n) } -> n.Node.Name <> "then" | _ -> true) 
+  [ let lastNode = nodes |> List.rev |> List.find (function 
+      | { Node = Expr.Member(_, { Node = Expr.Variable n }) } -> n.Node.Name <> "then" 
+      | _ -> true) 
     match lastNode.Entity.Value.Type with
     | Some(Type.Object obj) ->
         let members = 
           obj.Members 
-          |> Seq.choose (function Member.Property(name=n) when f n -> Some n | _ -> None)
+          |> Seq.choose (fun m -> if f m.Name then Some m.Name else None)
           |> Seq.sort
         yield h?ul [] [
           for n in members ->
@@ -447,7 +458,7 @@ let renderSection triggerEvent section =
   let trigger action = fun _ (e:Event) -> e.cancelBubble <- true; triggerEvent (CustomEvent(action))
   let triggerWith f = fun el (e:Event) -> e.cancelBubble <- true; triggerEvent (CustomEvent(f el))
   let getNodeNameAndSymbol = function
-    | Some { Entity = Some e; Node = Expr.Property(_, n) } -> n.Node.Name, Some e.Symbol
+    | Some { Entity = Some e; Node = Expr.Member(_, { Node = Expr.Variable n }) } -> n.Node.Name, Some e.Symbol
     | _ -> "", None
   [ match section with
     | Some { Nodes = nodes; Transformation = Pivot.GetSeries _ } ->
@@ -468,12 +479,11 @@ let renderSection triggerEvent section =
                 | Some selSym -> ReplaceElement(selSym, (unbox<HTMLSelectElement> el).value, None)) ] [
               if keyName = "" then yield h?option [ "value" => ""; "selected" => "selected" ] [ text "" ]
               for m in obj.Members do
-                match m with
-                | Member.Property(name=n) when n.StartsWith("with key") ->
-                    yield h?option [  
-                      yield "value" => n
-                      if keyName = n then yield "selected" => "selected" ] [ text (n.Replace("with key ", "")) ] 
-                | _ -> ()
+                let n = m.Name
+                if n.StartsWith("with key") then
+                  yield h?option [  
+                    yield "value" => n
+                    if keyName = n then yield "selected" => "selected" ] [ text (n.Replace("with key ", "")) ] 
             ]
         | _ -> ()
         match keyNode with
@@ -485,12 +495,11 @@ let renderSection triggerEvent section =
                 | Some selSym -> ReplaceElement(selSym, (unbox<HTMLSelectElement> el).value, None)) ] [
               if valName = "" then yield h?option [ "value" => ""; "selected" => "selected" ] [ text "" ]
               for m in obj.Members do
-                match m with
-                | Member.Property(name=n) when n.StartsWith("and value") ->
-                    yield h?option [  
-                      yield "value" => n
-                      if valName = n then yield "selected" => "selected" ] [ text (n.Replace("and value ", "")) ] 
-                | _ -> ()
+                let n = m.Name
+                if n.StartsWith("and value") then
+                  yield h?option [  
+                    yield "value" => n
+                    if valName = n then yield "selected" => "selected" ] [ text (n.Replace("and value ", "")) ] 
             ]
         | _ -> ()
 
@@ -509,19 +518,18 @@ let renderSection triggerEvent section =
                 | Some selSym -> ReplaceElement(selSym, (unbox<HTMLSelectElement> el).value, None)) ] [
               if selName = "" then yield h?option [ "value" => ""; "selected" => "selected" ] [ text "" ]
               for m in obj.Members do
-                match m with
-                | Member.Property(name=n) when n.StartsWith("by") ->
-                    yield h?option [  
-                      yield "value" => n
-                      if selName = n then yield "selected" => "selected" ] [ text n ] 
-                | _ -> ()
+                let n = m.Name
+                if n.StartsWith("by") then
+                  yield h?option [  
+                    yield "value" => n
+                    if selName = n then yield "selected" => "selected" ] [ text n ] 
             ]
         | _ -> ()
         yield! renderNodeList trigger aggNodes  
         yield renderContextMenu trigger
-
+        
     | Some { Nodes = nodes; Transformation = Pivot.Paging _ } ->                    
-        let methods = nodes |> List.map (function { Node = Expr.Call(_, n, _) } -> n.Node.Name | _ -> "") |> set
+        (*let methods = nodes |> List.map (function { Node = Expr.Call(_, n, _) } -> n.Node.Name | _ -> "") |> set
         for nd in nodes do
           match nd.Node with
           | Expr.Call(_, n, { Node = [arg] }) ->
@@ -547,10 +555,12 @@ let renderSection triggerEvent section =
           | _ -> ()
         if not (methods.Contains "take" && methods.Contains "skip") then
           yield renderContextMenu trigger
+          *)
+        ()
 
     | Some { Nodes = nodes; Transformation = Pivot.SortBy _ } ->
         let props = nodes |> List.choose (function
-          | { Node = Expr.Property(_, n); Entity = Some { Symbol = sym} }
+          | { Node = Expr.Member(_, { Node = Expr.Variable n }); Entity = Some { Symbol = sym} }
               when n.Node.Name <> "then" && n.Node.Name <> "sort data" -> Some(sym, n) | _ -> None)
         let last = List.tryLast props
         for sym, n in props ->
@@ -595,7 +605,7 @@ let renderPivot triggerEvent (state:LiveState<_>) =
           let secSymbol = (sec.Nodes |> List.head).Entity.Value.Symbol
           let identRange = 
             match sec.Nodes with
-            | { Node = Expr.Variable n | Expr.Call(_, n, _) | Expr.Property(_, n) }::_ -> n.Range
+            | { Node = Expr.Variable n | Expr.Member(_, { Node = Expr.Variable n }) }::_ -> n.Range
             | _ -> failwith "Unexpected node in pivot call chain" 
 
           h?li ["class" => if selected then "selected" else ""] [ 
@@ -642,7 +652,7 @@ let renderPivot triggerEvent (state:LiveState<_>) =
         match state.State.Menus, selSec with
         | ContextualDropdownOpen, Some { Nodes = nodes; Transformation = Pivot.Paging _ } ->
             let methods = nodes |> List.choose (function 
-              | { Node = Expr.Property(_, n) | Expr.Call(_, n, _); Entity = e } -> 
+              | { Node = Expr.Member(_, { Node = Expr.Variable n }); Entity = e } -> 
                   Some(n.Node.Name, e.Value.Symbol) | _ -> None) |> dict
             let lastSym = (List.last nodes).Entity.Value.Symbol
             let firstSym = (List.head nodes).Entity.Value.Symbol
@@ -687,4 +697,3 @@ let preview =
         SelectedEntity = Unchecked.defaultof<_>
         Preview = text "not created"
         Sections = []; Menus = Hidden; Focus = None } }
-        *)

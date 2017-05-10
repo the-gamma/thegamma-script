@@ -1,5 +1,5 @@
 ﻿module TheGamma.Monaco
-(*
+
 open Fable.Core
 open Fable.Import.monaco
 open Fable.Import.Browser
@@ -21,8 +21,7 @@ let getColorClass = function
   | TokenKind.String _ -> "string" 
   | TokenKind.QIdent _ | TokenKind.Ident _ -> "ident" 
   | TokenKind.Dot _ -> "operator" 
-  | TokenKind.By | TokenKind.To | TokenKind.Let 
-  | TokenKind.Boolean _ | TokenKind.Fun | TokenKind.Arrow -> "keyword" 
+  | TokenKind.Let | TokenKind.Boolean _ | TokenKind.Fun | TokenKind.Arrow -> "keyword" 
   | TokenKind.Number _ -> "number" 
   | _ -> ""
 
@@ -60,13 +59,13 @@ let createCompletionProvider (getService:string -> CheckingService) =
             let! _, ents, _ = svc.TypeCheck(input)
             let optMembers = 
               ents.Entities |> Seq.tryPick (fun (rng, ent) ->
-                match ent.Kind with 
-                | EntityKind.NamedMember(_, { Type = Some t }) when loc >= rng.Start && loc <= rng.End + 1 -> 
+                match ent with 
+                | { Kind = EntityKind.Member _; Type = Some t } when loc >= rng.Start && loc <= rng.End + 1 -> 
                     Log.trace("completions", "Antecedant at current location: %O", t)
                     match t with
                     | Type.Object obj -> Some(rng, obj.Members)
                     | _ -> None
-                | EntityKind.NamedMember(n, { Type = Some t })  ->
+                | { Kind = EntityKind.Member(_, { Kind = EntityKind.MemberName(n) }); Type = Some t } ->
                     Log.trace("completions", "Ignoring '%s' at location %s-%s (current=%s)", n.Name, rng.Start, rng.End, loc)
                     None
                 | _ -> None)
@@ -91,16 +90,17 @@ let createCompletionProvider (getService:string -> CheckingService) =
                 let completion =
                   [ for m in members ->
                       let ci = JsInterop.createEmpty<languages.CompletionItem>
-                      let n, k =
-                        match m with 
-                        | Member.Method(name=n) -> n, languages.CompletionItemKind.Method
-                        | Member.Property(name=n) -> n, languages.CompletionItemKind.Property
+                      let n = m.Name
+                      let k = 
+                        match m.Type with 
+                        | Type.Method _ -> languages.CompletionItemKind.Method 
+                        | _ -> languages.CompletionItemKind.Property
                       ci.kind <- k
                       ci.label <- n
                       ci.insertText <- Some(Ast.escapeIdent n)
                       ci.filterText <- Some(n)
-                      match m with
-                      | Member.Method(arguments=args) -> 
+                      match m.Type with
+                      | Type.Method(arguments=args) -> 
                           let acc, l = 
                             [ for n, opt, t in args -> (if opt then "?" else "") + n ] 
                             |> Seq.fold (fun (acc, l:string) s ->
@@ -151,6 +151,3 @@ let createMonacoEditor id code svc customize =
   let ed = editor.Globals.create(document.getElementById(id), options, services)
   createdEditors.Add(ed.getModel().uri.toString(), svc)
   ed
-
-
-*)
