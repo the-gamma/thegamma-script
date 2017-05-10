@@ -39,6 +39,7 @@ let rec getMember name typ =
     failwith "getEmitterAndParams: Not an object" 
 
 let rec compileExpression ctx (expr:Node<Expr>) = 
+  Log.trace("codegen", "Compiling expression: %O", expr)
   match expr.Node with 
   // Binary operators map to BinaryExpression, except for pow, which is a JS function
   | Expr.Binary(l, { Node = Operator.Power }, r) ->

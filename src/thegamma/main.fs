@@ -89,17 +89,22 @@ let callShowMethod outputId (cmd:Node<_>) =
   | Command.Expr({ Entity = Some { Type = Some typ } } as inst) ->
       match typ with
       | Type.Object obj ->
-          let hasShow = obj.Members |> Array.exists (function 
-            | { Name = "show"; Type = Type.Method([_, _, Type.Primitive PrimitiveType.String], _) } -> true
-            | _ -> false)
-          if hasShow then
+          let showTyp = obj.Members |> Array.tryPick (function 
+            | { Name = "show"; Type = typ & Type.Method([_, _, Type.Primitive PrimitiveType.String], _) } -> Some typ
+            | _ -> None)
+          match showTyp with 
+          | Some showTyp ->
             let rng = { Range.Start = cmd.Range.End; End = cmd.Range.End }
             let outExpr = Ast.node rng (Expr.String(outputId))
             let args = [{ Argument.Name = None; Argument.Value = outExpr }]
-            let showMember = Expr.Member(inst, Ast.node rng (Expr.Variable(Ast.node rng { Name = "show" })))
-            let expr = Ast.node rng (Expr.Call(Ast.node rng showMember, Ast.node rng args))
+            let showMember = Expr.Member(inst, Ast.node rng (Expr.Variable(Ast.node rng { Name = "show" }))) |> Ast.node rng
+            let showEntity = 
+              { Kind = EntityKind.Root; Symbol = createSymbol(); Value = None
+                Meta = []; Type = Some showTyp; Errors = [] }
+            showMember.Entity <- Some showEntity
+            let expr = Ast.node rng (Expr.Call(showMember, Ast.node rng args))
             Ast.node cmd.Range (Command.Expr(expr))
-          else cmd
+          | _ -> cmd
       | _ -> cmd
   | _ -> cmd
 

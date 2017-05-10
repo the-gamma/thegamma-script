@@ -2,7 +2,6 @@
 
 open Fable.Import
 open TheGamma.Html
-open TheGamma.Editors
 open TheGamma.Common
 
 module FsOption = Microsoft.FSharp.Core.Option
