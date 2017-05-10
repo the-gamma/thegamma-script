@@ -99,15 +99,6 @@ let dataCall parser trace endp =
       let mem = MemberExpression(tr, IdentifierExpression("getValue", None), false, None)
       CallExpression(mem, [StringLiteral(endp, None)], None) |> parser }
 
-let ident s = IdentifierExpression(s, None)
-let str v = StringLiteral(v, None)
-let (?) (e:Expression) (s:string) = MemberExpression(e, IdentifierExpression(s, None), false, None)
-let (/@/) (e:Expression) (args) = CallExpression(e, args, None)
-let func v f = 
-  let body = BlockStatement([ReturnStatement(f (ident v), None)], None)
-  FunctionExpression(None, [IdentifierPattern(v, None)], body, false, false, None)
-
-
 // Turn "Async<string>" into the required type
 // I guess we should keep a flag whether the input is still async (or something)
 let rec getTypeAndEmitter (lookupNamed:string -> TheGamma.Type) ty = 

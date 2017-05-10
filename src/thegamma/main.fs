@@ -1,7 +1,5 @@
-﻿#r "../../node_modules/fable-core/Fable.Core.dll"
-#r "../libraries/bin/Debug/libraries.dll"
-#r "../thegamma/bin/Debug/thegamma.dll"
-#r "../bindings/bin/Debug/bindings.dll"
+﻿module TheGamma.Main
+
 open Fable.Core
 open Fable.Core.Extensions
 open Fable.Import

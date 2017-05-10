@@ -344,3 +344,7 @@ let (|ExprLeaf|ExprNode|) e =
   | Expr.Boolean _
   | Expr.String _
   | Expr.Empty -> ExprLeaf()
+
+/// Find object member with the specified name 
+let (|FindMember|_|) (name:Name) (obj:ObjectType) = 
+  obj.Members |> Seq.tryPick (fun m -> if m.Name = name.Name then Some(m) else None) 

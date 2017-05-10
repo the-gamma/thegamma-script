@@ -70,7 +70,7 @@ type Token =
 // ------------------------------------------------------------------------------------------------
 
 type Emitter = 
-  { Emit : Babel.Expression * Babel.Expression list -> Babel.Expression }
+  { Emit : Babel.Expression (* Babel.Expression list *) -> Babel.Expression }
 
 type Metadata = 
   { Context : string

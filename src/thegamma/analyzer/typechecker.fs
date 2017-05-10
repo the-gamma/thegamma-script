@@ -21,9 +21,6 @@ type CheckingContext =
 let addError ctx ent err = 
   ctx.Errors.Add(err ctx.Ranges.[ent.Symbol])
 
-let (|FindMember|_|) (name:Name) (obj:ObjectType) = 
-  obj.Members |> Seq.tryPick (fun m -> if m.Name = name.Name then Some(m) else None) 
-
 /// Given a list of types, find the most frequent type (using Type.Any as the last resort)
 let inferListType typs = 
   typs 
@@ -139,8 +136,11 @@ and typeCheckEntity ctx (e:Entity) =
           Type.Any
 
   | EntityKind.Member(inst, _) ->
+      Log.error("typechecker", "typeCheckEntity: Member access is missing member name!")
       failwith "typeCheckEntity: Member access is missing member name!"
+
   | EntityKind.Call(inst, _) ->
+      Log.error("typechecker", "typeCheckEntity: Call to %s is missing argument list!", (lastChainElement inst).Name)
       failwithf "typeCheckEntity: Call to %s is missing argument list!" (lastChainElement inst).Name
 
   // Type of placeholder is the type of its body

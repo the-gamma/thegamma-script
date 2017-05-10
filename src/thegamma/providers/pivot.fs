@@ -136,20 +136,6 @@ let makeObjectType members =
 let isNumeric fld = fld = PrimitiveType.Number
 let isConcatenable fld = fld = PrimitiveType.String
 
-// From providers.fs
-let ident s = IdentifierExpression(s, None)
-let str v = StringLiteral(v, None)
-let bool v = BooleanLiteral(v, None)
-let arr l = ArrayExpression(l, None)
-
-let (?) (e:Expression) (s:string) = MemberExpression(e, IdentifierExpression(s, None), false, None)
-let (/?/) (e:Expression) a = MemberExpression(e, a, true, None)
-
-let (/@/) (e:Expression) (args) = CallExpression(e, args, None)
-let func v f = 
-  let body = BlockStatement([ReturnStatement(f (ident v), None)], None)
-  FunctionExpression(None, [IdentifierPattern(v, None)], body, false, false, None)
-
 let getTypeAndEmitter = function 
   | PrimitiveType.String -> Type.Primitive(PrimitiveType.String), id
   | PrimitiveType.Date -> Type.Primitive(PrimitiveType.String), fun e -> ident("Date")?parse /@/ [e]

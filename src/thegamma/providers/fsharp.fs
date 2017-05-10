@@ -5,6 +5,7 @@ module TheGamma.TypeProviders.FSharpProvider
 
 open TheGamma
 open TheGamma.Babel
+open TheGamma.Babel.BabelOperators
 open TheGamma.Common
 open Fable.Import
 open ProviderHelpers
@@ -225,10 +226,7 @@ let importProvidedType url lookupNamed exp =
         let assigns n = if List.exists ((=) n) typars then None else assigns n
 
         let args = [ for a in m.arguments -> a.name, a.optional, partiallySubstituteTypeParams assigns (mapType a.``type``) ]
-        let emitter = { Emit = fun (inst, args) ->
-          CallExpression
-            ( MemberExpression(inst, IdentifierExpression(m.name, None), false, None), 
-              args, None) }
+        let emitter = { Emit = fun inst -> MemberExpression(inst, IdentifierExpression(m.name, None), false, None) }
             
         let retTyp = partiallySubstituteTypeParams assigns (mapType m.returns)
         let retFunc tys =

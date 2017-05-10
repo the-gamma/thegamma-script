@@ -86,6 +86,7 @@
     <Compile Include="editors.fs" />
     <Compile Include="services.fs" />
     <Compile Include="monaco.fs" />
+    <Compile Include="main.fs" />
     <Content Include="App.config">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
