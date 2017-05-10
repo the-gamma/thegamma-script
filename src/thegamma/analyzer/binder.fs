@@ -86,7 +86,9 @@ let rec bindExpression ctx node =
   | Expr.Variable(name) ->
       // Variable is actually member access inside chain or placeholder inside chain
       match ctx.Chain with
-      | Some chain -> bindEntity ctx (EntityKind.Member(chain, name.Node)) |> setEntity ctx node 
+      | Some chain -> 
+          let memberName = bindEntity ctx (EntityKind.MemberName(name.Node)) |> setEntity ctx name
+          bindEntity ctx (EntityKind.Member(chain, memberName)) |> setEntity ctx node 
       | _ -> 
       // Variable is a local variable defined somewhere in context
       match ctx.Variables.TryFind name.Node with 

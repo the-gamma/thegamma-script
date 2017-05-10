@@ -1,11 +1,11 @@
 ﻿module TheGamma.Interpreter
-(*
+
 open TheGamma
 open TheGamma.Ast
 open TheGamma.Common
 open TheGamma.Babel
 open System.Collections.Generic
-
+(*
 // ------------------------------------------------------------------------------------------------
 // 
 // ------------------------------------------------------------------------------------------------
@@ -190,7 +190,7 @@ let evaluateEntityTree ctx (e:Entity) =
 // ------------------------------------------------------------------------------------------------
 // 
 // ------------------------------------------------------------------------------------------------
-
+*)
 let globalEntity name meta typ expr = 
   { Kind = EntityKind.GlobalValue({ Name = name }, expr)
     Symbol = createSymbol()
@@ -198,7 +198,7 @@ let globalEntity name meta typ expr =
     Meta = meta
     Value = None
     Errors = [] }
-
+    (*
 let evaluate (globals:seq<Entity>) (e:Entity) = 
   Log.trace("interpreter", "Evaluating entity %s (%O)", e.Name, e.Kind)
   let ctx = { Globals = dict [ for e in globals -> e.Name, e ] }

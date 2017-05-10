@@ -19,8 +19,8 @@ open NUnit.Framework
 
 // Helpers for generating object types
 let noEmitter = { Emit = fun _ -> failwith "mock emitter" }
-let prop n t = Member.Property(n, t, [], noEmitter)
-let meth n t a = Member.Method(n, a, t, [], noEmitter)
+let prop n t = { Member.Name = n; Metadata = []; Emitter = noEmitter; Type = t }
+let meth n t a = { Member.Name = n; Metadata = []; Emitter = noEmitter; Type = Type.Method(a, fun _ -> t) }
 let delay n f = Type.Delayed(Async.CreateNamedFuture n (async { return f () }))
 let obj membrs = 
   { new ObjectType with
@@ -34,7 +34,7 @@ let bool = Type.Primitive PrimitiveType.Bool
 
 // Helper for generating other types
 let list t = Type.List(t)
-let func t1 t2 = Type.Function([t1], t2)
+let func t1 t2 = Type.Method(["", false, t1], t2)
 
 // Find variable entity
 let isVariable name = function { Kind = EntityKind.Variable(n, _) } when n.Name = name -> true | _ -> false
@@ -133,7 +133,7 @@ let ``Report error when property not found`` () =
 let ``Report error when method not found`` () = 
   let code = "let res = test.yadda()"
   let actual = check code (isVariable "res") vars
-  actual |> assertErrors [304, "yadda"]
+  actual |> assertErrors [303, "yadda"]
 
 [<Test>]
 let ``Report error when instance is not an object`` () = 

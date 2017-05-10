@@ -13,7 +13,7 @@ open TheGamma.Common
 open TheGamma.TypeChecker
 open TheGamma.TypeProviders.FSharpProvider
 open NUnit.Framework
-
+(*
 // ------------------------------------------------------------------------------------------------
 // Helper functions for writing assertions (copy & paste from simpletypes.fs)
 // ------------------------------------------------------------------------------------------------
@@ -189,3 +189,5 @@ let ``Report error when generic method type cannot be inferred`` () =
   """
   let actual = check code (isVariable "res") vars
   actual |> assertErrors [308,"(1, true)"]
+
+  *)

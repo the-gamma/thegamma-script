@@ -89,16 +89,14 @@ module TypeChecker =
     { Number = 302; Range = rng 
       Message = sprintf "Variable '%s' is not in scope." name }
 
-  let private formatMembers (members:seq<Member>) = 
-    [ for m in members -> m.Name ] |> String.concat ", " 
+  let private formatMembers (members:seq<Member>) =     
+    let members = members |> Array.ofSeq
+    let suffix = if members.Length > 10 then sprintf ", (%d members)" (members.Length - 10) else ""
+    (String.concat ", " [ for m in members -> m.Name ]) + suffix
 
-  let propertyMissing name members rng = 
+  let memberMissing name members rng = 
     { Number = 303; Range = rng 
       Message = sprintf "Could not find property '%s' in the list '%s'." name (formatMembers members) }
-
-  let methodMissing name members rng = 
-    { Number = 304; Range = rng 
-      Message = sprintf "Could not find method '%s' in the list '%s'." name (formatMembers members) }
 
   let notAnObject name typ rng = 
     { Number = 305; Range = rng 
@@ -116,6 +114,10 @@ module TypeChecker =
     { Number = 308; Range = rng 
       Message = sprintf "Required parameter `%s` is not given a value." par }
 
+  let notAnMethod name typ rng = 
+    { Number = 309; Range = rng 
+      Message = sprintf "The type of member %s is `%s` and not a method and so it cannot be called." name (formatTypeInfo typ) }
+
 (*
   let incorrectParameterType parName parType actualType err1 err2 rng = 
     { Number = 309; Range = rng 
@@ -130,7 +132,7 @@ module TypeChecker =
           (formatTypeInfo t1) var (formatTypeInfo t2) }
 *)
   let parameterConflict rng = 
-    { Number = 308; Range = rng 
+    { Number = 310; Range = rng 
       Message = "Invalid argument type" }
 
   let callMissingInstance name rng = 

@@ -225,10 +225,11 @@ let formatEntityKind = function
   | EntityKind.Call _ -> "call"
   | EntityKind.ArgumentList _ -> "argument list"
   | EntityKind.Member _ -> "member access"
+  | EntityKind.MemberName _ -> "member name"
   | EntityKind.Placeholder _ -> "placeholder"
 
 /// Return entity name (or anonymous) and all its antecedants
-let entityCodeNameAndAntecedents = function
+let rec entityCodeNameAndAntecedents = function
   | EntityKind.Root -> 0, [], "<root>"
   | EntityKind.Program(ans) -> 1, ans, "<program>"
   | EntityKind.RunCommand(an) -> 2, [an], "<do>"
@@ -245,11 +246,19 @@ let entityCodeNameAndAntecedents = function
   | EntityKind.Binding(n, an) -> 13, [an], n.Name
   | EntityKind.ArgumentList(ans) -> 14, ans, "<args>"
   | EntityKind.Call(an1, an2) -> 15, [an1; an2], "<call>"
-  | EntityKind.Member(an, n) -> 16, [an], n.Name
+  | EntityKind.Member(an1, an2) -> 16, [an1; an2], "<member>"
   | EntityKind.NamedParam(n, an) -> 17, [an], n.Name
   | EntityKind.Placeholder(n, an) -> 18, [an], n.Name
   | EntityKind.CallSite(an, Choice1Of2 s) -> 19, [an], s
   | EntityKind.CallSite(an, Choice2Of2 m) -> 20, [an], string m
+  | EntityKind.MemberName(n) -> 21, [], n.Name
+
+/// Return the entity representing the name just before call in call chain
+let rec lastChainElement ent = 
+  match ent.Kind with
+  | EntityKind.Variable _ -> ent
+  | EntityKind.Member(_, mem) -> mem
+  | _ -> ent
 
 // Provide easy access to entity's antecedents
 type Entity with
