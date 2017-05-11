@@ -634,7 +634,7 @@ let ``Report error when placeholder is missing body and ident``() =
 // --------------------------------------------------------------------------------------
 
 [<Test>]
-let ``Ranges of identifiers in Olympic sample are correct`` = 
+let ``Ranges of identifiers in Olympic sample are correct``() = 
   let actual = parse """
     let phelp =
       olympics.'by athlete'.[athlete:'United States'.'Michael Phelps'].data
@@ -652,4 +652,11 @@ let ``Ranges of identifiers in Olympic sample are correct`` =
       .legend(position="none")
     """
   actual |> assertErrors []
+  actual |> assertNamesMatch
+
+[<Test>]
+let ``Ranges of empty identifier is correct``() = 
+  let actual = parse """
+    olympics.foo.
+    """
   actual |> assertNamesMatch

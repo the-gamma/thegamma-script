@@ -207,6 +207,7 @@ and parseCallArgList afterComma lastRng acc ctx =
       lastRng, [], List.rev acc
 
 
+/// If something goes wrong inside placeholder, this skips over everything until `]`
 and parsePlaceholderRecovery silent lastTokRng lastTokOpt whiteAcc ctx =
   match Context.tokenIndent ctx with
   | Some(white, { Token = TokenKind.RSquare; Range = lastTokRng }) ->
@@ -226,7 +227,7 @@ and parsePlaceholderRecovery silent lastTokRng lastTokOpt whiteAcc ctx =
       lastTokRng, whiteAcc
 
 
-///
+/// Parse placeholder after parsing `[` -- the full syntax is `[ident: <expr>]`
 and parsePlaceholder rngLSQuare ctx = 
   match Context.tokenIndent ctx with
   | Some(Identifier id & (_, tokId)) ->
@@ -274,7 +275,7 @@ and parseIdentAfterDot body prevDotRng prevDotTok ctx =
   | None ->
       // RECOVERY: Nothing after dot - return body so far
       Errors.Parser.unexpectedScopeEndAfterDot prevDotRng prevDotTok |> Context.error ctx 
-      let emptyRng = { End = prevDotRng.End; Start = prevDotRng.End }
+      let emptyRng = { End = prevDotRng.End; Start = prevDotRng.End+1 }
       Expr.Member(body, node emptyRng (Expr.Variable(node emptyRng {Name=""})))
       |> node (unionRanges body.Range emptyRng)
 
@@ -282,7 +283,7 @@ and parseIdentAfterDot body prevDotRng prevDotTok ctx =
       // RECOVERY: Wrong token after dot - skip and try next
       Context.next ctx
       Errors.Parser.unexpectedTokenAfterDot t.Range t.Token |> Context.error ctx 
-      let emptyRng = { End = prevDotRng.End; Start = prevDotRng.End }
+      let emptyRng = { End = prevDotRng.End; Start = prevDotRng.End+1 }
       let body =
         Expr.Member(body, node emptyRng (Expr.Variable(node emptyRng {Name=""})))
         |> node (unionRanges body.Range emptyRng)

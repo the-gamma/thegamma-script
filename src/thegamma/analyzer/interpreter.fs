@@ -57,12 +57,13 @@ let evaluateExpr args exprBuilder =
 /// If the value is object with 'preview' method or property, evaluate it!
 let evaluatePreview (ent:Entity) value = 
   let previewName = {Name.Name="preview"}
+  Log.trace("interpreter", "Evaluating preview on: %O (%s)", ent, Ast.formatType ent.Type.Value)
   match ent.Type with
-  | Some(Type.Object(FindMember previewName mem)) -> 
+  | Some(Type.Object(FindMember previewName mem)) ->       
       // Member access or member access & call, depending on whether the member is a method
       match mem.Type with
-      | Type.Method(_, _) -> evaluateExpr [value] (fun inst -> (List.head inst)?preview /@/ []) |> Some
-      | _ -> evaluateExpr [value] (fun inst -> (List.head inst)?preview) |> Some
+      | Type.Method(_, _) -> evaluateExpr [value] (fun inst -> mem.Emitter.Emit(List.head inst) /@/ []) |> Some
+      | _ -> evaluateExpr [value] (fun inst -> mem.Emitter.Emit(List.head inst)) |> Some
   | _ -> None
 
 // ------------------------------------------------------------------------------------------------

@@ -15,7 +15,8 @@ let needsEscaping (s:string) =
 
 /// Escape identifier if it needs escaping
 let escapeIdent s = 
-  if needsEscaping s then "'" + s + "'" else s
+  if s = "" then ""
+  elif needsEscaping s then "'" + s + "'" else s
 
 /// Union ranges, assuming Start <= End for each of them
 let unionRanges r1 r2 =
@@ -200,6 +201,7 @@ let formatWhiteBeforeExpr nd =
   let wa = 
     match nd.Node with 
     | Expr.Variable(n) -> nd.WhiteBefore @ n.WhiteBefore 
+    | Expr.Member(_, m & { Node = Expr.Variable n }) -> nd.WhiteBefore @ m.WhiteBefore @ n.WhiteBefore
     | _ -> nd.WhiteBefore
   String.concat "" [ for t in wa -> formatToken t.Token ]
 

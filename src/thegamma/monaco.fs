@@ -60,12 +60,13 @@ let createCompletionProvider (getService:string -> CheckingService) =
             let optMembers = 
               ents.Entities |> Seq.tryPick (fun (rng, ent) ->
                 match ent with 
-                | { Kind = EntityKind.Member _; Type = Some t } when loc >= rng.Start && loc <= rng.End + 1 -> 
-                    Log.trace("completions", "Antecedant at current location: %O", t)
+                | { Kind = EntityKind.Member({ Type = Some t }, { Kind = EntityKind.MemberName(n) }) } 
+                      when loc >= rng.Start && loc <= rng.End + 1 -> 
+                    Log.trace("completions", "Antecedant at current location (member '%s'): %O", n.Name, t)
                     match t with
-                    | Type.Object obj -> Some(rng, obj.Members)
+                    | Type.Object obj -> Some(n.Name, rng, obj.Members)
                     | _ -> None
-                | { Kind = EntityKind.Member(_, { Kind = EntityKind.MemberName(n) }); Type = Some t } ->
+                | { Kind = EntityKind.Member({ Type = Some t }, { Kind = EntityKind.MemberName(n) }) } ->
                     Log.trace("completions", "Ignoring '%s' at location %s-%s (current=%s)", n.Name, rng.Start, rng.End, loc)
                     None
                 | _ -> None)
@@ -84,7 +85,7 @@ let createCompletionProvider (getService:string -> CheckingService) =
             | None -> 
                 Log.trace("completions", "no members at %s", loc)
                 return ResizeArray []
-            | Some (nameRange, members) -> 
+            | Some (currentName, nameRange, members) -> 
                 let nameRange = convertRange nameRange
                 Log.trace("completions", "providing %s members at %O", members.Length, nameRange)
                 let completion =
@@ -98,7 +99,9 @@ let createCompletionProvider (getService:string -> CheckingService) =
                       ci.kind <- k
                       ci.label <- n
                       ci.insertText <- Some(Ast.escapeIdent n)
-                      ci.filterText <- Some(n)
+                      // We set the current text in the range as 'filterText' so Monaco 
+                      // does not filter things out when Ctrl+Space is typed (trick!)
+                      ci.filterText <- Some(Ast.escapeIdent currentName + n) 
                       match m.Type with
                       | Type.Method(arguments=args) -> 
                           let acc, l = 

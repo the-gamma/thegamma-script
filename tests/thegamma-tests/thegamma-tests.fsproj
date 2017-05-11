@@ -69,6 +69,7 @@
     <Compile Include="binder.fs" />
     <Compile Include="simpletypes.fs" />
     <Compile Include="fsharptypes.fs" />
+    <Compile Include="pivottypes.fs" />
     <None Include="paket.references" />
   </ItemGroup>
   <ItemGroup>
