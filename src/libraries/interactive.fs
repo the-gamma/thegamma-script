@@ -381,17 +381,20 @@ module YouGuessSortHelpers =
       Colors : System.Collections.Generic.IDictionary<string, string>
       Assignments : Map<string, string>
       Selected : string
-      Maximum : float }
+      Maximum : float 
+      CompletionStep : float
+      Completed : bool }
 
   type YouGuessEvent = 
     | SelectItem of string
     | AssignCurrent of string
-    //| ShowResults 
-    //| Animate 
-    //| Update of string * float
+    | ShowResults 
+    | Animate 
 
   let initState maxValue data =     
     { Data = data 
+      CompletionStep = 0.0
+      Completed = false
       Colors = Seq.map2 (fun (lbl, _) clr -> lbl, clr) data vega10 |> dict 
       Assignments = Map.empty
       Selected = fst (Seq.head data)
@@ -399,6 +402,8 @@ module YouGuessSortHelpers =
 
   let update state evt = 
     match evt with
+    | Animate -> { state with CompletionStep = min 1.0 (state.CompletionStep + 0.05) }
+    | ShowResults -> { state with Completed = true }
     | SelectItem s -> { state with Selected = s }
     | AssignCurrent target -> 
         let newAssigns = 
@@ -414,8 +419,8 @@ module YouGuessSortHelpers =
         { state with Assignments = newAssigns; Selected = defaultArg newSelected state.Selected }
   
   let renderBars (width, height) trigger (state:YouGuessState) = 
-    //if state.Completed && state.CompletionStep < 1.0 then
-      //window.setTimeout((fun () -> trigger Animate), 50) |> ignore
+    if state.Completed && state.CompletionStep < 1.0 then
+      window.setTimeout((fun () -> trigger Animate), 50) |> ignore
     let chart = 
       Axes(true, false, 
         Interactive
@@ -423,15 +428,18 @@ module YouGuessSortHelpers =
               EventHandler.TouchStart(fun evt (_, Cat(y, _)) -> trigger(AssignCurrent y))
               EventHandler.TouchMove(fun evt (_, Cat(y, _)) -> trigger(AssignCurrent y)) ],
             Style
-              ( id, //(fun s -> if state.Completed then s else { s with Cursor = "pointer" }),
+              ( (fun s -> if state.Completed then s else { s with Cursor = "pointer" }),
                 (Layered [
                   yield Stack
                     ( Vertical, 
                       [ for lbl, value in Seq.sortBy snd state.Data -> 
-                          let alpha, clr = 
-                            match state.Assignments.TryFind lbl with
-                            | Some assigned -> 0.6, state.Colors.[assigned]
-                            | None -> 0.3, "#a0a0a0"
+                          let alpha, value, clr = 
+                            match state.Completed, state.Assignments.TryFind lbl with
+                            | true, Some assigned -> 
+                                let _, actual = state.Data |> Seq.find (fun (lbl, _) -> lbl = assigned)
+                                0.6, state.CompletionStep * actual + (1.0 - state.CompletionStep) * value, state.Colors.[assigned]
+                            | _, Some assigned -> 0.6, value, state.Colors.[assigned]
+                            | _, None -> 0.3, value, "#a0a0a0"
                           let sh = Style((fun s -> { s with Fill = Solid(alpha, HTML clr) }), Bar(CO value, CA lbl)) 
                           Shape.Padding((5., 0., 5., 0.), sh) ])
 
@@ -455,14 +463,6 @@ module YouGuessSortHelpers =
                                 StrokeWidth = Pixels 4
                                 StrokeDashArray = [ Integer 5; Integer 5 ] }), 
                           Shape.Padding((10., 0., 10., 0.), line))
-                  match topLabel with
-                  | None -> ()
-                  | Some lbl ->
-                      let x = COV(CO (state.Maximum * 0.9))
-                      let y = CAR(CA (fst state.Data.[state.Data.Length/2]), if state.Data.Length % 2 = 0 then 0.0 else 0.5)
-                      yield Style(
-                        (fun s -> { s with Font = "13pt sans-serif"; Fill=Solid(1.0, HTML "#808080"); StrokeColor=(0.0, RGB(0,0,0)) }),
-                        Text(x, y, VerticalAlign.Baseline, HorizontalAlign.Center, lbl) ) 
                         *)
                 ]) )))
 
@@ -500,7 +500,7 @@ module YouGuessSortHelpers =
       h?div ["style"=>"padding-bottom:20px"] [
         h?button [
             yield "type" => "button"
-            yield "click" =!> fun _ _ -> () //trigger ShowResults
+            yield "click" =!> fun _ _ -> trigger ShowResults
             if state.Assignments.Count <> state.Data.Length then
               yield "disabled" => "disabled"
           ] [ text "Show me how I did" ]
