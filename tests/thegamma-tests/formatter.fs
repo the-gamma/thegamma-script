@@ -38,6 +38,18 @@ let ``Whitespace preserved in sample call chain (dot at the start)``() =
   equal code (Ast.formatProgram prog)
 
 [<Test>]
+let ``Whitespace preserved including placeholder``() =
+  let code, prog = parse """
+    let z = olympics
+      .'by athlete'
+        .'United States'.'Michael Phelps'.data
+      .'group data'.[foo:'by Athlete'].'sum Gold'.then
+      .paging.skip(10).take(10)
+      .'get series'
+        .'with key Athlete'.'and value Gold'"""
+  equal code (Ast.formatProgram prog)
+
+[<Test>]
 let ``Whitespace preserved in sample call chain (dot at the end)``() =
   let code, prog = parse """
     let z = olympics.

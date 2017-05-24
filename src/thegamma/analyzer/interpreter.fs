@@ -28,7 +28,7 @@ let storeArguments values =
 let evaluateExpression (_stored:RuntimeValue[]) (expr:Expression) =
   let prog = { Babel.Program.location = None; Babel.Program.body = [ExpressionStatement(expr, None)] }
   let code = babel.transformFromAst(Serializer.serializeProgram prog, "", { presets = [| "es2015" |] })
-  Log.trace("interpreter", "Interpreter evaluating: %O", code.code)
+  Log.trace("interpreter", "Interpreter evaluating: %O using values %O", code.code, _stored)
   try
     // HACK (1/2): Get fable to reference everything
     let s = TheGamma.Series.series<int, int>.create(async { return [||] }, "", "", "") 
@@ -116,8 +116,14 @@ let rec evaluateEntity (e:Entity) =
         if i < positionBased.Length then positionBased.[i]
         elif nameBased.ContainsKey(name) then nameBased.[name]
         else (unbox null) )
-      let inst = getValue inst
-      evaluateExpr (inst::pars) (fun stored -> List.head stored /@/ List.tail stored)
+
+      match inst with 
+      | { Kind = EntityKind.Member(inst, { Kind = EntityKind.MemberName(n) }) } ->
+          let inst = getValue inst
+          evaluateExpr (inst::pars) (fun stored -> ((List.head stored) /?/ str n.Name) /@/ List.tail stored)
+      | _ ->
+          let inst = getValue inst
+          evaluateExpr (inst::pars) (fun stored -> List.head stored /@/ List.tail stored)
 
   | EntityKind.Member(inst, _) ->
       Log.error("interpreter", "typeCheckEntity: Member access is missing member name!")
@@ -211,7 +217,7 @@ let globalEntity name meta typ expr =
     Errors = [] }
 
 let evaluate (globals:seq<Entity>) (e:Entity) = 
-  Log.trace("interpreter", "Evaluating entity %s (%O)", e.Name, e.Kind)
+  //Log.trace("interpreter", "Evaluating entity %s (%O)", e.Name, e.Kind)
   let res = evaluateEntityTree e
-  Log.trace("interpreter", "Evaluated entity %s (%O) = %O", e.Name, e.Kind, res)
+  //Log.trace("interpreter", "Evaluated entity %s (%O) = %O", e.Name, e.Kind, res)
   res

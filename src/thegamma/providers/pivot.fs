@@ -120,9 +120,9 @@ module Transform =
   let transformFields fields tfs = 
     tfs |> List.fold singleTransformFields (List.ofSeq fields) |> List.ofSeq
 
-// --------------------------------------------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
 // Pivot provider
-// --------------------------------------------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
 
 open TheGamma.TypeProviders.ProviderHelpers
 
@@ -174,6 +174,7 @@ let makeDataEmitter isPreview isSeries tfs =
 
 type Context = 
   { Root : string
+    IgnoreFiltersInRange : bool
     LookupNamed : string -> Type
     InputFields : Field list
     Fields : Field list }
@@ -299,6 +300,9 @@ and handleGroupRequest ctx rest keys =
 
 and handleFilterEqNeqRequest ctx rest (fld, eq) conds = async {
   let tfs = if List.isEmpty conds then rest else FilterBy(conds)::rest
+  let tfs = 
+    if ctx.IgnoreFiltersInRange then tfs |> List.filter (function FilterBy _ -> false | _ -> true)
+    else tfs
   let url = ctx.Root + "?" + (GetRange(fld)::tfs |> List.rev |> Transform.toUrl)
   let! options = Http.Request("GET", url)
   let options = jsonParse<string[]> options
@@ -312,11 +316,6 @@ and handleFilterRequest ctx rest conds =
   [ for field in ctx.Fields do
       yield makeProperty ctx (prefix + field.Name + " is") (FilterBy((field.Name, true, "!")::conds)::rest) 
       yield makeProperty ctx (prefix + field.Name + " is not") (FilterBy((field.Name, false, "!")::conds)::rest) 
-      //|> withDocs (sprintf "Group by %s" (field.Name.ToLower()))
-      //    ( "Creates groups based on the value of " + field.Name + " and calculte summary " +
-      //      "values for each group. You can specify a number of summary calculations in the " + 
-      //      "following list:")
-      //|> withCreateAction "Aggregation operations" 
     if not (List.isEmpty conds) then
       yield makeProperty ctx "then" (Empty::FilterBy(conds)::rest) ]
   |> makeObjectType  
@@ -385,14 +384,14 @@ and makePivotType ctx tfs =
 let makePivotExpression root = 
   NewExpression(ident("PivotContext"), [str root; ArrayExpression([], None)], None)
 
-let makePivotGlobalValue root name lookupNamed fields =
+let makePivotGlobalValue root name lookupNamed ignoreFilter fields =
   let fields = [ for f, t in fields -> { Name = f; Type = t }]
-  let typ = makePivotType { Fields = fields; InputFields = fields; LookupNamed = lookupNamed; Root = root } []
+  let typ = makePivotType { Fields = fields; InputFields = fields; LookupNamed = lookupNamed; Root = root; IgnoreFiltersInRange = ignoreFilter } []
   let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box []  }
   let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box fields  }
   ProvidedType.GlobalValue( name, [meta1; meta2], makePivotExpression root, typ)
 
-let providePivotType root name lookupNamed = async {
+let providePivotType root ignoreFilter name lookupNamed = async {
   let! membersJson = Http.Request("GET", root + "?metadata")
   let fields = JsHelpers.properties(jsonParse<obj> membersJson) |> Array.map (fun kv -> 
     let typ = 
@@ -402,4 +401,4 @@ let providePivotType root name lookupNamed = async {
       | "number" -> PrimitiveType.Number
       | s -> failwith (sprintf "The property '%s' has invalid type '%s'. Only 'string', 'number' and 'bool' are supported." kv.key s)
     kv.key, typ)
-  return makePivotGlobalValue root name lookupNamed fields }
+  return makePivotGlobalValue root name lookupNamed ignoreFilter fields }

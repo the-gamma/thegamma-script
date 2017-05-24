@@ -268,8 +268,10 @@ and parseIdentAfterDot body prevDotRng prevDotTok ctx =
       parseCallOrMember body ctx
   | Some(white, { Token = TokenKind.LSquare; Range = rngLSQuare }) ->
       Context.next ctx
-      let rngRSquare, body = parsePlaceholder rngLSQuare ctx 
-      let body = body |> node (unionRanges rngLSQuare rngRSquare) |> whiteBefore white 
+      let rngRSquare, place = parsePlaceholder rngLSQuare ctx
+      let body = 
+        Expr.Member(body, node (unionRanges rngRSquare rngLSQuare) place) 
+        |> node (unionRanges rngLSQuare rngRSquare) |> whiteBefore white 
       parseCallOrMember body ctx
   | Some(_, { Token = TokenKind.EndOfFile })
   | None ->

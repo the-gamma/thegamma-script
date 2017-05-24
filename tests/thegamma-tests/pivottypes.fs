@@ -85,7 +85,7 @@ let lookupNamed n = types.[n]
 types.Add("series", Type.Object series)
 
 let olympics = 
-  makePivotGlobalValue "http://demo" "olympics" lookupNamed 
+  makePivotGlobalValue "http://demo" "olympics" lookupNamed false
     [ "Athlete", PrimitiveType.String; "Team", PrimitiveType.String
       "Gold", PrimitiveType.Number; "Silver", PrimitiveType.Number ]
 
@@ -122,6 +122,20 @@ let ``Correctly type check grouping and aggregation with paging and drop`` () =
         .'group data'.'by Athlete'.'sum Gold'.'sum Silver'.then
         .paging.skip(10).take(15)
         .'drop columns'.'drop Silver'.then
+        .'get series'
+  """
+  let actual = check code (isVariable "res") vars
+  actual |> assertMember "with key Athlete"
+  actual |> assertMember "with key Gold"
+  actual |> assertErrors []
+
+[<Test>]
+let ``Correctly type check grouping and aggregation with placeholder`` () =
+  let code = """
+    let res = 
+      olympics
+        .'group data'.'by Athlete'.'sum Gold'.'sum Silver'.then
+        .'drop columns'.[drop:'drop Silver'].then
         .'get series'
   """
   let actual = check code (isVariable "res") vars

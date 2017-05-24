@@ -32,11 +32,11 @@ let rec getMember name typ =
       match o.Members |> Seq.tryPick (fun m -> if m.Name = name then Some(m) else None) with
       | Some res -> res
       | _ ->
-        Log.exn("codegen", "getEmitterAndParams: Member %s not found in object %O", name, o)
-        failwith "getEmitterAndParams: Member not found" 
+        Log.exn("codegen", "getMember: Member %s not found in object %O", name, o)
+        failwith "getMember: Member not found" 
   | t -> 
-    Log.exn("codegen", "getEmitterAndParams: Not an object %O", t)
-    failwith "getEmitterAndParams: Not an object" 
+    Log.exn("codegen", "getMember: Not an object %O", t)
+    failwith "getMember: Not an object" 
 
 let rec compileExpression ctx (expr:Node<Expr>) = 
   Log.trace("codegen", "Compiling expression: %O", expr)
@@ -67,6 +67,7 @@ let rec compileExpression ctx (expr:Node<Expr>) =
       BinaryExpression(op, l, r, rangeToLoc ctx expr.Range)
       
   // Handle member access and calls - method call is a combination of the two
+  | Expr.Member(inst, { Node = Expr.Placeholder(_, { Node = Expr.Variable n }) })
   | Expr.Member(inst, { Node = Expr.Variable n }) ->
       let mem = getMember n.Node.Name inst.Entity.Value.Type.Value
       let inst = compileExpression ctx inst

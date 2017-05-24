@@ -81,7 +81,8 @@ let rec bindExpression ctx node =
   | Expr.Placeholder(name, body) ->
       // Keep `ctx.Chain` in case the plceholder contains member access
       let bodyEnt = bindPlaceExpression ctx body
-      bindEntity ctx (EntityKind.Placeholder(name.Node, bodyEnt)) |> setEntity ctx node
+      bindEntity ctx (EntityKind.Placeholder(name.Node, bodyEnt)) |> setEntity ctx node |> ignore
+      bodyEnt
 
   | Expr.Variable(name) ->
       // Variable is actually member access inside chain or placeholder inside chain

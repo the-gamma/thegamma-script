@@ -55,15 +55,15 @@ let buildGlobalsTable provideTypes = Async.StartAsNamedFuture "buildGlobalsTable
     | _ -> None)
   return globalEntities } 
 
-let rec resolveProvider lookup kind endpoint = 
+let rec resolveProvider lookup ignoreFilter kind endpoint = 
   match kind with
   | "rest" ->
-      match TypeProviders.RestProvider.provideRestType lookup (resolveProvider lookup) "anonymous" endpoint "" with
+      match TypeProviders.RestProvider.provideRestType lookup (resolveProvider lookup ignoreFilter) "anonymous" endpoint "" with
       | ProvidedType.GlobalValue(_, _, e, t) -> t, { Emit = fun _ -> e }
       | _ -> failwith "resolveProvider: Expected global value"
   | "pivot" ->
       let pivotType = async {
-        let! typ = TypeProviders.Pivot.providePivotType endpoint "anonymous" lookup
+        let! typ = TypeProviders.Pivot.providePivotType endpoint ignoreFilter "anonymous" lookup
         match typ with 
         | ProvidedType.GlobalValue(_, _, _, t) -> return t 
         | _ -> return failwith "resolveProvider: Expected global value" }
@@ -192,30 +192,31 @@ let rec serializeType typ =
       |> JsInterop.createObj
 
 let rec serializeEntity (rng:Range option) (ent:Entity) =
-  let kind = 
+  let kind, extras = 
     match ent.Kind with
-    | EntityKind.Root -> "root"
-    | EntityKind.Program _ -> "program"
-    | EntityKind.RunCommand _ -> "do"
-    | EntityKind.LetCommand _ -> "let"
-    | EntityKind.Operator _ -> "operator"
-    | EntityKind.List _ -> "list"
-    | EntityKind.Constant _ -> "constant"
-    | EntityKind.Function _ -> "function"
-    | EntityKind.GlobalValue _ -> "global"
-    | EntityKind.Variable _ -> "variable"
-    | EntityKind.Binding _ -> "binding"
-    | EntityKind.ArgumentList _ -> "args"
-    | EntityKind.CallSite _ -> "callsite"
-    | EntityKind.NamedParam _ -> "param"
-    | EntityKind.Member _ -> "member"
-    | EntityKind.MemberName _ -> "name"
-    | EntityKind.Placeholder _ -> "placeholder"
-    | EntityKind.Call _ -> "call"
+    | EntityKind.Root -> "root", []
+    | EntityKind.Program _ -> "program", []
+    | EntityKind.RunCommand _ -> "do", []
+    | EntityKind.LetCommand _ -> "let", []
+    | EntityKind.Operator _ -> "operator", []
+    | EntityKind.List _ -> "list", []
+    | EntityKind.Constant _ -> "constant", []
+    | EntityKind.Function _ -> "function", []
+    | EntityKind.GlobalValue _ -> "global", []
+    | EntityKind.Variable _ -> "variable", []
+    | EntityKind.Binding _ -> "binding", []
+    | EntityKind.ArgumentList _ -> "args", []
+    | EntityKind.CallSite _ -> "callsite", []
+    | EntityKind.Member _ -> "member", []
+    | EntityKind.MemberName(n) -> "name", ["name", box n.Name]
+    | EntityKind.NamedParam(n, _) -> "param", ["name", box n.Name]
+    | EntityKind.Placeholder(n, _) -> "placeholder", ["name", box n.Name]
+    | EntityKind.Call _ -> "call", []
   [ yield "kind", box kind
     if rng.IsSome then yield "range", JsInterop.createObj [ "start", box rng.Value.Start; "end", box rng.Value.End ]
     yield "getChildren", box (fun () -> ent.Antecedents |> List.toArray |> Array.map (serializeEntity None))
-    yield "type", match ent.Type with Some t -> serializeType t | _ -> box "unknown" ]
+    yield "type", match ent.Type with Some t -> serializeType t | _ -> box "unknown" 
+    yield! extras ]
   |> JsInterop.createObj
 
 type checkingResult(_wellTyped:bool, _bindingResult:Binder.BindingResult, _program:Program) = 
@@ -312,18 +313,18 @@ type providers =
       return Seq.concat providers })
     { globals = globals }    
 
-  static member rest(url, ?cookies) : provider = 
+  static member rest(url, ?cookies, ?ignoreFilter) : provider = 
     (fun name lookup -> async {
       let provider = 
         TypeProviders.RestProvider.provideRestType 
-          lookup (resolveProvider lookup) name url (defaultArg cookies "")
+          lookup (resolveProvider lookup (defaultArg ignoreFilter false)) name url (defaultArg cookies "")
       return [ provider ] })
 
   static member library(url) : provider = 
     (fun _ lookup ->
       TypeProviders.FSharpProvider.provideFSharpTypes lookup url)
 
-  static member pivot(url) : provider = 
+  static member pivot(url, ?ignoreFilter) : provider = 
     (fun name lookup -> async {
-      let! t = TypeProviders.Pivot.providePivotType url name lookup 
+      let! t = TypeProviders.Pivot.providePivotType url (defaultArg ignoreFilter false) name lookup 
       return [t] })
