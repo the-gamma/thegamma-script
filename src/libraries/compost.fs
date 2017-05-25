@@ -537,7 +537,7 @@ module Projections =
 
     | Scaled((sx, sy) as scales, _, ScaledAxes(grid, (lblsx, lblsy), shape)) ->
         let (lx, hx), (ly, hy) = getExtremes sx, getExtremes sy
-        let ppad = Padding((20.0, 20.0, (if lblsx.Length = 0 then 20.0 else 40.0), (if lblsy.Length = 0 then 20.0 else 100.0)), (lx, hx, ly, hy), projection)
+        let ppad = Padding((0.0, 20.0, (if lblsx.Length = 0 then 20.0 else 40.0), (if lblsy.Length = 0 then 20.0 else 100.0)), (lx, hx, ly, hy), projection)
         Projected(ppad, scales, ProjectedAxes(grid, (lblsx, lblsy), calculateProjections shape ppad))
 
     | Scaled(scales, _, ScaledStack(orient, shapes)) ->

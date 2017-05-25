@@ -170,8 +170,8 @@ let knownTypes =
         "IEqualityComparer", "object"
         "DomNode", "object"
         "table`2", "table"
-        "youdraw", "youdraw"
         "youguess", "youguess"
+        "YouGuessLine", "YouuGuessLine"
         "YouGuessSortBars", "YouGuessSortBars"
         "YouGuessColsBars", "YouGuessColsBars"
         "YouGuessColsBarsKind", "object"
@@ -195,9 +195,7 @@ let e =
       yield { exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Static 
                 with instance = [| "table" |] }
       yield exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Instance
-      yield exportType ctx (asm.GetType("TheGamma.Interactive.youdraw")) BindingFlags.Instance 
-      yield { exportType ctx (asm.GetType("TheGamma.Interactive.youdraw")) BindingFlags.Static 
-                with instance = [| "youdraw" |] }
+      yield exportType ctx (asm.GetType("TheGamma.Interactive.YouGuessLine")) BindingFlags.Instance 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.YouGuessColsBars")) BindingFlags.Instance 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.YouGuessSortBars")) BindingFlags.Instance 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.youguess")) BindingFlags.Instance 

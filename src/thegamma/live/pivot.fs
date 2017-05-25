@@ -627,7 +627,7 @@ let renderPivot triggerEvent (state:LiveState<_>) =
         if state.State.Menus = AddDropdownOpen then 
           yield h?ul [] [
             yield h?li [] [ h?a [ clickHandler(Pivot.DropColumns []) ] [ text "drop columns"] ]
-            yield h?li [] [ h?a [ clickHandler(Pivot.FilterBy []) ] [ text "filter by"] ]
+            yield h?li [] [ h?a [ clickHandler(Pivot.FilterBy(Pivot.And, [])) ] [ text "filter by"] ]
             yield h?li [] [ h?a [ clickHandler(Pivot.GroupBy([], [])) ] [ text "group by"] ]
             yield h?li [] [ h?a [ clickHandler(Pivot.Paging []) ] [ text "paging"] ]
             yield h?li [] [ h?a [ clickHandler(Pivot.SortBy []) ] [ text "sort by"] ]

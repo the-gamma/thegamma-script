@@ -109,7 +109,7 @@ let zzzzzzzz() =
   let sy : Scale<1> = Categorical [| CA "A"; CA "B"; CA "C" |]
   let (xl, xh), (yl, yh) = Projections.getExtremes sx, Projections.getExtremes sy
   let proj = 
-    Projections.Padding((10.,10.,0.,0.), 
+    Projections.Padding((10.,10.,5.,5.), 
       (xl, xh, yl, yh),
       Projections.Rescale((0.0, 1.0), (0.5, 0.6), 
         Projections.Scale((0.0, 500.0), (0.0, 500.0))))

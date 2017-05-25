@@ -40,7 +40,7 @@ let evaluateExpression (_stored:RuntimeValue[]) (expr:Expression) =
     TheGamma.Maps.timeline<int, int>.create(s) |> ignore
     TheGamma.Series.series<int, int>.values([| 1 |]) |> ignore    
     TheGamma.placeholder.create("") |> ignore
-    TheGamma.Interactive.youdraw.create |> ignore
+    TheGamma.Interactive.youguess.line |> ignore
 
     // HACK (2/2) The name `_stored` may appear in the generated code!
     _stored.Length |> ignore
@@ -119,11 +119,15 @@ let rec evaluateEntity (e:Entity) =
 
       match inst with 
       | { Kind = EntityKind.Member(inst, { Kind = EntityKind.MemberName(n) }) } ->
-          let inst = getValue inst
-          evaluateExpr (inst::pars) (fun stored -> ((List.head stored) /?/ str n.Name) /@/ List.tail stored)
+          let instValue = getValue inst
+          match inst.Type with 
+          | Some(Type.Object(FindMember n mem)) ->
+              evaluateExpr (instValue::pars) (fun stored -> mem.Emitter.Emit(List.head stored) /@/ List.tail stored)
+          | _ ->
+              evaluateExpr (instValue::pars) (fun stored -> ((List.head stored) /?/ str n.Name) /@/ List.tail stored)
       | _ ->
-          let inst = getValue inst
-          evaluateExpr (inst::pars) (fun stored -> List.head stored /@/ List.tail stored)
+          let instValue = getValue inst
+          evaluateExpr (instValue::pars) (fun stored -> List.head stored /@/ List.tail stored)
 
   | EntityKind.Member(inst, _) ->
       Log.error("interpreter", "typeCheckEntity: Member access is missing member name!")

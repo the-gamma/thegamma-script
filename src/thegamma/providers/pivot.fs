@@ -33,11 +33,12 @@ type Paging =
   | Take of string
   | Skip of string
   
+type FilterOperator = And | Or
 type Transformation = 
   | DropColumns of string list
   | SortBy of (string * SortDirection) list
   | GroupBy of string list * Aggregation list
-  | FilterBy of (string * bool * string) list
+  | FilterBy of FilterOperator * (string * bool * string) list
   | Paging of Paging list
   | Empty
   // One of these may be the last one
@@ -67,7 +68,7 @@ module Transform =
         | GetTheData -> []
         | Metadata -> ["metadata", []]
         | GetRange fld -> ["range", [fld]]
-        | FilterBy(conds) -> ["filter", (List.map (fun (f,b,v) -> f + (if b then " eq " else " neq ") + v) conds)]
+        | FilterBy(op, conds) -> ["filter", (match op with And -> "and" | Or -> "or")::(List.map (fun (f,b,v) -> Ast.escapeIdent f + (if b then " eq " else " neq ") + Ast.escapeIdent v) conds)]
         | DropColumns(columns) -> ["drop", columns]
         | SortBy(columns) -> ["sort", (List.map (fun (c, o) -> c + (if o = Ascending then " asc" else " desc")) columns)]
         | GroupBy(flds, aggs) -> ["groupby", (List.map (fun fld -> "by " + Ast.escapeIdent fld) flds) @ (List.map formatAgg aggs)]
@@ -298,8 +299,8 @@ and handleGroupRequest ctx rest keys =
       yield! aggregationMembers ctx rest keys [GroupKey] ]
   |> makeObjectType  
 
-and handleFilterEqNeqRequest ctx rest (fld, eq) conds = async {
-  let tfs = if List.isEmpty conds then rest else FilterBy(conds)::rest
+and handleFilterEqNeqRequest ctx rest (fld, eq) op conds = async {
+  let tfs = if List.isEmpty conds then rest else FilterBy(op, conds)::rest
   let tfs = 
     if ctx.IgnoreFiltersInRange then tfs |> List.filter (function FilterBy _ -> false | _ -> true)
     else tfs
@@ -308,16 +309,22 @@ and handleFilterEqNeqRequest ctx rest (fld, eq) conds = async {
   let options = jsonParse<string[]> options
   return
     [ for opt in options do
-        yield makeProperty ctx opt (FilterBy((fld, eq, opt)::conds)::rest) ] 
+        yield makeProperty ctx opt (FilterBy(op, (fld, eq, opt)::conds)::rest) ] 
     |> makeObjectType }
 
-and handleFilterRequest ctx rest conds = 
-  let prefix = if List.isEmpty conds then "" else "and "
-  [ for field in ctx.Fields do
-      yield makeProperty ctx (prefix + field.Name + " is") (FilterBy((field.Name, true, "!")::conds)::rest) 
-      yield makeProperty ctx (prefix + field.Name + " is not") (FilterBy((field.Name, false, "!")::conds)::rest) 
+and handleFilterRequest ctx rest op conds = 
+  let prefixes = 
+    match conds, op with
+    | [], _ -> ["", And] 
+    | _::[], _ -> ["and ", And; "or ", Or]
+    | _, And -> ["and ", And] 
+    | _, Or -> ["or ", Or]
+  [ for prefix, op in prefixes do
+      for field in ctx.Fields do
+        yield makeProperty ctx (prefix + field.Name + " is") (FilterBy(op, (field.Name, true, "!")::conds)::rest) 
+        yield makeProperty ctx (prefix + field.Name + " is not") (FilterBy(op, (field.Name, false, "!")::conds)::rest) 
     if not (List.isEmpty conds) then
-      yield makeProperty ctx "then" (Empty::FilterBy(conds)::rest) ]
+      yield makeProperty ctx "then" (Empty::FilterBy(op, conds)::rest) ]
   |> makeObjectType  
 
 and makePivotTypeImmediate ctx tfs = async {
@@ -328,7 +335,7 @@ and makePivotTypeImmediate ctx tfs = async {
   | Empty ->
     return
       [ makeProperty ctx "group data" (GroupBy([], [])::rest) 
-        makeProperty ctx "filter data" (FilterBy([])::rest) 
+        makeProperty ctx "filter data" (FilterBy(And, [])::rest) 
         makeProperty ctx "sort data" (SortBy([])::rest) 
         makeProperty ctx "drop columns" (DropColumns([])::rest) 
         makeProperty ctx "paging" (Paging([])::rest) 
@@ -345,10 +352,10 @@ and makePivotTypeImmediate ctx tfs = async {
       return handleSortRequest ctx rest keys
   | DropColumns(dropped) ->
       return handleDropRequest ctx rest dropped
-  | FilterBy((fld, eq, "!")::conds) ->
-      return! handleFilterEqNeqRequest ctx rest (fld, eq) conds
-  | FilterBy(conds) ->
-      return handleFilterRequest ctx rest conds
+  | FilterBy(op, (fld, eq, "!")::conds) ->
+      return! handleFilterEqNeqRequest ctx rest (fld, eq) op conds
+  | FilterBy(op, conds) ->
+      return handleFilterRequest ctx rest op conds
   | GroupBy(flds, []) ->
       return handleGroupRequest ctx rest flds
   | GroupBy(flds, aggs) ->

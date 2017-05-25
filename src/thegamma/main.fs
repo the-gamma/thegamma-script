@@ -130,7 +130,7 @@ let evaluate ctx code outputId = async {
   TheGamma.Maps.timeline<int, int>.create(s) |> ignore
   TheGamma.Series.series<int, int>.values([| 1 |]) |> ignore
   TheGamma.placeholder.create("") |> ignore
-  TheGamma.Interactive.youdraw.create |> ignore
+  TheGamma.Interactive.youguess.line |> ignore
   return eval code }
 
 type provider = string -> (string -> Type) -> Async<list<ProvidedType>>
