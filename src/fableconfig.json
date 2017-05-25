@@ -6,8 +6,7 @@
   "projFile": [
     "bindings/bindings.fsproj",
     "libraries/libraries.fsproj",
-    "thegamma/thegamma.fsproj",
-    "main/main.fsproj"
+    "thegamma/thegamma.fsproj"
   ],
   "targets": {
     "es2015": {

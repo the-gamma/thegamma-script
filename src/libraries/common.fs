@@ -46,8 +46,8 @@ let isLocalHost() =
 
 let mutable enabledCategories = 
   if not (isLocalHost ()) then set []
-  else set [ "RUNTIME"; "API"; "LIVE"; "SYSTEM"; "PARSING";"BINDER"; "COMPLETIONS"; "EDITORS"; "TYPECHECKER"; "PROVIDERS"; "SERVICE"; "CODEGEN"; "INTERPRETER"; "RUNTIME" ]
-  //else set [] 
+  //else set ["PROVIDERS"] 
+  else set ["*"] 
 type Log =
   static member setEnabled(cats) = enabledCategories <- cats
 
@@ -60,7 +60,7 @@ type Log =
     if not (isLocalHost ()) && level = "EXCEPTION" then
       logEvent "system" "exception" "" (JsInterop.createObj ["category", box category; "msg", box msg; "args", box args ])
 
-    if level = "EXCEPTION" || level = "ERROR" || enabledCategories.Contains category then
+    if level = "EXCEPTION" || level = "ERROR" || enabledCategories.Contains "*" || enabledCategories.Contains category then
       let dt = System.DateTime.Now
       let p2 (s:int) = (string s).PadLeft(2, '0')
       let p4 (s:int) = (string s).PadLeft(4, '0')

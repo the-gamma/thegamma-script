@@ -8,148 +8,92 @@ open TheGamma.Ast
 open TheGamma.Common
 
 // ------------------------------------------------------------------------------------------------
-// This is mostly a recursive-descent parser with a lot of additional bookkeeping for decent
-// error recovery - this is indentation sensitive and parameters after `(` always have to be
-// indented further. The `nestedToken` function returns `None` if the currently nested block ends.
-// In erroneous case, we generally skip all errors within block, but terminate the current
-// syntactic structure at block end (and treat it as next thing) 
+// This is mostly a recursive-descent parser
 // ------------------------------------------------------------------------------------------------
 
 /// Parsing context is mutated, because we never backtrack (except for one case,
 /// in which case we clone the context explicitly using `clone`)
-type Context = 
+type ParsingContext = 
   { Tokens : Token[]
     Whitespace : ResizeArray<Token>
     Errors : ResizeArray<Error<Range>>
-    mutable TopLevel : bool
-    mutable Silent : bool
-    mutable StrictlyNested : bool
-    mutable IndentCurrent : int
-    mutable IndentStack : (int * bool) list
+    mutable SilentMode : bool
     mutable Position : int }
 
-/// Lets us implement lookahead withot making the whole context immutable
-/// (this is only used in fairly limited scenarios - e.g. named arguments)
-let clone ctx = 
-  { Tokens = ctx.Tokens
-    Whitespace = ResizeArray(ctx.Whitespace)
-    Errors = ResizeArray(ctx.Errors)
-    TopLevel = ctx.TopLevel
-    Silent = ctx.Silent
-    StrictlyNested = ctx.StrictlyNested
-    IndentCurrent = ctx.IndentCurrent
-    IndentStack = ctx.IndentStack 
-    Position = ctx.Position }
+module Context =
+  /// Lets us implement lookahead withot making the whole context immutable
+  /// (this is only used in fairly limited scenarios - e.g. named arguments)
+  let clone ctx = 
+    { Tokens = ctx.Tokens
+      Whitespace = ResizeArray(ctx.Whitespace)
+      Errors = ResizeArray(ctx.Errors)
+      Position = ctx.Position
+      SilentMode = ctx.SilentMode }
 
-/// Advance the position
-let next ctx = 
-  ctx.Position <- ctx.Position + 1
+  /// Advance the position
+  let next ctx = ctx.Position <- ctx.Position + 1
 
-/// Helper for creating diposables
-/// (workaround for https://github.com/fable-compiler/Fable/pull/602)
-type DisposableHelper(f) = 
-  interface System.IDisposable with
-    member x.Dispose() = f()
+  /// Add specified error to context
+  let error ctx e = if not ctx.SilentMode then ctx.Errors.Add(e)
 
-let disposable f = 
-  new DisposableHelper(f) :> System.IDisposable
+  /// Run the given function with silent mode on
+  let silent ctx f = 
+    ctx.SilentMode <- true
+    let res = f ctx
+    ctx.SilentMode <- false    
+    res
 
-/// Temporarilly silence all error reports (we're in wrong state anyway)
-let usingSilentMode ctx = 
-  let prev = ctx.Silent
-  ctx.Silent <- true
-  disposable (fun () -> ctx.Silent <- prev )
+  /// Parses next token & accumulates whitespace. 
+  /// Only retrns tokens if they are next or indented.
+  let rec tokenIndent ctx = 
+    match ctx.Tokens.[ctx.Position] with
+    | { Token = TokenKind.Newline } as t1 ->
+        match ctx.Tokens.[ctx.Position + 1] with
+        | t2 & { Token = TokenKind.White s } ->
+            next ctx; next ctx
+            ctx.Whitespace.Add t1
+            ctx.Whitespace.Add t2
+            tokenIndent ctx
+        | _ -> None
+    | { Token = TokenKind.Error _ | TokenKind.White _ } as t ->
+        ctx.Whitespace.Add t
+        next ctx
+        tokenIndent ctx
+    | t -> 
+        let white = ctx.Whitespace |> Seq.toList
+        ctx.Whitespace.Clear()
+        Some(white, t)
 
-/// Report error if we are not in silent mode
-let addError ctx e = 
-  if not ctx.Silent then ctx.Errors.Add(e)
+  /// Parses next token & accumulates whitespace. 
+  /// Only retrns tokens if they are first or non-indented after a newline.
+  let rec tokenNonIndent ctx = 
+    match ctx.Tokens.[ctx.Position] with
+    | { Token = TokenKind.Newline } as t1 ->
 
-/// Specify that all further tokens should be indented. If `current`, then
-/// we use indentation of the current line, otherwise, we use indentation
-/// of the next line (as set by `setLineIndent`).
-let usingIndent current (tok:Token) ctx =
-  let started = 
-    match ctx.IndentStack with
-    | (prev, true)::_ when prev > ctx.IndentCurrent -> 
-        Errors.Parser.unindentedBlock tok.Range tok.Token |> addError ctx
-        false
-    | (prev, false)::_ when prev <> ctx.IndentCurrent -> 
-        failwith "usingIndent: We forgot to set the top-stack line indentation"
-    | _ ->
-        ctx.IndentStack <- (ctx.IndentCurrent, current)::ctx.IndentStack
-        true
-  disposable (fun () ->
-    match started, ctx.IndentStack with
-    | true, t::stack -> ctx.IndentStack <- stack
-    | false, _ -> ()
-    | _ -> failwith "usingIndent: We lost item from an indentation stack" )
+        // Find next Newline that is followed by non-whitespace (indented or not)
+        let mutable newNonEmptyLinePos = ctx.Position
+        let mutable i = ctx.Position
+        while i < ctx.Tokens.Length do
+          match ctx.Tokens.[i].Token with
+          | TokenKind.Newline -> newNonEmptyLinePos <- i; i <- i + 1
+          | TokenKind.White _ -> i <- i + 1
+          | _ -> i <- ctx.Tokens.Length          
+        ctx.Position <- newNonEmptyLinePos
 
-/// In this mode, we accept toknes that are not indented at line 0 
-/// (which is useful when parsing erroneously nested top-level commands)
-let usingTopLevelNesting ctx = 
-  let prev = ctx.StrictlyNested
-  ctx.StrictlyNested <- true
-  match ctx.IndentStack with
-  | x::xs -> ctx.IndentStack <- (0, true)::xs
-  | _ -> ()
-  disposable (fun () ->
-    ctx.StrictlyNested <- prev )
+        // If it was indented, then bad luck...
+        match ctx.Tokens.[ctx.Position + 1] with
+        | { Token = TokenKind.White _ } -> None
+        | t -> 
+            next ctx
+            ctx.Whitespace.Add(t1)
+            let white = ctx.Whitespace |> Seq.toList
+            ctx.Whitespace.Clear()
+            Some(white, t)
 
-/// When we are not at top-level, we can break indentation rules 
-/// (and report an error)
-let usingNonTopLevel ctx = 
-  let prev = ctx.TopLevel
-  ctx.TopLevel <- false
-  disposable (fun () -> ctx.TopLevel <- prev)
-
-/// Set current line indent after parsing a token
-let setLineIndent ctx l = 
-  ctx.IndentCurrent <- l
-  match ctx.IndentStack with
-  | (oldl, false)::stack when l <= oldl -> ctx.IndentStack <- (System.Int32.MaxValue, true)::stack
-  | (oldl, false)::stack -> ctx.IndentStack <- (l, true)::stack
-  | _ -> ()
-
-/// Parses next non-white token & accumulates whitespace
-let rec justToken ctx = 
-  let current ctx = ctx.Tokens.[ctx.Position]
-  match current ctx with
-  | { Token = TokenKind.Newline } as t ->
-      ctx.Whitespace.Add t
-      next ctx
-      match current ctx with
-      | { Token = TokenKind.White s } as t ->          
-          ctx.Whitespace.Add t
-          setLineIndent ctx s.Length
-          next ctx
-      | _ -> 
-          setLineIndent ctx 0
-      justToken ctx
-  | { Token = TokenKind.Error _ | TokenKind.White _ } as t ->
-      ctx.Whitespace.Add t
-      next ctx
-      justToken ctx
-  | t -> 
-      t
-
-/// Parses token and eats all whitespace before it
-let token ctx = 
-  let t = justToken ctx
-  let white = ctx.Whitespace |> Seq.toList
-  ctx.Whitespace.Clear()
-  white, t
-
-/// Parses nested token and eats all whitespace before it
-let nestedToken ctx = 
-  let white () =
-    let white = ctx.Whitespace |> Seq.toList
-    ctx.Whitespace.Clear()
-    white
-  let t = justToken ctx
-  match ctx.IndentStack with
-  | (indent, _)::_ when ctx.IndentCurrent > indent || (not ctx.StrictlyNested && ctx.IndentCurrent = indent) -> Some(white(), t)
-  | [] -> Some(white(), t)
-  | _ -> None
+    | { Token = TokenKind.White _ } when ctx.Position = 0 -> None
+    | t when ctx.Position = 0 || ctx.Position = ctx.Tokens.Length - 1 -> 
+        Some([], t)
+    | _ -> None
 
 /// Creates a node with a range and no whitespace
 let node rng n = 
@@ -161,21 +105,12 @@ let whiteAfter w n = { n with WhiteAfter = n.WhiteAfter @ w  }
 /// Preppends whitespace beforenode
 let whiteBefore w n = { n with WhiteBefore = w @ n.WhiteBefore }
 
-/// Return range of the last element of call chain
-let lastCallOrPropertyRange expr id =
-  match expr with
-  | { Node = Expr.Call(_, id, _) | Expr.Property(_, id) } -> id.Range 
-  | _ -> expr.Range
-
 /// Parsed token is identifier or quoted identifier (with preceding whitespace)
 let (|Identifier|_|) t = 
   match t with
   | white, { Range = rng; Token = (TokenKind.Ident id | TokenKind.QIdent id) } ->
       node rng { Name.Name = id } |> whiteBefore white |> Some
   | _ -> None
-
-/// Pattern matching helper
-let (|Let|) a b = a, b
 
 // ------------------------------------------------------------------------------------------------
 // Operator precedence handling
@@ -218,218 +153,286 @@ let buildExpression terms term =
   |> fst
 
 // ------------------------------------------------------------------------------------------------
-// The parser
+// The parser - member access and calls
 // ------------------------------------------------------------------------------------------------
 
-let makeCallOrProp optInst prevId prevArgs =
-  // Reconstruct previous bit of the chain from optInst/prevId/prevArgs
-  match optInst, prevArgs with
-  | Some inst, None -> node (unionRanges inst.Range prevId.Range) (Expr.Property(inst, prevId))
-  | None, None -> node prevId.Range (Expr.Variable(prevId))
-  | _, Some prevArgs -> 
-      let fullRng = 
-        match optInst with 
-        | Some i -> unionRanges i.Range prevArgs.Range 
-        | _ -> unionRanges prevId.Range prevArgs.Range
-      node fullRng (Expr.Call(optInst, prevId, prevArgs))
+/// Try parsing input as '<id> = <expr>', if that does not work, treat it as <expr>
+let rec parseExpressionOrNamedParam ctx = 
+  let lookAheadCtx = Context.clone ctx
+  match Context.tokenIndent lookAheadCtx with
+  | Some(Identifier id) ->
+      Context.next lookAheadCtx
+      match Context.tokenIndent lookAheadCtx with
+      | Some(white, ({ Token = TokenKind.Equals } as t)) ->
+          // Replay what we did on lookahead context on the original context
+          ignore (Context.tokenIndent ctx); Context.next ctx
+          ignore (Context.tokenIndent ctx); Context.next ctx
+          match parseExpression [] ctx with
+          | Some expr -> Choice1Of2(whiteAfter white id, expr)
+          | None -> 
+              Errors.Parser.unexpectedTokenInArgList t.Range t.Token |> Context.error ctx
+              Choice1Of2(whiteAfter white id, node { Start = id.Range.End; End = id.Range.End } Expr.Empty)
+      | _ -> Choice2Of2(parseExpression [] ctx)
+  | _ -> 
+      Choice2Of2(parseExpression [] ctx)
+    
 
-/// Property access or method call after '.' in a nested block
-let rec parseChain dotRng optInst prevId prevArgs prevWhite ctx = 
-  let inst = makeCallOrProp optInst prevId prevArgs |> whiteAfter prevWhite
-  let emptyRng = { Start=dotRng.End + 1; End=dotRng.End + 1 }
-  let emptyMember = node emptyRng (Expr.Property(inst, node emptyRng { Name = "" })) 
+/// Parse a comma separated list of expressions or named parameter assignments -- after `(`
+and parseCallArgList afterComma lastRng acc ctx = 
+  let parsed, acc = 
+    match parseExpressionOrNamedParam ctx with
+    | Choice2Of2(None) -> false, acc
+    | Choice2Of2(Some e) -> true, { Name = None; Value = e }::acc
+    | Choice1Of2(id, e) -> true, { Name = Some id; Value = e }::acc
+  match Context.tokenIndent ctx with
+  | Some(white, ({ Token = TokenKind.RParen } as t)) ->
+      Context.next ctx
+      if afterComma && not parsed then        
+        Errors.Parser.unexpectedTokenInArgList lastRng TokenKind.RParen |> Context.error ctx
+      t.Range, white, List.rev acc
 
-  match nestedToken ctx with
-  | Some (Identifier id) ->
-      next ctx
-      parseMember (Some inst) id ctx
+  | Some(white, { Token = TokenKind.Comma; Range = lastRng }) when parsed ->
+      Context.next ctx
+      parseCallArgList true lastRng acc ctx
 
-  | Some(_, t) ->      
-      // Error: Expected identifier (after '.') but there was some other token
-      // at the correct level of nesting, so skip it & try prsing next thing
-      Errors.Parser.unexpectedTokenAfterDot t.Range t.Token |> addError ctx 
-      if t.Token = TokenKind.EndOfFile then emptyMember
-      else 
-        next ctx
-        use _silent = usingSilentMode ctx
-        parseMember (Some inst) (node emptyRng { Name = "" }) ctx
-      
-  | None ->
-  match token ctx with
-  | Identifier id ->
-      // Error: There is an identifier after '.' but it is not properly indented
-      let rng = lastCallOrPropertyRange inst
-      Errors.Parser.unindentedIdentifierAfterDot id.Range rng id.Node.Name |> addError ctx 
-      // If we are at top-level, we stop (to avoid consuming next line). 
-      // If we are inside expression list and not all the way to the left, 
-      //  we continue - but for that, we unindent the current stack
-      match ctx.TopLevel, ctx.IndentStack with 
-      | false, (sl, si)::stack when ctx.IndentCurrent > 0 ->
-          next ctx
-          ctx.IndentStack <- (ctx.IndentCurrent, si)::stack
-          parseMember (Some inst) id ctx
-      | _ -> emptyMember
-
-  | _, t ->      
-      // Error: Expected more after '.' but the nested scope ends here
-      // Just return what we got so far & end the current chain
-      let rng = lastCallOrPropertyRange inst
-      Errors.Parser.unexpectedScopeEndAfterDot t.Range rng t.Token |> addError ctx 
-      emptyMember
+  | Some(_, t) when t.Token <> TokenKind.EndOfFile ->
+      // Skip over unexpected, but correctly nested tokens
+      Context.next ctx
+      Errors.Parser.unexpectedTokenInArgList t.Range t.Token |> Context.error ctx
+      Context.silent ctx (fun ctx -> 
+        parseCallArgList afterComma t.Range acc ctx)
+  | _ ->
+      // Unexpected end of nesting - end argument list now
+      Errors.Parser.unexpectedScopeEndInArgList lastRng |> Context.error ctx
+      lastRng, [], List.rev acc
 
 
-/// Helper used by 'parseMember' - parse '.' or '(...)' after ident in a chain
-and parseDotOrLParen optInst id ctx tok = 
-  match tok with
-  | { Token = TokenKind.LParen } ->
-      next ctx
-      use _top = usingNonTopLevel ctx
-      let endRange, white, args = parseCallArgList false tok.Range [] ctx
-      let args = node (unionRanges tok.Range endRange) args |> whiteAfter white
-      
-      // Call can be followed by '.' or end of call chain
-      match nestedToken ctx with
-      | Some(whiteAfterArgs, { Token = TokenKind.Dot; Range = dotRng }) ->
-          next ctx
-          Some(parseChain dotRng optInst id (Some args) whiteAfterArgs ctx)
+/// If something goes wrong inside placeholder, this skips over everything until `]`
+and parsePlaceholderRecovery silent lastTokRng lastTokOpt whiteAcc ctx =
+  match Context.tokenIndent ctx with
+  | Some(white, { Token = TokenKind.RSquare; Range = lastTokRng }) ->
+      Context.next ctx
+      if not silent then Errors.Parser.unexpectedEndOfPlaceholder lastTokRng |> Context.error ctx
+      lastTokRng, whiteAcc @ white
+
+  | Some(white, t) when t.Token <> TokenKind.EndOfFile ->
+      // Skip over unexpected, but correctly nested tokens
+      Context.next ctx
+      if not silent then Errors.Parser.unexpectedTokenInPlaceholder t.Range t.Token |> Context.error ctx
+      parsePlaceholderRecovery true t.Range (Some t.Token) (whiteAcc @ white @ [t]) ctx
+
+  | _ ->
+      // Unexpected end of placeholder - end placeholder now
+      if not silent then Errors.Parser.unexpectedScopeEndInPlaceholder lastTokRng lastTokOpt |> Context.error ctx
+      lastTokRng, whiteAcc
+
+
+/// Parse placeholder after parsing `[` -- the full syntax is `[ident: <expr>]`
+and parsePlaceholder rngLSQuare ctx = 
+  match Context.tokenIndent ctx with
+  | Some(Identifier id & (_, tokId)) ->
+      Context.next ctx
+      match Context.tokenIndent ctx with
+      | Some(whiteBeforeColon, { Token = TokenKind.Colon; Range = rngColon }) ->
+          Context.next ctx
+          match parseExpression [] ctx with
+          | Some body ->
+              match Context.tokenIndent ctx with
+              | Some(whiteBeforeSquare, { Token = TokenKind.RSquare; Range = rngRSquare }) ->
+                  Context.next ctx
+                  rngRSquare, Expr.Placeholder(whiteAfter whiteBeforeColon id, whiteAfter whiteBeforeSquare body)
+              | _ ->
+                  // RECOVERY: Skip everything until `]` or end of indentation
+                  let rng, white = parsePlaceholderRecovery false body.Range None [] ctx
+                  rng, Expr.Placeholder(id, whiteAfter white body)
+          | _ ->
+              // RECOVERY: Skip everything until `]` or end of indentation
+              let rng, white = parsePlaceholderRecovery false rngColon (Some TokenKind.Colon) [] ctx
+              rng, Expr.Placeholder(id, whiteAfter white (node rng Expr.Empty))
       | _ ->
-          Some(makeCallOrProp optInst id (Some args))
-
-  | { Token = TokenKind.Dot } ->
-      next ctx
-      Some(parseChain tok.Range optInst id None [] ctx)
-
-  | _ -> None
-
-
-/// Call chain after name - either '.' & more or '(...)' or end of call chain
-and parseMember (optInst:option<_>) (id:Node<Name>) ctx : Node<_> = 
-  let parsed = 
-    // Token is correctly nested - parse '.' or '('
-    match nestedToken ctx with
-    | Some(white, res) -> parseDotOrLParen optInst (whiteAfter white id) ctx res
+          // RECOVERY: Skip everything until `]` or end of indentation
+          let rng, white = parsePlaceholderRecovery false id.Range (Some tokId.Token) [] ctx
+          rng, Expr.Placeholder(id, whiteAfter white (node rng Expr.Empty))
     | _ ->
-    // Token is not nested, but it is '.' or '(', so we accept it with erorr
-    let white, after = token ctx    
-    match (use _silent = usingSilentMode ctx in parseDotOrLParen optInst (whiteAfter white id) ctx after) with
-    | Some res -> 
-        Errors.Parser.unindentedDotAfterIdentifier id.Range after.Range |> addError ctx 
-        Some res 
-    // Otherwise, we end the call chain
-    | _ -> None
-  match parsed with
-  | Some res -> res
-  | None -> 
-      // If we did not parse anything, create chain with what we have
-      match optInst with
-      | Some inst -> node (unionRanges inst.Range id.Range) (Expr.Property(inst, id))
-      | None -> node id.Range (Expr.Variable(id))
+        // RECOVERY: Skip everything until `]` or end of indentation
+        let rng, white = parsePlaceholderRecovery false rngLSQuare (Some TokenKind.LSquare) [] ctx
+        rng, Expr.Placeholder(node rngLSQuare { Name = "" }, whiteAfter white (node rng Expr.Empty))
 
+      
+/// Parse `ident` after `.` in `.ident`; skips over non-idents after dot until it finds ident
+and parseIdentAfterDot body prevDotRng prevDotTok ctx =
+  match Context.tokenIndent ctx with
+  | Some(Identifier id) ->
+      Context.next ctx
+      let body = Expr.Member(body, node id.Range (Expr.Variable id)) |> node (unionRanges body.Range id.Range)
+      parseCallOrMember body ctx
+  | Some(white, { Token = TokenKind.LSquare; Range = rngLSQuare }) ->
+      Context.next ctx
+      let rngRSquare, place = parsePlaceholder rngLSQuare ctx
+      let body = 
+        Expr.Member(body, node (unionRanges rngRSquare rngLSQuare) place) 
+        |> node (unionRanges rngLSQuare rngRSquare) |> whiteBefore white 
+      parseCallOrMember body ctx
+  | Some(_, { Token = TokenKind.EndOfFile })
+  | None ->
+      // RECOVERY: Nothing after dot - return body so far
+      Errors.Parser.unexpectedScopeEndAfterDot prevDotRng prevDotTok |> Context.error ctx 
+      let emptyRng = { End = prevDotRng.End; Start = prevDotRng.End+1 }
+      Expr.Member(body, node emptyRng (Expr.Variable(node emptyRng {Name=""})))
+      |> node (unionRanges body.Range emptyRng)
+
+  | Some(white, t) ->
+      // RECOVERY: Wrong token after dot - skip and try next
+      Context.next ctx
+      Errors.Parser.unexpectedTokenAfterDot t.Range t.Token |> Context.error ctx 
+      let emptyRng = { End = prevDotRng.End; Start = prevDotRng.End+1 }
+      let body =
+        Expr.Member(body, node emptyRng (Expr.Variable(node emptyRng {Name=""})))
+        |> node (unionRanges body.Range emptyRng)
+      Context.silent ctx (parseIdentAfterDot body prevDotRng prevDotTok)
+
+
+
+/// Parse `.ident` or `(args)` after we parsed an expression specified as body
+and parseCallOrMember body ctx = 
+  match Context.tokenIndent ctx with
+  | Some(white, { Token = TokenKind.LParen; Range = firstRng }) ->
+      Context.next ctx
+      let lastRng, white, args = parseCallArgList false firstRng [] ctx
+      let body = 
+        Expr.Call(body, whiteAfter white (node (unionRanges firstRng lastRng) args)) 
+        |> node (unionRanges body.Range lastRng)
+      // Parse more chain elements after `(args).`
+      match Context.tokenIndent ctx with
+      | Some(white, t & { Token = TokenKind.Dot }) ->
+          Context.next ctx
+          parseIdentAfterDot (whiteAfter white body) t.Range t.Token ctx
+      | _ -> body
+            
+  | Some(white, t & { Token = TokenKind.Dot }) ->
+      Context.next ctx
+      parseIdentAfterDot (whiteAfter white body) t.Range t.Token ctx
+
+  | _ -> body      
+
+// ------------------------------------------------------------------------------------------------
+// The parser - functions, lists
+// ------------------------------------------------------------------------------------------------
 
 /// We already parsed `fun`, parse the rest of the function, i.e. `<id> -> <expr>`
 and parseFunction ctx funRng = 
-  match nestedToken ctx with
+  match Context.tokenIndent ctx with
   | Some(Identifier id) ->
-      next ctx
-      match nestedToken ctx with
-      | Some(whiteAfterId, { Token = TokenKind.Arrow; Range = rngEq }) ->
-          next ctx
+      Context.next ctx
+      match Context.tokenIndent ctx with
+      | Some(whiteAfterId, { Token = TokenKind.Arrow; Range = rngArr }) ->
+          Context.next ctx
           let body = 
             match parseExpression [] ctx with
             | Some body -> body
             | _ -> 
-                Errors.Parser.missingBodyOfFunc (unionRanges funRng rngEq) |> addError ctx
-                node { Start = rngEq.End; End = rngEq.End } Expr.Empty
+                Errors.Parser.missingBodyOfFunc (unionRanges funRng rngArr) |> Context.error ctx
+                node { Start = rngArr.End; End = rngArr.End } Expr.Empty
           let rng = unionRanges funRng body.Range
           node rng (Expr.Function(whiteAfter whiteAfterId id, body)) |> Some
-      | nt ->
-          // Missing arrow - try parsing the body anyway
+
+      | nt -> 
+          // RECOVERY: Missing arrow - try parsing the body anyway
           let errRng, whiteAfterId = 
             match nt with
             | None -> unionRanges funRng id.Range, []
             | Some(whiteAfterId, t) -> t.Range, whiteAfterId
-          Errors.Parser.missingArrowInFunc errRng |> addError ctx
+          Errors.Parser.missingArrowInFunc errRng |> Context.error ctx
           let body = 
             match parseExpression [] ctx with 
             | Some e -> e 
             | _ -> node {Start=id.Range.End; End=id.Range.End} Expr.Empty
-          node (unionRanges funRng body.Range) (Expr.Function(id, whiteBefore whiteAfterId body)) |> Some            
-
-  // Unexpected token or end of scope - return empty function
+          node (unionRanges funRng body.Range) 
+            (Expr.Function(id, whiteBefore whiteAfterId body)) |> Some            
+          
+  // RECOVERY: Unexpected token or end of scope - return empty function
   | Some(white, t) ->
-      Errors.Parser.unexpectedTokenAfterFun t.Range t.Token |> addError ctx
+      Errors.Parser.unexpectedTokenAfterFun t.Range t.Token |> Context.error ctx
       let rng = { Start = funRng.End; End = funRng.End }
-      node rng (Expr.Function(node rng {Name=""}, node rng Expr.Empty)) |> whiteBefore white |> Some
+      node rng (Expr.Function(node rng {Name=""}, node rng Expr.Empty)) 
+      |> whiteBefore white |> Some
+  
   | None ->
-      Errors.Parser.unexpectedScopeEndInFunc funRng |> addError ctx
+      Errors.Parser.unexpectedScopeEndInFunc funRng |> Context.error ctx
       let rng = { Start = funRng.End; End = funRng.End }
       node rng (Expr.Function(node rng {Name=""}, node rng Expr.Empty)) |> Some
-  
     
-/// A term is a single thing inside expression involving operators, i.e.
-///   <expression> := <term> <op> <term> <op> .. <op> <term>
-and parseTerm ctx = 
-  match nestedToken ctx with
-  // Variable or call chain
-  | Some((Identifier id) & (_, tok)) ->
-      next ctx
-      use _indent = usingIndent false tok ctx
-      let varOrCall = parseMember None id ctx 
-      Some varOrCall
 
-  // String, numeric and Boolean literals
-  | Some(white, { Token = TokenKind.Number(_, n); Range = r }) ->
-      next ctx
-      node r (Expr.Number n) |> whiteAfter white |> Some
-  | Some(white, { Token = TokenKind.String(s); Range = r }) ->
-      next ctx
-      node r (Expr.String s) |> whiteAfter white |> Some
-  | Some(white, { Token = TokenKind.Boolean(b); Range = r }) ->
-      next ctx
-      node r (Expr.Boolean b) |> whiteAfter white |> Some
-
-  // Parse nested expressions starting with `(` or list starting with `[`
-  | Some(white, ({ Token = TokenKind.LParen } as t)) ->
-      next ctx
-      parseParenTermEnd (t::List.rev white) [] (parseExpression [] ctx) ctx
-  | Some(white, ({ Token = TokenKind.LSquare } as t)) ->
-      next ctx
-      use _nest = usingNonTopLevel ctx
-      parseListElements false t.Range white t.Range [] ctx
-
-  | Some(white, ({ Token = TokenKind.Fun } as t)) ->
-      next ctx
-      parseFunction ctx t.Range
-
-  // Not a term, but that's fine
-  | _ -> None 
-
-
-/// Parse list of elements and closing square bracket, after `[`
-and parseListElements expectMore lastRng whiteStart startRng acc ctx =
+/// Parse expression followed by a list of more elements or closing square bracket
+and parseListElements afterComma lastRng whiteStart startRng acc ctx =
   let parsed, acc =  
     match parseExpression [] ctx with
     | Some expr -> true, fun white -> (whiteAfter white expr)::acc
     | _ -> false, fun _ -> acc
 
-  match nestedToken ctx with
+  match Context.tokenIndent ctx with
   | Some(white, { Token = TokenKind.RSquare; Range = endRng }) ->
-      next ctx
+      Context.next ctx
+      if not parsed && afterComma then
+        Errors.Parser.unexpectedTokenInList lastRng TokenKind.Comma |> Context.error ctx
       node (unionRanges startRng endRng) (Expr.List(List.rev (acc []))) |> whiteBefore white |> Some
+
   | Some(white, { Token = TokenKind.Comma; Range = lastRng }) ->
-      next ctx
-      if not parsed && expectMore then
-        Errors.Parser.unexpectedTokenInList lastRng TokenKind.Comma |> addError ctx
+      Context.next ctx
+      if not parsed && afterComma then
+        Errors.Parser.unexpectedTokenInList lastRng TokenKind.Comma |> Context.error ctx
       parseListElements true lastRng whiteStart startRng (acc white) ctx
+
   | Some(_, t) when t.Token <> TokenKind.EndOfFile ->
       // Skip over unexpected, but correctly nested tokens
-      next ctx
-      Errors.Parser.unexpectedTokenInList t.Range t.Token |> addError ctx
-      parseListElements expectMore t.Range whiteStart startRng (acc []) ctx
+      Context.next ctx
+      Errors.Parser.unexpectedTokenInList t.Range t.Token |> Context.error ctx
+      Context.silent ctx (fun ctx ->
+        parseListElements afterComma t.Range whiteStart startRng (acc []) ctx)
   | _ ->
       // Unexpected end of nesting - end argument list now
-      Errors.Parser.unexpectedScopeEndInList lastRng |> addError ctx
+      Errors.Parser.unexpectedScopeEndInList lastRng |> Context.error ctx
       node (unionRanges startRng lastRng) (Expr.List(List.rev (acc []))) |> Some
+
+
+// ------------------------------------------------------------------------------------------------
+// The parser - terms and expressions
+// ------------------------------------------------------------------------------------------------
+
+/// A term is a single thing inside expression involving operators, i.e.
+///   <expression> := <term> <op> <term> <op> .. <op> <term>
+and parseTerm ctx = 
+  match Context.tokenIndent ctx with
+  // Variable or call chain
+  | Some(Identifier id) ->
+      Context.next ctx
+      parseCallOrMember (node id.Range (Expr.Variable id)) ctx |> Some
+
+  // String, numeric and Boolean literals
+  | Some(white, { Token = TokenKind.Number(_, n); Range = r }) ->
+      Context.next ctx
+      node r (Expr.Number n) |> whiteAfter white |> Some
+  | Some(white, { Token = TokenKind.String(s); Range = r }) ->
+      Context.next ctx
+      node r (Expr.String s) |> whiteAfter white |> Some
+  | Some(white, { Token = TokenKind.Boolean(b); Range = r }) ->
+      Context.next ctx
+      node r (Expr.Boolean b) |> whiteAfter white |> Some
+
+  // Parse nested expressions starting with `(` or list starting with `[`
+  | Some(white, ({ Token = TokenKind.LParen } as t)) ->
+      Context.next ctx
+      parseParenTermEnd (t::List.rev white) [] (parseExpression [] ctx) ctx
+  | Some(white, ({ Token = TokenKind.LSquare } as t)) ->
+      Context.next ctx
+      parseListElements false t.Range white t.Range [] ctx
+
+  | Some(white, ({ Token = TokenKind.Fun } as t)) ->
+      Context.next ctx
+      parseFunction ctx t.Range
+
+  // Not a term, but that's fine
+  | _ -> None 
 
 
 /// Parse what follows after `(<expr>` - either `)` or some errors 
@@ -441,22 +444,23 @@ and parseParenTermEnd wb wa bodyOpt ctx =
       | Some body -> body
       | None -> 
           let rng = List.append [List.head wb] wa |> List.map (fun t -> t.Range) |> List.reduce unionRanges
-          Errors.Parser.missingParenthesizedExpr rng |> addError ctx
+          Errors.Parser.missingParenthesizedExpr rng |> Context.error ctx
           node rng Expr.Empty
     Some(body |> whiteBefore (List.rev wb) |> whiteAfter (List.rev wa))
 
   // Wait for ')', ignoring other nested tokens & ending on end of nesting
-  match nestedToken ctx with
+  match Context.tokenIndent ctx with
   | Some(white, ({ Token = TokenKind.RParen } as t)) -> 
-      next ctx
+      Context.next ctx
       makeBody (t::(List.append (List.rev white) wa))
   | Some(white, t) -> 
-      next ctx
-      Errors.Parser.unexpectedTokenInParenthesizedExpr t.Range t.Token |> addError ctx
-      parseParenTermEnd wb (t::(List.append (List.rev white) wa)) bodyOpt ctx
+      Context.next ctx
+      Errors.Parser.unexpectedTokenInParenthesizedExpr t.Range t.Token |> Context.error ctx
+      Context.silent ctx (fun ctx ->
+        parseParenTermEnd wb (t::(List.append (List.rev white) wa)) bodyOpt ctx)
   | None ->
       let rng = match bodyOpt with Some b -> b.Range | _ -> (List.head wb).Range
-      Errors.Parser.unindentedTokenInParenthesizedExpr rng |> addError ctx
+      Errors.Parser.unexpectedScopeEndInParenthesizedExpr rng |> Context.error ctx
       makeBody wa
             
 
@@ -464,186 +468,147 @@ and parseParenTermEnd wb wa bodyOpt ctx =
 and parseExpression terms ctx = 
   match terms, parseTerm ctx with
   | terms, Some term -> 
-      match nestedToken ctx with
+      match Context.tokenIndent ctx with
       // Followed by operator and more expressions
       | Some(white, ({ Token = TokenKind.Equals } as t)) ->
-          next ctx
+          Context.next ctx
           parseExpression ((term, whiteBefore white (node t.Range Operator.Equals))::terms) ctx
       | Some(white, ({ Token = TokenKind.Operator op } as t)) ->
-          next ctx
+          Context.next ctx
           parseExpression ((term, whiteBefore white (node t.Range op))::terms) ctx
-      | _ -> 
-          Some(buildExpression terms term)  
+      | Some(white, _) -> buildExpression terms term |> whiteAfter white |> Some  
+      | None -> buildExpression terms term |> Some
+          
   // Not an expression, return None
   | [], None -> None  
+
   // Nothing after operator - ignore operator, but parse preceding terms
   | (term, op)::terms, None -> 
-      let next = justToken ctx
-      Errors.Parser.unexpectedTokenAfterOperator next.Range (TokenKind.Operator op.Node) next.Token |> addError ctx
+      Errors.Parser.unexpectedEndAfterOperator op.Range (TokenKind.Operator op.Node) |> Context.error ctx
       Some(buildExpression terms term)
 
 
-/// Try parsing input as '<id> = <expr>', if that does not work, treat it as <expr>
-and parseExpressionOrNamedParam ctx = 
-  let lookAheadCtx = clone ctx
-  match nestedToken lookAheadCtx with
-  | Some(Identifier id) ->
-      next lookAheadCtx
-      match nestedToken lookAheadCtx with
-      | Some(white, ({ Token = TokenKind.Equals } as t)) ->
-          // Replay what we did on lookahead context on the original context
-          ignore (nestedToken ctx); next ctx
-          ignore (nestedToken ctx); next ctx
-          match parseExpression [] ctx with
-          | Some expr -> Choice1Of2(whiteAfter white id, expr)
-          | None -> 
-              Errors.Parser.unexpectedTokenInArgList t.Range t.Token |> addError ctx
-              Choice2Of2(Some(node id.Range (Expr.Variable(id))))
-      | _ -> Choice2Of2(parseExpression [] ctx)
-  | _ -> 
-      Choice2Of2(parseExpression [] ctx)
-    
+// ------------------------------------------------------------------------------------------------
+// The parser - commands
+// ------------------------------------------------------------------------------------------------
 
-/// Parse a comma separated list of expressions or named parameter assignments
-and parseCallArgList expectMore lastRng acc ctx = 
-  let parsed, acc = 
-    match parseExpressionOrNamedParam ctx with
-    | Choice2Of2(None) -> false, acc
-    | Choice2Of2(Some e) -> true, { Name = None; Value = e }::acc
-    | Choice1Of2(id, e) -> true, { Name = Some id; Value = e }::acc
-  match nestedToken ctx with
-  | Some(white, ({ Token = TokenKind.RParen } as t)) ->
-      next ctx
-      if expectMore && not parsed then        
-        Errors.Parser.unexpectedTokenInArgList lastRng TokenKind.RParen |> addError ctx
-      t.Range, white, List.rev acc
-
-  | Some(white, { Token = TokenKind.Comma; Range = lastRng }) when parsed ->
-      next ctx
-      parseCallArgList true lastRng acc ctx
-
-  | Some(_, t) when t.Token <> TokenKind.EndOfFile ->
-      // Skip over unexpected, but correctly nested tokens
-      next ctx
-      Errors.Parser.unexpectedTokenInArgList t.Range t.Token |> addError ctx
-      parseCallArgList expectMore t.Range acc ctx
-  | _ ->
-      // Unexpected end of nesting - end argument list now
-      Errors.Parser.unexpectedScopeEndInArgList lastRng |> addError ctx
-      lastRng, [], List.rev acc
-
-
-/// Parse a top-level expression, 
-let rec parseNestedExpressions wacc acc ctx = 
+/// Parse expression, skipping all tokens that cannot be parsed
+let rec parseLetBindingBody lastRng ctx = 
   match parseExpression [] ctx with
-  | Some expr ->  
-      if not (List.isEmpty acc) then 
-        Errors.Parser.nestedExpressionInCommand expr.Range |> addError ctx
-        parseNestedExpressions [] ((whiteBefore (List.rev wacc) expr)::acc) ctx
-      else
-        use _strict = usingTopLevelNesting ctx
-        parseNestedExpressions [] ((whiteBefore (List.rev wacc) expr)::acc) ctx
-  | _ ->
-  match nestedToken ctx with
-  | Some(_, { Token = TokenKind.EndOfFile })
+  | Some body -> body
   | None ->
-      match acc with
-      | x::xs -> (whiteAfter (List.rev wacc) x)::xs
-      | [] -> []
-  | Some(white, tok) ->
-      next ctx
-      parseNestedExpressions (tok::(List.rev white) @ wacc) acc ctx
+      match Context.tokenIndent ctx with
+      | None ->     
+          Errors.Parser.unexpectedScopeEndInLet lastRng |> Context.error ctx
+          node lastRng Expr.Empty
+      | Some(white, t) ->
+          Errors.Parser.unexpectedTokenInLetBinding t.Range t.Token |> Context.error ctx
+          Context.silent ctx (fun ctx -> parseLetBindingBody t.Range ctx)
 
+
+/// Skip all remaining nested tokens after a command
+let rec skipNestedTokens firstTok white ctx = 
+  match Context.tokenIndent ctx with 
+  | None -> firstTok, white
+  | Some(whiteBefore, t & { Token = TokenKind.EndOfFile }) ->
+      (if firstTok = None then Some t else firstTok), white @ whiteBefore
+  | Some(whiteBefore, t) ->
+      Context.next ctx
+      let firstTok = if firstTok = None then Some t else firstTok
+      skipNestedTokens firstTok (white @ whiteBefore @ [t]) ctx
+      
 
 /// Parse the rest of the let binding after `let`, handling all sorts of errors
 /// This returns parsed command together with all nested expressions after the command
 /// (those should not be nested, but we accept them anyway & report error)
 let parseLetBinding whiteBeforeLet rngLet ctx = 
-  match nestedToken ctx with
+  match Context.tokenIndent ctx with
   | Some(Identifier id) ->
-      next ctx
-      match nestedToken ctx with
+      Context.next ctx
+      match Context.tokenIndent ctx with
       | Some (whiteAfterId, { Token = TokenKind.Equals; Range = rngEq }) ->
-          next ctx
-          match List.rev (parseNestedExpressions [] [] ctx) with
-          | body::rest ->
-              rest, 
-              Command.Let(whiteAfter whiteAfterId id, body)
-              |> node (unionRanges rngLet body.Range) 
-              |> whiteBefore whiteBeforeLet
-              
-          | [] ->
-              // Missing body - return let binding with empty expression
-              Errors.Parser.missingBodyInLetBinding (unionRanges rngLet rngEq) |> addError ctx
-              [],
-              Command.Let(whiteAfter whiteAfterId id, node { Start = rngEq.End; End = rngEq.End } Expr.Empty)
-              |> node (unionRanges rngLet rngEq) 
-              |> whiteBefore whiteBeforeLet
-              
-      | Some (whiteAfterId, t) ->
-          // Unexpected token after ident - try to parse nested body as expression nevertheless
-          Errors.Parser.unexpectedTokenInLetBinding t.Range t.Token |> addError ctx
-          let body, rest = 
-            match List.rev (parseNestedExpressions [] [] ctx) with
-            | body::rest -> body, rest
-            | [] -> node { Start = id.Range.End; End = id.Range.End } Expr.Empty, []
-          rest,
+          Context.next ctx
+          let body = parseLetBindingBody rngEq ctx                
+          Command.Let(whiteAfter whiteAfterId id, body)
+          |> node (unionRanges rngLet body.Range) 
+          |> whiteBefore whiteBeforeLet
+
+      | Some(whiteAfterId, t) -> 
+          // RECOVERY: Unexpected token after ident - try to parse the body anyway
+          Errors.Parser.unexpectedTokenInLetBinding t.Range t.Token |> Context.error ctx
+          let body = parseLetBindingBody t.Range ctx
           Command.Let(whiteAfter whiteAfterId id, body)
           |> node (unionRanges rngLet id.Range) 
           |> whiteBefore whiteBeforeLet
-          
+
       | None ->
-          // End of block after ident - return binding with empty expression
-          Errors.Parser.missingBodyInLetBinding id.Range |> addError ctx
+          // RECOVERY: End of block after ident - return binding with empty expression
+          Errors.Parser.missingBodyInLetBinding id.Range |> Context.error ctx
           let body = node { Start = id.Range.End; End = id.Range.End } Expr.Empty
-          [], node (unionRanges rngLet id.Range) (Command.Let(id, body)) |> whiteBefore whiteBeforeLet
+          Command.Let(id, body)
+          |> node (unionRanges rngLet id.Range) 
+          |> whiteBefore whiteBeforeLet
           
   | Some(whiteAfterLet, t) ->
-      // Unexpected token after let - try to parse nested body as expression & assume emtpy identifier
-      //printfn "Unexpected token after let: %A" t
-      Errors.Parser.unexpectedTokenInLetBinding t.Range t.Token |> addError ctx
+      // RECOVERY: Unexpected token after let - try to parse body as expression & assume emtpy identifier
+      Errors.Parser.unexpectedTokenInLetBinding t.Range t.Token |> Context.error ctx
       let letEndRng = { Start = rngLet.End; End = rngLet.End }
-      let body, rest = 
-        match List.rev (parseNestedExpressions [] [] ctx) with
-        | body::rest -> body, rest
-        | [] -> node letEndRng Expr.Empty, []
-      rest,
+      let body = 
+        match parseExpression [] ctx with 
+        | Some e -> e
+        | None -> 
+            let firstSkipped, white = skipNestedTokens None [] ctx
+            let skipRng = t::white |> List.map (fun t -> t.Range) |> List.reduce unionRanges
+            node skipRng Expr.Empty |> whiteAfter (t::white)
       Command.Let(whiteBefore whiteAfterLet (node letEndRng { Name = "" } ), body)
       |> node (unionRanges rngLet body.Range) 
       |> whiteBefore whiteBeforeLet
       
   | None ->
-      // Missing body - return let binding with empty expression and empty identifier
-      Errors.Parser.missingBodyInLetBinding rngLet |> addError ctx
+      // RECOVERY: Missing body - return let binding with empty expression and empty identifier
+      Errors.Parser.missingBodyInLetBinding rngLet |> Context.error ctx
       let rng = { Start = rngLet.End; End = rngLet.End }
-      [], node rng (Command.Let(node rng { Name = "" }, node rng Expr.Empty)) |> whiteBefore whiteBeforeLet
+      Command.Let(node rng { Name = "" }, node rng Expr.Empty)
+      |> node rng |> whiteBefore whiteBeforeLet
 
-      
+
 /// A command is either top-level expression or let binding
 let rec parseCommands acc ctx = 
-  let c = token ctx
-  match c with
-  | whiteBeforeLet, ({ Token = TokenKind.Let; Range = rngLet } as tok) ->
-      next ctx
-      let rest, parsed = 
-        use _indent = usingIndent false tok ctx
-        parseLetBinding whiteBeforeLet rngLet ctx
-      let rest = rest |> List.map (fun e -> node e.Range (Command.Expr e))
-      parseCommands (rest @ (parsed::acc)) ctx
-
-  | white, { Token = TokenKind.EndOfFile } ->
+  match Context.tokenNonIndent ctx with
+  | Some(white, { Token = TokenKind.EndOfFile }) ->
       // Return commands & store the whitespace
       match acc with 
       | x::xs -> List.rev ({ x with WhiteAfter = white }::xs)
       | [] -> []
     
-  | white, tok -> 
+  | Some(whiteBeforeLet, tok & { Token = TokenKind.Let; Range = rngLet }) ->
+      Context.next ctx
+      let cmd = parseLetBinding whiteBeforeLet rngLet ctx 
+      parseCommands (cmd::acc) ctx
+
+  | Some(white, t) -> 
       // Treat command as top-level expression
-      let cmds = 
-        use _indent = usingIndent true tok ctx
-        parseNestedExpressions (List.rev white) [] ctx |> List.map (fun expr ->
-          node expr.Range (Command.Expr expr))
-      parseCommands (cmds @ acc) ctx
+      match parseExpression [] ctx with
+      | Some expr -> 
+          let cmd = node expr.Range (Command.Expr(expr)) |> whiteBefore white
+          parseCommands (cmd::acc) ctx
+      | None -> 
+          // RECOVERY: Not an expression, just skip over the whole thing
+          let _, white = skipNestedTokens None [] ctx
+          Errors.Parser.unexpectedNestedTokenInCommand t.Range t.Token |> Context.error ctx
+          let skipRng = t::white |> List.map (fun t -> t.Range) |> List.reduce unionRanges
+          let cmd = node skipRng (Command.Expr(node skipRng Expr.Empty)) |> whiteAfter (t::white)
+          parseCommands (cmd::acc) ctx
+
+  | None ->
+      // RECOVERY: Skip over all subsequent nested tokens
+      let firstSkipped, white = skipNestedTokens None [] ctx
+      let firstSkipped = firstSkipped.Value
+      Errors.Parser.unexpectedNestedTokenInCommand firstSkipped.Range firstSkipped.Token |> Context.error ctx
+      let skipRng = firstSkipped::white |> List.map (fun t -> t.Range) |> List.reduce unionRanges
+      let cmd = node skipRng (Command.Expr(node skipRng Expr.Empty)) |> whiteAfter white
+      parseCommands (cmd::acc) ctx
+
 
 // ------------------------------------------------------------------------------------------------
 // User friendly entry point
@@ -653,9 +618,7 @@ let parseProgram (input:string) =
   try
     let tokens, errors = Tokenizer.tokenize input
     let ctx = 
-      { Tokens = tokens
-        TopLevel = true; Silent = false; StrictlyNested = false
-        Position = 0; IndentCurrent = 0; IndentStack = []
+      { Tokens = tokens; Position = 0; SilentMode = false
         Errors = ResizeArray<_>(); Whitespace = ResizeArray<_>() }
     let cmds = parseCommands [] ctx
     let errors = Array.append errors (ctx.Errors.ToArray())

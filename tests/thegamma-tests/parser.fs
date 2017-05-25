@@ -1,4 +1,4 @@
-﻿#if INTERACTIVEZ
+﻿#if INTERACTIVE
 #r "../../src/thegamma/bin/Debug/thegamma.dll"
 #r "../../packages/NUnit/lib/net45/nunit.framework.dll"
 #else
@@ -81,7 +81,11 @@ let isFun name bf = function
 
 /// Sub-expression contains property with given name
 let isProperty name = function 
-  | Expr.Property(_, n) -> n.Node.Name = name | _ -> false
+  | Expr.Member(_, { Node = Expr.Variable n }) -> n.Node.Name = name | _ -> false
+
+/// Sub-expression contains property a placeholder
+let isPlaceholder name checkBody = function 
+  | Expr.Placeholder(id, body) -> id.Node.Name = name && checkBody body.Node | _ -> false
 
 /// Sub-expression contains empty expression
 let isEmpty = function 
@@ -89,7 +93,9 @@ let isEmpty = function
 
 /// Sub-expression contains call with given name and arguments match function
 let isCall name ac = function 
-  | Expr.Call(_, n, args) -> n.Node.Name = name && ac args | _ -> false
+  | Expr.Call({ Node = Expr.Variable n }, args) 
+  | Expr.Call({ Node = Expr.Member(_, { Node = Expr.Variable n }) }, args) -> 
+      n.Node.Name = name && ac args | _ -> false
 
 /// Sub-expression is a list with elements matching specified functions
 let isList conds = function 
@@ -155,6 +161,17 @@ let ``Correctly parse indented call chain``() =
   actual |> assertErrors []
 
 [<Test>]
+let ``Correctly parse indented call chain with calls``() =
+  let actual = parse """
+    let a = foo(1).
+      'bar zoo'(2).
+      yadda"""
+  actual |> assertSubExpr (isCall "foo" (hasArgValues [isVal 1.0]))
+  actual |> assertSubExpr (isCall "bar zoo" (hasArgValues [isVal 2.0]))
+  actual |> assertSubExpr (isProperty "yadda")
+  actual |> assertErrors []
+
+[<Test>]
 let ``Correctly parse aligned call chain without nesting``() =
   let actual = parse """
     foo.
@@ -170,7 +187,7 @@ let ``Error reported on identifier following an unfinished chain``() =
     bar"""
   actual |> assertSubExpr (isVariable "foo")
   actual |> assertSubExpr (isVariable "bar")
-  actual |> assertErrors [203, "bar"]
+  actual |> assertErrors [202, "."]
 
 [<Test>]
 let ``Correctly parse indented call chain with nesting``() =
@@ -197,8 +214,7 @@ let ``Error reported on incomplete named parameter specification``() =
   let actual = parse """
     foo(a=bar(b=, c=2, 3))"""
   actual |> assertSubExpr (isCall "foo" (hasArgNames ["a"]))
-  actual |> assertSubExpr (isCall "bar" (hasArgNames [""; "c"; ""]))
-  actual |> assertSubExpr (isVariable "b")
+  actual |> assertSubExpr (isCall "bar" (hasArgNames ["b"; "c"; ""]))
   actual |> assertErrors [207, "="]
 
 [<Test>]
@@ -223,25 +239,27 @@ let ``Error reported on unfinished call chain``() =
     let b = a"""
   actual |> assertSubExpr (isVariable "foo")
   actual |> assertSubExpr (isProperty "bar")
-  actual |> assertErrors [202, "let"]
+  actual |> assertErrors [202, "."]
 
 [<Test>]
-let ``Error reported on unindented token in call chain``() =
+let ``Error reported on wrongly indented chain``() =
   let actual = parse """
     let a = foo.
       'bar zoo'.
     yadda"""
   actual |> assertSubExpr (isProperty "bar zoo")
   actual |> assertSubExpr (isVariable "yadda")
-  actual |> assertErrors [203, "yadda"]
+  actual |> assertErrors [202, "."]
 
 [<Test>]
 let ``Empty property parsed after incomplete '.' followed by identifier``() =
+  // (this models the case when we start typing .something after 'bar zoo')
   let actual = parse """
     let a = foo.
       'bar zoo'.
     yadda"""
   actual |> assertSubExpr (isProperty "")
+  actual |> assertErrors [202, "."]
 
 [<Test>]
 let ``Empty property parsed after incomplete '.' followed by another '.'``() = 
@@ -251,6 +269,7 @@ let ``Empty property parsed after incomplete '.' followed by another '.'``() =
       'bar zoo'.
       .foo"""
   actual |> assertSubExpr (isProperty "")
+  actual |> assertErrors [201, "."]
 
 // --------------------------------------------------------------------------------------
 // TESTS: Call chains with arguments
@@ -269,7 +288,7 @@ let ``Error reported when argument list is not closed``() =
     let a = foo.
       'bar zoo'("""
   actual |> assertSubExpr (isCall "bar zoo" (hasArgValues []))
-  // TODO: Check errors
+  actual |> assertErrors [208, "("]
 
 [<Test>]
 let ``Correctly parse multiple nested chain calls`` () =
@@ -282,7 +301,7 @@ let ``Correctly parse multiple nested chain calls`` () =
   actual |> assertErrors []
 
 [<Test>]
-let ``Error reported on insufficiently indented nested chain`` () =
+let ``Correctly parse nested chain with two space indentation`` () =
   let actual = parse """
     let a = foo1
       .foo2(bar1
@@ -290,7 +309,6 @@ let ``Error reported on insufficiently indented nested chain`` () =
       .goo2.'bar zoo'(1)))"""
   actual |> assertSubExpr (isCall "bar2" (hasArgValues [hasSubExpr (isProperty "goo2") ]))
   actual |> assertSubExpr (isCall "bar zoo" (hasArgValues [isVal 1.0]))
-  actual |> assertErrors [204, "bar1"]
 
 [<Test>]
 let ``Correctly parse one inline chain and one indented chain`` () =
@@ -317,7 +335,7 @@ let ``Report error and continue parsing indented method chain`` () =
     let a = foo(
         1,).yadda
     bar(2)"""
-  actual |> assertErrors [207,","]
+  actual |> assertErrors [207, ","]
   actual |> assertSubExpr (isCall "foo" (hasArgValues [isVal 1.0]))
   actual |> assertSubExpr (isProperty "yadda")
 
@@ -340,6 +358,20 @@ let ``Correctly parse list of inline elements`` () =
     let a = [1, 2, 3]"""
   actual |> assertSubExpr (isList [isVal 1.0; isVal 2.0; isVal 3.0])
   actual |> assertErrors []
+
+[<Test>]
+let ``Report error on unexpected comma in the middle of list expression`` () =
+  let actual = parse """
+    let a = [1, , 3]"""
+  actual |> assertSubExpr (isList [isVal 1.0; isVal 3.0])
+  actual |> assertErrors [212, ","]
+
+[<Test>]
+let ``Report error on unexpected comma at the end of list expression`` () =
+  let actual = parse """
+    let a = [1, 2, ]"""
+  actual |> assertSubExpr (isList [isVal 1.0; isVal 2.0])
+  actual |> assertErrors [212, ","]
 
 [<Test>]
 let ``Correctly parse list of elements with line breaks`` () =
@@ -371,6 +403,25 @@ let ``Report error and skip over unexpected tokens in list`` () =
 // --------------------------------------------------------------------------------------
 // TESTS: Commands
 // --------------------------------------------------------------------------------------
+
+[<Test>]
+let ``Report error on expression after completed expression command`` () = 
+  let actual = parse """
+    1 2
+    let b = 3"""
+  actual |> assertErrors [216, "2"]
+  actual |> assertLet "b" (hasSubExpr (isVal 3.0))
+  actual |> assertSubExpr (isVal 1.0)
+
+[<Test>]
+let ``Report error on invalid syntax aft the beginning of a command`` () = 
+  let actual = parse """
+    1 
+    : 2
+    let b = 3"""
+  actual |> assertErrors [216, ":"]
+  actual |> assertLet "b" (hasSubExpr (isVal 3.0))
+  actual |> assertSubExpr (isVal 1.0)
 
 [<Test>]
 let ``Report error on unifinished let and continue parsing`` () =
@@ -413,18 +464,17 @@ let ``Report error on nested expression and parse it as command`` () =
       3
         4 + 1
     let b = 1"""
-  actual |> assertCmds [""; ""; ""; "b"] [any; any; any; any]
-  actual |> assertErrors [216, "3"; 216, "4 + 1"]
+  actual |> assertCmds [""; ""; "b"] [any; any; any]
+  actual |> assertErrors [216, "3"]
   actual |> assertSubExpr (isVal 1.0)
-  actual |> assertSubExpr (isVal 4.0)
-
+  
 [<Test>]
 let ``Report error on nested expression after let and parse it as command`` () =
   let actual = parse """
     let a = 1 
       2
     let b = 3"""
-  actual |> assertCmds ["a"; ""; "b"] [hasSubExpr (isVal 1.0); hasSubExpr (isVal 2.0); hasSubExpr (isVal 3.0)]
+  actual |> assertCmds ["a"; ""; "b"] [hasSubExpr (isVal 1.0); any; hasSubExpr (isVal 3.0)]
   actual |> assertErrors [216, "2"]
 
 [<Test>]
@@ -436,15 +486,13 @@ let ``Correctly parse mix of let bindings and expression commands`` () =
   actual |> assertCmds ["a";"";"b"] [ any; hasSubExpr (isVal 3.0); any ]
   actual |> assertErrors []
 
-(*
 [<Test>]
 let ``Report error on expression after let binding and parse it as command`` () =
   let actual = parse """
     let a = 1 2
     let b = 3"""
-  actual |> assertCmds ["a"; ""; "b"] [hasSubExpr (isVal 1.0); hasSubExpr (isVal 2.0); hasSubExpr (isVal 3.0)]
+  actual |> assertCmds ["a"; ""; "b"] [hasSubExpr (isVal 1.0); any; hasSubExpr (isVal 3.0)]
   actual |> assertErrors [216, "2"]
-*)
 
 // --------------------------------------------------------------------------------------
 // TESTS: Binary operator precedence & parenthesis
@@ -475,7 +523,7 @@ let ``Correctly parses precedence of operators with nested chain`` () =
   actual |> assertSubExpr (isCall "foo" (hasArgValues [ fun e -> 
     equal "(1 + ((2 ^ ?) * 4))" (formatSimpleNumExpr e) 
     true ]))
-  actual |> assertErrors [203, "yadda"]
+  actual |> assertErrors []
 
 [<Test>]
 let ``Correctly parses parenthesized expression`` () =
@@ -534,14 +582,62 @@ let ``Report error when function is missing arrow``() =
   actual |> assertSubExpr (isFun "x" (hasSubExpr (isVal 2.0)))
 
 // --------------------------------------------------------------------------------------
-// TESTS: Explicit functions
+// TESTS: Placeholders
 // --------------------------------------------------------------------------------------
 
 [<Test>]
-let ``Ranges of identifiers in Olympic sample are correct`` = 
+let ``Can parse placeholder in member chain``() =
+  let actual = parse """
+    foo.[bar:'some name'].goo"""
+  actual |> assertErrors []
+  actual |> assertSubExpr (isProperty "goo")
+  actual |> assertSubExpr (isPlaceholder "bar" (isVariable "some name"))
+
+[<Test>]
+let ``Can parse placeholder containing a chain``() =
+  let actual = parse """
+    foo.[bar:'some name'.'another name'].goo"""
+  actual |> assertErrors []
+  actual |> assertSubExpr (isProperty "goo")
+  actual |> assertSubExpr (isPlaceholder "bar" (hasSubExpr (isVariable "some name")))
+  actual |> assertSubExpr (isPlaceholder "bar" (hasSubExpr (isProperty "another name")))
+
+[<Test>]
+let ``Can parse placeholder in multi-line member chain``() =
+  let actual = parse """
+    foo
+      .[bar:
+        'some name']
+      .goo"""
+  actual |> assertErrors []
+  actual |> assertSubExpr (isProperty "goo")
+  actual |> assertSubExpr (isPlaceholder "bar" (isVariable "some name"))
+
+[<Test>]
+let ``Report error when placeholder is missing body``() =
+  let actual = parse """
+    foo.[bar:].goo"""
+  actual |> assertErrors [205, "]"]
+  actual |> assertSubExpr (isProperty "goo")
+  actual |> assertSubExpr (isPlaceholder "bar" any)
+
+[<Test>]
+let ``Report error when placeholder is missing body and ident``() =
+  let actual = parse """
+    foo.[].goo"""
+  actual |> assertErrors [205, "]"]
+  actual |> assertSubExpr (isProperty "goo")
+  actual |> assertSubExpr (isPlaceholder "" any)
+
+// --------------------------------------------------------------------------------------
+// TESTS: Ranges of identifiers
+// --------------------------------------------------------------------------------------
+
+[<Test>]
+let ``Ranges of identifiers in Olympic sample are correct``() = 
   let actual = parse """
     let phelp =
-      olympics.'by athlete'.'United States'.'Michael Phelps'.data
+      olympics.'by athlete'.[athlete:'United States'.'Michael Phelps'].data
         .'group data'.'by Athlete'.'sum Gold'.then
         .'get series'.'with key Athlete'.'and value Gold'
 
@@ -554,6 +650,13 @@ let ``Ranges of identifiers in Olympic sample are correct`` =
 
     chart.columns([data, phelp], ["#F4C300","#3CB3EC"])
       .legend(position="none")
-  """
+    """
   actual |> assertErrors []
+  actual |> assertNamesMatch
+
+[<Test>]
+let ``Ranges of empty identifier is correct``() = 
+  let actual = parse """
+    olympics.foo.
+    """
   actual |> assertNamesMatch

@@ -1,16 +1,20 @@
-﻿module TheGamma.TypeProviders.Pivot
+﻿// ------------------------------------------------------------------------------------------------
+// Pivot type provider - for expressing data aggregation queries over a table
+// ------------------------------------------------------------------------------------------------
+module TheGamma.TypeProviders.Pivot
 
 open Fable.Core
 open Fable.Import
 
 open TheGamma
 open TheGamma.Babel
+open TheGamma.Babel.BabelOperators
 open TheGamma.Common
 open TheGamma.TypeProviders
 
-// ----------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
 // Operations that we can do on the table
-// ----------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
 
 type Aggregation = 
   | GroupKey
@@ -29,11 +33,12 @@ type Paging =
   | Take of string
   | Skip of string
   
+type FilterOperator = And | Or
 type Transformation = 
   | DropColumns of string list
   | SortBy of (string * SortDirection) list
   | GroupBy of string list * Aggregation list
-  | FilterBy of (string * bool * string) list
+  | FilterBy of FilterOperator * (string * bool * string) list
   | Paging of Paging list
   | Empty
   // One of these may be the last one
@@ -63,7 +68,7 @@ module Transform =
         | GetTheData -> []
         | Metadata -> ["metadata", []]
         | GetRange fld -> ["range", [fld]]
-        | FilterBy(conds) -> ["filter", (List.map (fun (f,b,v) -> f + (if b then " eq " else " neq ") + v) conds)]
+        | FilterBy(op, conds) -> ["filter", (match op with And -> "and" | Or -> "or")::(List.map (fun (f,b,v) -> Ast.escapeIdent f + (if b then " eq " else " neq ") + Ast.escapeIdent v) conds)]
         | DropColumns(columns) -> ["drop", columns]
         | SortBy(columns) -> ["sort", (List.map (fun (c, o) -> c + (if o = Ascending then " asc" else " desc")) columns)]
         | GroupBy(flds, aggs) -> ["groupby", (List.map (fun fld -> "by " + Ast.escapeIdent fld) flds) @ (List.map formatAgg aggs)]
@@ -136,20 +141,6 @@ let makeObjectType members =
 let isNumeric fld = fld = PrimitiveType.Number
 let isConcatenable fld = fld = PrimitiveType.String
 
-// From providers.fs
-let ident s = IdentifierExpression(s, None)
-let str v = StringLiteral(v, None)
-let bool v = BooleanLiteral(v, None)
-let arr l = ArrayExpression(l, None)
-
-let (?) (e:Expression) (s:string) = MemberExpression(e, IdentifierExpression(s, None), false, None)
-let (/?/) (e:Expression) a = MemberExpression(e, a, true, None)
-
-let (/@/) (e:Expression) (args) = CallExpression(e, args, None)
-let func v f = 
-  let body = BlockStatement([ReturnStatement(f (ident v), None)], None)
-  FunctionExpression(None, [IdentifierPattern(v, None)], body, false, false, None)
-
 let getTypeAndEmitter = function 
   | PrimitiveType.String -> Type.Primitive(PrimitiveType.String), id
   | PrimitiveType.Date -> Type.Primitive(PrimitiveType.String), fun e -> ident("Date")?parse /@/ [e]
@@ -158,15 +149,15 @@ let getTypeAndEmitter = function
   | PrimitiveType.Unit -> Type.Primitive(PrimitiveType.Unit), fun e -> NullLiteral(None)
 
 let propertyEmitter = 
-  { Emit = fun (this, _) -> this }
+  { Emit = fun this -> this }
 
 let makeMethodEmitter callid pars =
-  { Emit = fun (this, args) -> 
+  { Emit = fun this -> funcN (Seq.length pars) (fun args ->
       let args = arr [ for v in args -> v ]
-      this?addCall /@/ [str callid; args] }
+      this?addCall /@/ [str callid; args]) }
 
 let makeDataEmitter isPreview isSeries tfs = 
-  { Emit = fun (this, _) -> 
+  { Emit = fun this -> 
       // TODO: This is not properly recursively transforming values, but they're just int/string, so it's OK
       if isSeries then
         ident("series")?create /@/ 
@@ -178,12 +169,13 @@ let makeDataEmitter isPreview isSeries tfs =
             str "key"; str "value"; str "" ] }
 
 
-// ----------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
 // Transformations
-// ----------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
 
 type Context = 
   { Root : string
+    IgnoreFiltersInRange : bool
     LookupNamed : string -> Type
     InputFields : Field list
     Fields : Field list }
@@ -191,15 +183,19 @@ type Context =
 let rec makeProperty ctx name tfs = 
   let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box tfs  }
   let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box ctx.Fields  }
-  Member.Property(name, makePivotType ctx tfs, [meta1; meta2], propertyEmitter)
+  { Member.Name = name; Type = makePivotType ctx tfs; Metadata = [meta1; meta2]; Emitter = propertyEmitter }
   
 and makeMethod ctx name tfs callid args = 
   let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box tfs  }
   let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box ctx.Fields  }
-  Member.Method
-    ( name, [ for n, t in args -> n, false, Type.Primitive t ], 
-      (fun ts -> if ts = List.map (snd >> Type.Primitive) args then Some(makePivotType ctx tfs) else None),  
-      [meta1; meta2], makeMethodEmitter callid args )
+  { Member.Name = name; Metadata = [meta1; meta2]
+    Type = 
+      Type.Method
+        ( [ for n, t in args -> n, false, Type.Primitive t ],       
+          (fun ts -> 
+              if Types.listsEqual ts args (fun t1 (_, t2) -> Types.typesEqual t1 (Type.Primitive t2)) 
+                then Some(makePivotType ctx tfs) else None) )
+    Emitter = makeMethodEmitter callid args }
 
 and makeDataMember ctx name isPreview tfs =
   let fields = Transform.transformFields ctx.InputFields (List.rev tfs)
@@ -215,15 +211,15 @@ and makeDataMember ctx name isPreview tfs =
         let membs = 
           fields |> Array.ofSeq |> Array.map (fun fld ->
             let memTy, memConv = getTypeAndEmitter fld.Type
-            let emitter = { Emit = fun (inst, _) -> memConv <| (inst /?/ str fld.Name) }
-            Member.Property(fld.Name, memTy, [docMeta (Documentation.Text "")], emitter))
+            let emitter = { Emit = fun inst -> memConv <| (inst /?/ str fld.Name) }
+            { Member.Name = fld.Name; Type = memTy; Metadata = [docMeta (Documentation.Text "")]; Emitter = emitter })
         let recTyp = makeObjectType membs
         FSharpProvider.applyTypes (ctx.LookupNamed "series") [Type.Primitive PrimitiveType.Number; recTyp ], false
 
   let tfs = if isSeries then tfs else GetTheData::tfs
   let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box tfs }
   let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box ctx.Fields  }
-  Member.Property(name, dataTyp, [meta1; meta2], makeDataEmitter isPreview isSeries tfs)
+  { Member.Name = name; Type = dataTyp; Metadata = [meta1; meta2]; Emitter = makeDataEmitter isPreview isSeries tfs }
 
 and handleGetSeriesRequest ctx rest k v = 
   match k, v with
@@ -303,28 +299,32 @@ and handleGroupRequest ctx rest keys =
       yield! aggregationMembers ctx rest keys [GroupKey] ]
   |> makeObjectType  
 
-and handleFilterEqNeqRequest ctx rest (fld, eq) conds = async {
-  let tfs = if List.isEmpty conds then rest else FilterBy(conds)::rest
+and handleFilterEqNeqRequest ctx rest (fld, eq) op conds = async {
+  let tfs = if List.isEmpty conds then rest else FilterBy(op, conds)::rest
+  let tfs = 
+    if ctx.IgnoreFiltersInRange then tfs |> List.filter (function FilterBy _ -> false | _ -> true)
+    else tfs
   let url = ctx.Root + "?" + (GetRange(fld)::tfs |> List.rev |> Transform.toUrl)
   let! options = Http.Request("GET", url)
   let options = jsonParse<string[]> options
   return
     [ for opt in options do
-        yield makeProperty ctx opt (FilterBy((fld, eq, opt)::conds)::rest) ] 
+        yield makeProperty ctx opt (FilterBy(op, (fld, eq, opt)::conds)::rest) ] 
     |> makeObjectType }
 
-and handleFilterRequest ctx rest conds = 
-  let prefix = if List.isEmpty conds then "" else "and "
-  [ for field in ctx.Fields do
-      yield makeProperty ctx (prefix + field.Name + " is") (FilterBy((field.Name, true, "!")::conds)::rest) 
-      yield makeProperty ctx (prefix + field.Name + " is not") (FilterBy((field.Name, false, "!")::conds)::rest) 
-      //|> withDocs (sprintf "Group by %s" (field.Name.ToLower()))
-      //    ( "Creates groups based on the value of " + field.Name + " and calculte summary " +
-      //      "values for each group. You can specify a number of summary calculations in the " + 
-      //      "following list:")
-      //|> withCreateAction "Aggregation operations" 
+and handleFilterRequest ctx rest op conds = 
+  let prefixes = 
+    match conds, op with
+    | [], _ -> ["", And] 
+    | _::[], _ -> ["and ", And; "or ", Or]
+    | _, And -> ["and ", And] 
+    | _, Or -> ["or ", Or]
+  [ for prefix, op in prefixes do
+      for field in ctx.Fields do
+        yield makeProperty ctx (prefix + field.Name + " is") (FilterBy(op, (field.Name, true, "!")::conds)::rest) 
+        yield makeProperty ctx (prefix + field.Name + " is not") (FilterBy(op, (field.Name, false, "!")::conds)::rest) 
     if not (List.isEmpty conds) then
-      yield makeProperty ctx "then" (Empty::FilterBy(conds)::rest) ]
+      yield makeProperty ctx "then" (Empty::FilterBy(op, conds)::rest) ]
   |> makeObjectType  
 
 and makePivotTypeImmediate ctx tfs = async {
@@ -335,7 +335,7 @@ and makePivotTypeImmediate ctx tfs = async {
   | Empty ->
     return
       [ makeProperty ctx "group data" (GroupBy([], [])::rest) 
-        makeProperty ctx "filter data" (FilterBy([])::rest) 
+        makeProperty ctx "filter data" (FilterBy(And, [])::rest) 
         makeProperty ctx "sort data" (SortBy([])::rest) 
         makeProperty ctx "drop columns" (DropColumns([])::rest) 
         makeProperty ctx "paging" (Paging([])::rest) 
@@ -352,10 +352,10 @@ and makePivotTypeImmediate ctx tfs = async {
       return handleSortRequest ctx rest keys
   | DropColumns(dropped) ->
       return handleDropRequest ctx rest dropped
-  | FilterBy((fld, eq, "!")::conds) ->
-      return! handleFilterEqNeqRequest ctx rest (fld, eq) conds
-  | FilterBy(conds) ->
-      return handleFilterRequest ctx rest conds
+  | FilterBy(op, (fld, eq, "!")::conds) ->
+      return! handleFilterEqNeqRequest ctx rest (fld, eq) op conds
+  | FilterBy(op, conds) ->
+      return handleFilterRequest ctx rest op conds
   | GroupBy(flds, []) ->
       return handleGroupRequest ctx rest flds
   | GroupBy(flds, aggs) ->
@@ -391,14 +391,14 @@ and makePivotType ctx tfs =
 let makePivotExpression root = 
   NewExpression(ident("PivotContext"), [str root; ArrayExpression([], None)], None)
 
-let makePivotGlobalValue root name lookupNamed fields =
+let makePivotGlobalValue root name lookupNamed ignoreFilter fields =
   let fields = [ for f, t in fields -> { Name = f; Type = t }]
-  let typ = makePivotType { Fields = fields; InputFields = fields; LookupNamed = lookupNamed; Root = root } []
+  let typ = makePivotType { Fields = fields; InputFields = fields; LookupNamed = lookupNamed; Root = root; IgnoreFiltersInRange = ignoreFilter } []
   let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box []  }
   let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box fields  }
   ProvidedType.GlobalValue( name, [meta1; meta2], makePivotExpression root, typ)
 
-let providePivotType root name lookupNamed = async {
+let providePivotType root ignoreFilter name lookupNamed = async {
   let! membersJson = Http.Request("GET", root + "?metadata")
   let fields = JsHelpers.properties(jsonParse<obj> membersJson) |> Array.map (fun kv -> 
     let typ = 
@@ -408,4 +408,4 @@ let providePivotType root name lookupNamed = async {
       | "number" -> PrimitiveType.Number
       | s -> failwith (sprintf "The property '%s' has invalid type '%s'. Only 'string', 'number' and 'bool' are supported." kv.key s)
     kv.key, typ)
-  return makePivotGlobalValue root name lookupNamed fields }
+  return makePivotGlobalValue root name lookupNamed ignoreFilter fields }

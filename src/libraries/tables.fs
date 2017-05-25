@@ -35,19 +35,22 @@ type html =
 type table<'k,'v> =
   { data : series<'k,'v>
     showKey : bool option 
+    emptyText : string
     hiddenColumns : Set<string>
     addedColumns : list<string * ('v -> obj)> }
 
   static member create(data:series<_, _>) =
     { table.data = data
+      emptyText = "No data available"
       hiddenColumns = Set.empty
       addedColumns = []
       showKey = None }
 
-  member t.set(?title:string, ?showKey:bool) = 
+  member t.set(?title:string, ?showKey:bool, ?emptyText) = 
     { table.data = t.data.set(t.data.data, seriesName=defaultArg title t.data.seriesName)
       hiddenColumns = t.hiddenColumns
       addedColumns = t.addedColumns
+      emptyText = defaultArg emptyText t.emptyText
       showKey = match showKey with None -> t.showKey | sk -> sk }
 
   member t.hideColumns(names:string[]) =
@@ -85,26 +88,28 @@ type table<'k,'v> =
     async {
       try
         let! vs = t.data.data |> Async.AwaitFuture
+        if vs.Length = 0 then
+          return h?div ["class" => "placeholder"] [ h?p [] [ text t.emptyText ] ]
+        else 
+          let filteredProperties o =
+            properties o |> Array.filter (fun kv -> not (t.hiddenColumns.Contains kv.key))
 
-        let filteredProperties o =
-          properties o |> Array.filter (fun kv -> not (t.hiddenColumns.Contains kv.key))
-
-        let _, first = vs |> Seq.head
-        let headers = 
-          [ if isObject first then for kv in filteredProperties first -> text kv.key
-            else yield text t.data.valueName 
-            for k, _ in t.addedColumns -> text k ]
-        let showKey = match t.showKey with Some sk -> sk | _ -> not (isObject first)
-        return
-          [ for k, v in vs ->
-              let formattedVals =
-                [ if isObject v then for kv in filteredProperties v -> text (unbox kv.value)
-                  elif not (isNumber v) then yield text (v.ToString())
-                  elif isNaN (unbox v) then yield text ""
-                  else yield text (unbox v)  // formatNumber (unbox v) "0,0.00" ]
-                  for _, f in t.addedColumns -> formatAdded (f v) ] 
-              row showKey "td" (unbox k) formattedVals ]
-          |> makeTable showKey t.data.keyName headers
+          let _, first = vs |> Seq.head
+          let headers = 
+            [ if isObject first then for kv in filteredProperties first -> text kv.key
+              else yield text t.data.valueName 
+              for k, _ in t.addedColumns -> text k ]
+          let showKey = match t.showKey with Some sk -> sk | _ -> not (isObject first)
+          return
+            [ for k, v in vs ->
+                let formattedVals =
+                  [ if isObject v then for kv in filteredProperties v -> text (unbox kv.value)
+                    elif not (isNumber v) then yield text (v.ToString())
+                    elif isNaN (unbox v) then yield text ""
+                    else yield text (unbox v)  // formatNumber (unbox v) "0,0.00" ]
+                    for _, f in t.addedColumns -> formatAdded (f v) ] 
+                row showKey "td" (unbox k) formattedVals ]
+            |> makeTable showKey t.data.keyName headers
       with e ->
         Log.exn("live", "Getting data for table failed: %O", e) 
         return raise e }

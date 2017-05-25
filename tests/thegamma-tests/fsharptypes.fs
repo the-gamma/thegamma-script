@@ -180,7 +180,7 @@ let ``Report error when method parameter is given a wrong value`` () =
     let res = numbers.add("yo").head()
   """
   let actual = check code (isVariable "res") vars
-  actual |> assertErrors [308,"(\"yo\")"]
+  actual |> assertErrors [310,"(\"yo\")"]
 
 [<Test>]
 let ``Report error when generic method type cannot be inferred`` () =
@@ -188,4 +188,4 @@ let ``Report error when generic method type cannot be inferred`` () =
     let res = series.makeTwo(1, true).head()
   """
   let actual = check code (isVariable "res") vars
-  actual |> assertErrors [308,"(1, true)"]
+  actual |> assertErrors [310,"(1, true)"]

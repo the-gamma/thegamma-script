@@ -1,4 +1,5 @@
-﻿#if INTERACTIVEZ
+﻿#if INTERACTIVE
+#r "../../src/thegamma/bin/Debug/libraries.dll"
 #r "../../src/thegamma/bin/Debug/thegamma.dll"
 #r "../../packages/NUnit/lib/net45/nunit.framework.dll"
 #else
@@ -22,7 +23,7 @@ let checkCommands eq n (p1:Program) (p2:Program) =
 
 /// Parse sample that's indented with 2 spaces
 let parse (code:string) = 
-  let code = code.Replace("\n  ", "\n") 
+  let code = code.Replace("\n  ", "\n").TrimStart()
   code, code |> Parser.parseProgram |> fst
 
 /// Olympic sample code (in process of writing if `not completed`)

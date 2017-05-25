@@ -63,12 +63,14 @@
   </Target>
   -->
   <ItemGroup>
+    <Compile Include="compost.fs" />
     <Compile Include="tokenizer.fs" />
     <Compile Include="parser.fs" />
     <Compile Include="formatter.fs" />
     <Compile Include="binder.fs" />
     <Compile Include="simpletypes.fs" />
     <Compile Include="fsharptypes.fs" />
+    <Compile Include="pivottypes.fs" />
     <None Include="paket.references" />
   </ItemGroup>
   <ItemGroup>

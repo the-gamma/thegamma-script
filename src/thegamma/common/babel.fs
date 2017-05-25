@@ -1,5 +1,9 @@
 ﻿namespace TheGamma.Babel
 
+// ------------------------------------------------------------------------------------------------
+// Babel AST and formatting it as JSON
+// ------------------------------------------------------------------------------------------------
+
 open Fable
 open Fable.Core
 
@@ -199,6 +203,31 @@ module Serializer =
       "body" => Array.ofList (List.map serializeStatement prog.body)
       "directives" => box [||]
     ]
+
+// ------------------------------------------------------------------------------------------------
+// Operators that make constructing Babel ASTs easier
+// ------------------------------------------------------------------------------------------------
+
+module BabelOperators = 
+  let ident s = IdentifierExpression(s, None)
+  let str v = StringLiteral(v, None)
+  let bool v = BooleanLiteral(v, None)
+  let arr l = ArrayExpression(l, None)
+
+  let (?) (e:Expression) (s:string) = MemberExpression(e, IdentifierExpression(s, None), false, None)
+  let (/?/) (e:Expression) a = MemberExpression(e, a, true, None)
+
+  let (/@/) (e:Expression) (args) = CallExpression(e, args, None)
+  let func v f = 
+    let body = BlockStatement([ReturnStatement(f (ident v), None)], None)
+    FunctionExpression(None, [IdentifierPattern(v, None)], body, false, false, None)
+  
+  let funcN n f = 
+    let args = List.init n (fun i -> "_arg" + string i)
+    let body = BlockStatement([ReturnStatement(f (List.map ident args), None)], None)
+    FunctionExpression(None, List.map (fun s -> IdentifierPattern(s, None)) args, body, false, false, None)
+
+
 
 (*
 type NumberKind =

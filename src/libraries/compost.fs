@@ -43,6 +43,10 @@ type Value<[<Measure>] 'u> =
   | CAR of categorical<'u> * float
   | COV of continuous<'u>
 
+type Scale<[<Measure>] 'v> =
+  | Continuous of continuous<'v> * continuous<'v>
+  | Categorical of categorical<'v>[]
+
 type EventHandler<[<Measure>] 'vx, [<Measure>] 'vy> = 
   | MouseMove of (MouseEvent -> (Value<'vx> * Value<'vy>) -> unit)
   | MouseUp of (MouseEvent -> (Value<'vx> * Value<'vy>) -> unit)
@@ -60,7 +64,8 @@ type Orientation =
 type Shape<[<Measure>] 'vx, [<Measure>] 'vy> = 
   | Style of (Style -> Style) * Shape<'vx, 'vy>
   | Text of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * string
-  | Scale of option<continuous<'vx> * continuous<'vx>> * option<continuous<'vy> * continuous<'vy>> * Shape<'vx, 'vy>
+  | InnerScale of option<continuous<'vx> * continuous<'vx>> * option<continuous<'vy> * continuous<'vy>> * Shape<'vx, 'vy>
+  | OuterScale of option<Scale<'vx>> * option<Scale<'vy>> * Shape<'vx, 'vy>
   | Line of seq<Value<'vx> * Value<'vy>>
   | Area of seq<Value<'vx> * Value<'vy>>
   | Bar of continuous<'vx> * categorical<'vy>
@@ -155,12 +160,9 @@ module Svg =
 // ------------------------------------------------------------------------------------------------
 
 module Scales = 
-  type Scale<[<Measure>] 'v> =
-    | Continuous of continuous<'v> * continuous<'v>
-    | Categorical of categorical<'v>[]
-
   type ScaledShapeInner<[<Measure>] 'vx, [<Measure>] 'vy> = 
     | ScaledStyle of (Style -> Style) * ScaledShape<'vx, 'vy>
+    | ScaledOuterScale of option<Scale<'vx>> * option<Scale<'vy>> * ScaledShape<'vx, 'vy>
     | ScaledText of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * string    
     | ScaledLine of (Value<'vx> * Value<'vy>)[]
     | ScaledArea of (Value<'vx> * Value<'vy>)[]
@@ -180,7 +182,7 @@ module Scales =
     Scaled of outer:(Scale<'vx> * Scale<'vy>) * inner:(Scale<'vx> * Scale<'vy>) * ScaledShapeInner<'vx, 'vy>
 
   [<Fable.Core.Emit("$0.toFixed($1)")>]
-  let toFixed (num:float) (decs:float) : string = failwith "JS"
+  let toFixed (num:float) (decs:float) : string = System.Math.Round(num, int decs) |> string
 
   let generateContinuousRange (CO (lo:float<'u>)) (CO (hi:float<'u>)) = 
     let lo, hi = unbox lo, unbox hi 
@@ -201,7 +203,6 @@ module Scales =
     | Continuous(l1, h1), Continuous(l2, h2) -> Continuous(min l1 l2, max h1 h2)
     | Categorical(v1), Categorical(v2) -> Categorical(Array.distinct (Array.append v1 v2))
     | _ -> 
-      console.log(s1, s2)
       failwith "Cannot union continuous with categorical"
 
   // Replace scales in all immediately nested things that will
@@ -210,16 +211,21 @@ module Scales =
 
   let rec replaceScales outer (Scaled(_, inner, shape) as scaled) =
     match shape with
+    // Replace at the leafs
     | ScaledLine _ 
     | ScaledText _
     | ScaledColumn _
-    | ScaledBar _
+    | ScaledBar _    
     | ScaledArea _ -> Scaled(outer, inner, shape)
+    // Replace just top level scales
+    | ScaledOuterScale _ -> Scaled(outer, inner, shape)
+    // Propagate recursively
     | ScaledStyle(f, shape) -> Scaled(outer, inner, ScaledStyle(f, replaceScales outer shape))
     | ScaledPadding(pad, shape) -> Scaled(outer, inner, ScaledPadding(pad, replaceScales outer shape))
     | ScaledInteractive(f, shape) -> Scaled(outer, inner, ScaledInteractive(f, replaceScales outer shape))
     | ScaledLayered(shapes) -> Scaled(outer, inner, ScaledLayered(Array.map (replaceScales outer) shapes))
     | ScaledStack(orient, shapes) -> Scaled(outer, inner, ScaledStack(orient, Array.map (replaceScales outer) shapes))
+    // Stop propagating further
     | ScaledAxes _ -> scaled
 
   // From the leafs to the root, calculate the scales of
@@ -255,7 +261,12 @@ module Scales =
   // but outer scales can be replaced later by replaceScales
   let rec calculateScales<[<Measure>] 'ux, [<Measure>] 'uy> (shape:Shape<'ux, 'uy>) = 
     match shape with
-    | Scale(sx, sy, shape) ->
+    | OuterScale(sx, sy, shape) ->
+        let (Scaled((osx, osy), inner, _)) as scaled = calculateScales shape
+        let scales = defaultArg sx osx, defaultArg sy osy
+        Scaled(scales, inner, ScaledOuterScale(sx, sy, scaled))
+
+    | InnerScale(sx, sy, shape) ->
         let (Scaled((asx, asy), _, shape)) = calculateScales shape
         let scales = 
           (match sx with Some sx -> Continuous(sx) | _ -> asx), 
@@ -341,6 +352,12 @@ module Projections =
 
   type Projection<[<Measure>] 'vx, [<Measure>] 'vy, [<Measure>] 'ux, [<Measure>] 'uy> = 
     | Scale of (float<'ux> * float<'ux>) * (float<'uy> * float<'uy>)
+    
+    // given a projection that maps things to (0, 100), the floats
+    // specify subrange of the target domain, so i.e. specifying (0.2, 0.8) would
+    // result in all the vales being mapped to (20, 80)
+    | Rescale of (float * float) * (float * float) * Projection<'vx, 'vy, 'ux, 'uy> 
+
     | Padding of
         // padding from top, right, bottom, left 
         padding:(float<'uy> * float<'ux> * float<'uy> * float<'ux>) * 
@@ -364,6 +381,7 @@ module Projections =
         shape : ProjectedShape<'vx, 'vy>
     | ProjectedInteractive of seq<EventHandler<'vx, 'vy>> * ProjectedShape<'vx, 'vy>
 
+  /// Projection from values on the scales (specified) to pixels
   and ProjectedShape<[<Measure>] 'vx, [<Measure>] 'vy> =
     Projected of Projection<'vx, 'vy, 1, 1> * (Scale<'vx> * Scale<'vy>) * ProjectedShapeInner<'vx, 'vy>
 
@@ -388,6 +406,16 @@ module Projections =
     match projection, point with
     | Scale(tx, ty), (x, y) ->
         scaleOne tx sx x, scaleOne ty sy y 
+    
+    | Rescale((rlx, rhx), (rly, rhy), proj), point ->
+        let (lx, hx), (ly, hy) = getExtremes sx, getExtremes sy
+        let (CO x1, CO y1), (CO x2, CO y2) = project sx sy (lx, ly) proj, project sx sy (hx, hy) proj
+        let lx, hx, ly, hy = min x1 x2, max x1 x2, min y1 y2, max y1 y2
+
+        let (CO x, CO y) = project sx sy point proj 
+        let nx = if lx = hx then x else lx + (hx - lx) * ((x - lx) / (hx - lx) * (rhx - rlx) + rlx)
+        let ny = if ly = hy then y else ly + (hy - ly) * ((y - ly) / (hy - ly) * (rhy - rly) + rly)
+        (CO nx, CO ny)
 
     | Padding((t,r,b,l),(lx,hx,ly,hy),projection), _ ->
         //let (lx, hx), (ly, hy) = getExtremes sx, getExtremes sy
@@ -412,32 +440,48 @@ module Projections =
         let size = (thv - tlv) / float cats.Length
         let i = floor (v / size)
         let f = (v / size) - i
-        let i = if i < 0. then (float cats.Length) + i else i // Negative when thv < tlv
+        let i = if size < 0.<_> then (float cats.Length) + i else i // Negative when thv < tlv
         if int i < 0 || int i >= cats.Length then CAR(CA "<outside-of-range>", f)
         else CAR(cats.[int i], f)
 
    // project:    scales<v> * point<v> * proj<v -> u> -> point<u>   // v = -1 .. 1     u = 0px .. 100px
    // projectInv: scales<v> * point<u> * proj<v -> u> -> point<v>
 
+  let rec invertProj proj = 
+    match proj with
+    | Rescale(rx, ry, Padding(p, ex, proj)) -> Padding(p, ex, Rescale(rx, ry, proj))
+    | Padding(p, ex, Rescale(rx, ry, proj)) -> Rescale(rx, ry, Padding(p, ex, proj))
+    | _ -> proj
+
+
   let rec projectInv<[<Measure>] 'vx, [<Measure>] 'vy, [<Measure>] 'ux, [<Measure>] 'uy> 
       ((sx, sy):Scale<'vx> * Scale<'vy>) (point:continuous<'ux> * continuous<'uy>) 
       (projection:Projection<'vx, 'vy, 'ux, 'uy>) : Value<'vx> * Value<'vy> = 
     
     match projection, point with
+    | Rescale((rlx, rhx), (rly, rhy), projection), (CO x, CO y) ->
+        let (lx, hx), (ly, hy) = getExtremes sx, getExtremes sy
+        let (CO x1, CO y1), (CO x2, CO y2) = project sx sy (lx, ly) projection, project sx sy (hx, hy) projection
+        let lx, hx, ly, hy = min x1 x2, max x1 x2, min y1 y2, max y1 y2
+
+        // Inverse of project
+        let (CO ox, CO oy) = point 
+        let nx = lx + ((ox - lx) / (hx - lx) - rlx) / (rhx - rlx) * (hx - lx)
+        let ny = ly + ((oy - ly) / (hy - ly) - rly) / (rhy - rly) * (hy - ly)
+        projectInv (sx, sy) (CO nx, CO ny) projection
+
     | Padding((t, r, b, l), (lx, hx, ly, hy), projection), (CO x, CO y) ->
-        //match sx, sy with
-        ///| Continuous(lx, hx), Continuous(ly, hy) ->
         let (CO x1, CO y1) = project sx sy (lx, ly) projection
         let (CO x2, CO y2) = project sx sy (hx, hy) projection
         let lx, hx, ly, hy = min x1 x2, max x1 x2, min y1 y2, max y1 y2
         
         // Imagine point is in 20px .. 60px, calculate equivalent point in 0px .. 100px (add padding)
         let (CO ox, CO oy) = point 
-        let nx = (ox - l) / (hx - lx - l - r) * (hx - lx)
-        let ny = (oy - t) / (hy - ly - t - b) * (hy - ly)
+        //let nx = (ox - l) / (hx - lx - l - r) * (hx - lx)
+        //let ny = (oy - t) / (hy - ly - t - b) * (hy - ly)
+        let nx = (ox - lx - l) / (hx - lx - l - r) * (hx - lx) + lx
+        let ny = (oy - ly - t) / (hy - ly - t - b) * (hy - ly) + ly
         projectInv (sx, sy) (CO nx, CO ny) projection
-        //|  _ ->
-          //  failwith "TODO: projectInv for categorical scales"
 
     | Scale(tx, ty), (x, y) ->
         scaleOneInv tx sx x, scaleOneInv ty sy y 
@@ -447,6 +491,27 @@ module Projections =
     match shape with
     | Scaled(scales, _, ScaledStyle(style, shape)) ->
         Projected(projection, scales, ProjectedStyle(style, calculateProjections shape projection))
+
+    | Scaled((sx, sy), _, ScaledOuterScale(osx, osy, shape)) ->
+        //let pinner = Projection
+
+        // projection + shape scales determines mapping from shape scales to pixel space
+        // get range of osx/osy within scales and transform projection so that it only maps on this subrange
+        let projection = 
+          match osy with
+          | Some(oy) ->
+              let lsy, hsy = getExtremes sy
+              let lsy', hsy' = scaleOne (0.0, 1.0) sy lsy, scaleOne (0.0, 1.0) sy hsy
+              let loy, hoy = getExtremes oy
+              let (CO loy'), (CO hoy') = scaleOne (0.0, 1.0) sy loy, scaleOne (0.0, 1.0) sy hoy
+              Rescale((0.0, 1.0), (loy', hoy'), projection)
+          | _ -> 
+              projection
+
+        let (Projected(pbody, scales, nested)) = calculateProjections shape projection
+        //Projected(projection, scales, ProjectedStyle(style, ))
+        //failwith "hard!"
+        Projected(pbody, scales, nested)
 
     | Scaled(scales, _, ScaledLine line) -> 
         Projected(projection, scales, ProjectedLine line)
@@ -472,7 +537,7 @@ module Projections =
 
     | Scaled((sx, sy) as scales, _, ScaledAxes(grid, (lblsx, lblsy), shape)) ->
         let (lx, hx), (ly, hy) = getExtremes sx, getExtremes sy
-        let ppad = Padding((20.0, 20.0, (if lblsx.Length = 0 then 20.0 else 40.0), (if lblsy.Length = 0 then 20.0 else 100.0)), (lx, hx, ly, hy), projection)
+        let ppad = Padding((0.0, 20.0, (if lblsx.Length = 0 then 20.0 else 40.0), (if lblsy.Length = 0 then 20.0 else 100.0)), (lx, hx, ly, hy), projection)
         Projected(ppad, scales, ProjectedAxes(grid, (lblsx, lblsy), calculateProjections shape ppad))
 
     | Scaled(scales, _, ScaledStack(orient, shapes)) ->
@@ -607,8 +672,8 @@ module Events =
 
   let projectEvent scales projection event =
     match event with
-    | MouseEvent(kind, (COV x, COV y)) -> MouseEvent(kind, projectInv scales (x, y) projection)
-    | TouchEvent(kind, (COV x, COV y)) -> TouchEvent(kind, projectInv scales (x, y) projection)
+    | MouseEvent(kind, (COV x, COV y)) -> MouseEvent(kind, projectInv scales (x, y) (invertProj projection))
+    | TouchEvent(kind, (COV x, COV y)) -> TouchEvent(kind, projectInv scales (x, y) (invertProj projection))
     | MouseEvent _
     | TouchEvent _ -> failwith "TODO: projectEvent - not continuous"
     | MouseLeave -> MouseLeave
@@ -640,6 +705,12 @@ module Events =
     | ProjectedLayered shapes -> for shape in shapes do triggerEvent shape jse event
     | ProjectedInteractive(handlers, shape) ->
         let localEvent = projectEvent scales projection event
+
+        match localEvent with
+        | MouseEvent(MouseEventKind.Down, pt) ->
+            console.log("Local event: %O in scales: %O", pt, scales)
+        | _ -> ()
+
         if inScales scales localEvent then 
           for handler in handlers do 
             match localEvent, handler with
@@ -647,12 +718,12 @@ module Events =
             | MouseEvent(MouseEventKind.Move, pt), MouseMove(f) 
             | MouseEvent(MouseEventKind.Up, pt), MouseUp(f) 
             | MouseEvent(MouseEventKind.Down, pt), MouseDown(f) -> 
-                jse.preventDefault()
+                if jse <> null then jse.preventDefault()
                 f (unbox jse) pt
             | TouchEvent(TouchEventKind.Move, pt), TouchMove(f) 
             | TouchEvent(TouchEventKind.Start, pt), TouchStart(f) 
             | TouchEvent(TouchEventKind.End, pt), TouchEnd(f) -> 
-                jse.preventDefault()
+                if jse <> null then jse.preventDefault()
                 f (unbox jse) pt
             | MouseLeave, EventHandler.MouseLeave f -> f (unbox jse) 
             | MouseLeave, _ 

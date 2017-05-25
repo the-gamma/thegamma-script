@@ -1,4 +1,7 @@
-﻿module TheGamma.TypeChecker
+﻿// ------------------------------------------------------------------------------------------------
+// Type checker sets the Type properties of the Entities created by the Binder
+// ------------------------------------------------------------------------------------------------
+module TheGamma.TypeChecker
 
 open TheGamma
 open TheGamma.Ast
@@ -18,14 +21,6 @@ type CheckingContext =
 let addError ctx ent err = 
   ctx.Errors.Add(err ctx.Ranges.[ent.Symbol])
 
-let (|FindProperty|_|) (name:Name) (obj:ObjectType) = 
-  obj.Members |> Seq.tryPick (function 
-    Member.Property(name=n; typ=r; meta=m) when n = name.Name -> Some(m, r) | _ -> None) 
-
-let (|FindMethod|_|) (name:Name) (obj:ObjectType) = 
-  obj.Members |> Seq.tryPick (function 
-    Member.Method(name=n; arguments=args; meta=m; typ=r) when n = name.Name -> Some (m, args, r) | _ -> None) 
-
 /// Given a list of types, find the most frequent type (using Type.Any as the last resort)
 let inferListType typs = 
   typs 
@@ -38,16 +33,22 @@ let inferListType typs =
 
 /// Resolve type of parameter - parSpec can be Choice1Of2 with 
 /// parameter name or Choice2Of2 with parameter index.
-let resolveParameterType instTy methName parSpec = 
+let resolveParameterType instTy parSpec = 
   match instTy with
-  | Type.Object(FindMethod methName (_, args, _)) ->
-      match parSpec with
-      | Choice1Of2 name -> args |> Seq.pick (fun (n, _, t) -> if n = name then Some t else None) // TODO: Can crash
-      | Choice2Of2 idx -> let _, _, t = args.[idx] in t // TODO: Can crash
+  | Type.Method(args, _) -> 
+      let par = 
+        match parSpec with
+        | Choice1Of2 name -> args |> Seq.tryFind (fun (n, _, _) -> n = name)
+        | Choice2Of2 idx -> args |> Seq.tryItem idx  
+      match par with
+      | Some(_, _, t) -> t
+      | _ -> failwith "resolveParameterType: Parameter specification was incorrect"
   | _ -> failwith "resolveParameterType: Instance is not an object"
 
-
-let rec checkMethodCall (name:string) ctx memTy pars argList args = 
+/// Check method call - methodName is for logging only; parameterTypes and resultTypeFunc
+/// are the type information from `Type.Method` of the parent; `argList` and `args` are the
+/// actual type-checked arguments (argList is for storing errors only)
+let rec checkMethodCall (methodName:string) ctx parameterTypes resultTypeFunc argList args = 
 
   // Split arguments into position & name based and report 
   // error if there is non-named argument after named argument
@@ -65,7 +66,7 @@ let rec checkMethodCall (name:string) ctx memTy pars argList args =
   // Match actual arguments with the parameters and report
   // error if non-optional parameter is missing an assignment
   let matchedArguments = 
-    pars |> List.mapi (fun index (name, optional, typ) ->
+    parameterTypes |> List.mapi (fun index (name, optional, typ) ->
       let arg = 
         if index < positionBased.Length then Some(positionBased.[index]) 
         else Map.tryFind name nameBased 
@@ -77,10 +78,11 @@ let rec checkMethodCall (name:string) ctx memTy pars argList args =
           name, Type.Any, None)
 
   // Infer assignments for type parameters from actual arguments
-  match memTy [ for _, typ, _ in matchedArguments -> typ ] with
+  match resultTypeFunc [ for _, typ, _ in matchedArguments -> typ ] with
   | Some typ -> typ
   | None ->   
-      Log.trace("typechecker", "Invalid argument type when calling '%s'. Argument types: %O", name, [| for _, typ, _ in matchedArguments -> typ |])
+      Log.trace("typechecker", "Invalid argument type when calling '%s'. Argument types: %O", 
+        methodName, [| for _, typ, _ in matchedArguments -> typ |])
       Errors.TypeChecker.parameterConflict |> addError ctx argList
       Type.Any
   
@@ -97,6 +99,8 @@ and getType ctx (e:Entity) =
 /// have been reduced to non-delayed type before
 and typeCheckEntity ctx (e:Entity) = 
   match e.Kind with
+
+  // Type check global value reference (from globals) and variable reference (from antecedent)
   | EntityKind.GlobalValue(name, _) ->
       if not (ctx.Globals.ContainsKey(name.Name)) then
         Errors.TypeChecker.variableNotInScope name.Name |> addError ctx e
@@ -107,39 +111,43 @@ and typeCheckEntity ctx (e:Entity) =
   | EntityKind.Variable(_, inst) ->
       getType ctx inst      
 
-  | EntityKind.ChainElement(true, name, ident, Some inst, _) ->
+  // Member access gets type of a given member, call assumes the called thing was a method
+  | EntityKind.Member(inst, nameEnt & { Kind = EntityKind.MemberName name }) ->
       match getType ctx inst with 
       | Type.Any -> Type.Any
-      | Type.Object(FindProperty name (meta, resTyp)) -> 
-          e.Meta <- meta
-          resTyp
+      | Type.Object(FindMember name mem) -> 
+          e.Meta <- mem.Metadata
+          mem.Type
       | Type.Object obj ->
-          Errors.TypeChecker.propertyMissing name.Name obj.Members |> addError ctx ident
+          Errors.TypeChecker.memberMissing name.Name obj.Members |> addError ctx nameEnt
           Type.Any
       | typ ->
           Errors.TypeChecker.notAnObject name.Name typ |> addError ctx inst
           Type.Any
 
-  | EntityKind.ChainElement(false, name, ident, Some inst, Some ({ Kind = EntityKind.ArgumentList(ents) } as arglist)) ->
+  | EntityKind.Call(inst, { Kind = EntityKind.ArgumentList(ents) } & arglist) ->
+      let lastName = lastChainElement inst
       match getType ctx inst with 
       | Type.Any -> Type.Any
-      | Type.Object(FindMethod name (meta, args, resTyp)) ->  
-          e.Meta <- meta
-          checkMethodCall name.Name ctx resTyp args arglist ents
-      | Type.Object obj ->
-          Errors.TypeChecker.methodMissing name.Name obj.Members |> addError ctx ident
-          Type.Any
+      | Type.Method(parameterTypes, resultTypeFunc) ->  
+          checkMethodCall inst.Name ctx parameterTypes resultTypeFunc arglist ents
       | typ ->
-          Errors.TypeChecker.notAnObject name.Name typ |> addError ctx inst
+          Errors.TypeChecker.notAnMethod lastName.Name typ |> addError ctx inst
           Type.Any
 
-  | EntityKind.ChainElement(_, name, ident, None, _) ->
-      Errors.TypeChecker.callMissingInstance name.Name |> addError ctx ident
-      Type.Any
+  | EntityKind.Member(inst, _) ->
+      Log.error("typechecker", "typeCheckEntity: Member access is missing member name!")
+      failwith "typeCheckEntity: Member access is missing member name!"
 
-  | EntityKind.ChainElement(false, name, _, _, _) ->
-      failwith (sprintf "typeCheckEntity: Call to %s is missing argument list!" name.Name)
-      
+  | EntityKind.Call(inst, _) ->
+      Log.error("typechecker", "typeCheckEntity: Call to %s is missing argument list!", (lastChainElement inst).Name)
+      failwithf "typeCheckEntity: Call to %s is missing argument list!" (lastChainElement inst).Name
+
+  // Type of placeholder is the type of its body
+  | EntityKind.Placeholder(_, body) ->      
+      getType ctx body
+
+  // Operators and lists depend on the types of operands and elements...
   | EntityKind.Operator(l, operator, r) ->      
       [l; r] |> List.iteri (fun idx operand ->
         let typ = getType ctx operand 
@@ -156,19 +164,20 @@ and typeCheckEntity ctx (e:Entity) =
           Errors.TypeChecker.listElementTypeDoesNotMatch typ elty |> addError ctx a
       Type.List(typ)
 
-  | EntityKind.Binding(name, { Kind = EntityKind.CallSite(inst, methName, parSpec) }) ->
+  | EntityKind.Binding(name, { Kind = EntityKind.CallSite(inst, parSpec) }) ->
       // Binding node is used to resolve type of a lambda function variable. 
       // Its antecedent is `EntityKind.CallSite` containing reference to the method around it - 
       // assuming lambda appears in something like: `foo(10, fun x -> ...)`
-      match resolveParameterType (getType ctx inst) methName parSpec with
-      | Type.Function([tin], _) -> tin
+      match resolveParameterType (getType ctx inst) parSpec with
+      | Type.Method([_, _, tin], _) -> tin
       | _ -> failwith "typeCheckEntity: Expected parameter of function type"
 
   | EntityKind.Binding(name, _) ->
-      failwith (sprintf "typeCheckEntity: Variable binding %s is missing call site!" name.Name)
+      failwithf "typeCheckEntity: Variable binding %s is missing call site!" name.Name
 
   | EntityKind.Function(var, body) ->
-      Type.Function([getType ctx var], getType ctx body)
+      let resTyp = getType ctx body
+      Type.Method(["", false, getType ctx var], fun _ -> Some resTyp)
 
   // Entities with primitive types
   | EntityKind.Constant(Constant.Number _) -> Type.Primitive(PrimitiveType.Number)
@@ -182,35 +191,14 @@ and typeCheckEntity ctx (e:Entity) =
   | EntityKind.RunCommand _ -> Type.Any
   | EntityKind.ArgumentList _ -> Type.Any
   | EntityKind.NamedParam _ -> Type.Any
-  | EntityKind.NamedMember _ -> Type.Any
   | EntityKind.CallSite _ -> Type.Any
   | EntityKind.Program _ -> Type.Any
+  | EntityKind.MemberName _ -> Type.Any
 
 
 /// Perform type applications & evaluate delayed types
 let rec evaluateDelayedType topLevel (t:Type) = async {
   match t with
-(*  | Type.Object(obj) when topLevel ->
-      let! members = obj.Members |> Async.Array.map (fun m -> async {
-        match m with
-        | Member.Method(n, args, typ, doc, e) -> 
-            let! args = args |> Async.map (fun (n, opt, t) -> async {
-              let! t = evaluateDelayedType false t
-              return n, opt, t }) 
-            return Member.Method(n, args, typ, doc, e)
-        | prop -> return prop })
-      let obj = 
-        { new ObjectType with 
-            member x.Members = members
-            member x.TypeEquals t2 = obj.TypeEquals t2 }
-      return Type.Object obj
-  | Type.Function(t1s, t2) ->
-      let! t2 = evaluateDelayedType topLevel t2
-      let! t1s = Async.map (evaluateDelayedType topLevel) t1s
-      return Type.Function(t1s, t2)
-  | Type.List(t) ->
-      let! t = evaluateDelayedType topLevel t
-      return Type.List(t) *)
   | Type.Delayed(f) ->
       let! t = Async.AwaitFuture f
       return! evaluateDelayedType topLevel t

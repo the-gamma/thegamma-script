@@ -1,4 +1,7 @@
-﻿module TheGamma.Live.Pivot
+﻿// ------------------------------------------------------------------------------------------------
+// Live preview for pivot type provider
+// ------------------------------------------------------------------------------------------------
+module TheGamma.Live.Pivot
 
 open Fable.Core
 open Fable.Import
@@ -28,7 +31,7 @@ let pickMetaByType ctx typ metas =
 
 let pickPivotFields expr =
   match expr.Entity with
-  | Some { Kind = EntityKind.ChainElement _; Meta = m } 
+  | Some { Kind = EntityKind.Member _; Meta = m } 
   | Some { Kind = EntityKind.GlobalValue _; Meta = m } 
   | Some { Kind = EntityKind.Variable(_, { Meta = m }) } -> 
       match pickMetaByType "http://schema.thegamma.net/pivot" "Fields" m with
@@ -37,12 +40,13 @@ let pickPivotFields expr =
   | _ -> None
 
 let pickPivotTransformations expr =
-  match expr.Entity with
-  | Some { Kind = EntityKind.ChainElement _; Meta = m } -> 
+  match expr with
+  | { Node = Expr.Call({ Entity = Some { Kind = EntityKind.Member _; Meta = m } }, _) }
+  | { Entity = Some { Kind = EntityKind.Member _; Meta = m } } -> 
       match pickMetaByType "http://schema.thegamma.net/pivot" "Transformations" m with
       | Some m -> Some(unbox<TypeProviders.Pivot.Transformation list> m)
       | _ -> None
-  | Some { Kind = EntityKind.GlobalValue _; Meta = m } -> 
+  | { Entity = Some { Kind = EntityKind.GlobalValue _; Meta = m } } -> 
       Some([])
   | _ -> None
 
@@ -53,6 +57,18 @@ let commandAtLocation loc (program:Program) =
 // ------------------------------------------------------------------------------------------------
 // Pivot editor: Splitting pivot transformations into sections
 // ------------------------------------------------------------------------------------------------
+
+/// Represents a chain such as `foo.bar(1).goo`, potentially 
+/// inside a command (that may contain things like `let` etc.)
+type NestedChain = 
+  { // List containing Expr.Member, Expr.Call and Expr.Variable nodes 
+    // from a call chain with their starting offset
+    Chain : (int * Node<Expr>) list }
+
+/// Represents a tab of the pivot editor (with all nodes that represent the transform)
+type PivotSection = 
+  { Transformation : Pivot.Transformation   
+    Nodes : Node<Expr> list }
 
 let transformName = function
   | Pivot.DropColumns _ -> "drop columns"
@@ -65,11 +81,7 @@ let transformName = function
   | Pivot.SortBy _ -> "sort by"
   | Pivot.GetRange _ | Pivot.Metadata _ -> failwith "Unexpected get range or metadata"
 
-type PivotSection = 
-  { Transformation : Pivot.Transformation   
-    Nodes : Node<Expr> list }
-
-let createPivotSections tfss = 
+let createPivotSections (ch:NestedChain) = 
   let rec loop acc (currentTfs, currentEnts, currentLength) = function
     | (e, tfs)::tfss when 
           transformName (List.head tfs) = transformName currentTfs && 
@@ -82,7 +94,7 @@ let createPivotSections tfss =
           let current = { Transformation = currentTfs; Nodes = List.rev currentEnts }
           List.rev (current::acc)
     
-  let tfss = tfss |> List.choose (fun node ->
+  let tfss = ch.Chain |> List.choose (fun (_, node) ->
     match pickPivotTransformations node with
     | Some(tfs) ->
         let tfs = tfs |> List.filter (function Pivot.Empty -> false | _ -> true)
@@ -92,30 +104,20 @@ let createPivotSections tfss =
   | (e, tfs)::tfss -> loop [] (List.head tfs, [e], List.length tfs) tfss
   | [] -> []
 
+
 let rec collectChain acc node =
   match node.Node with
-  | Expr.Call(Some e, n, _) 
-  | Expr.Property(e, n) -> collectChain ((n.Range.Start, node)::acc) e
+  | Expr.Call(e, a) -> collectChain ((a.Range.Start, node)::acc) e
+  | Expr.Member(e, n) -> collectChain ((n.Range.Start, node)::acc) e
   | Expr.Variable(n) -> Some((n.Range.Start, node)::acc)
   | _ -> None
 
 let rec collectFirstChain expr = 
   match collectChain [] expr with
-  | Some((_::_) as chain) -> Some(id, chain)
+  | Some((_::_) as chain) -> Some { Chain = chain }
   | _ ->
   match expr with
-  | { Node = ExprNode(es, ns) } -> 
-      let rec loop acc es =   
-        match es with 
-        | [] -> None
-        | e::es ->
-            match collectFirstChain e with 
-            | None -> loop (e::acc) es
-            | Some(recreate, chain) ->
-                let recreate newChain =
-                  { expr with Node = rebuildExprNode e.Node (List.rev acc @ [ recreate newChain ] @ es) ns }
-                Some(recreate, chain)
-      loop [] es
+  | { Node = ExprNode(es, ns) } -> es |> Seq.tryPick collectFirstChain
   | _ -> None
 
 // ------------------------------------------------------------------------------------------------
@@ -159,8 +161,7 @@ let withPivotState (pivotState:PivotEditorState) state =
 let findPreview trigger globals (ent:Entity) = 
   let nm = { Name.Name="preview" }
   match ent.Type with 
-  | Some(Type.Object(TypeChecker.FindMethod nm _))
-  | Some(Type.Object(TypeChecker.FindProperty nm _)) ->
+  | Some(Type.Object(FindMember nm _)) ->
       let res = Interpreter.evaluate globals ent  
       let res = res |> FsOption.bind (fun p -> p.Preview.Value)
       match res with
@@ -180,19 +181,24 @@ let findPreview trigger globals (ent:Entity) =
   | _ ->
       h?div [ "class" => "placeholder" ] [ text "This block does not have a preview" ]
 
+
+/// Recreate editor state based on the current source code and cursor location
+/// (this is called after the cursor moves or code changes)
 let updateBody trigger state = 
   match commandAtLocation state.Location state.Program with
   | Some(cmd) ->
       let line, col = state.Mapper.AbsoluteToLineCol(cmd.Range.End + 1)
       let (Command.Expr expr | Command.Let(_, expr)) = cmd.Node 
       match collectFirstChain expr with
-      | Some(recreate, chain) ->
-          let sections = chain |> List.map snd |> createPivotSections 
-          let _, first = chain |> List.head
-          match chain |> List.filter (fun (start, node) -> state.Location >= start) |> List.tryLast with
+      | Some(ch) ->
+          let sections = createPivotSections ch
+          let _, first = ch.Chain |> List.head
+          match ch.Chain |> List.filter (fun (start, node) -> state.Location >= start) |> List.tryLast with
           | Some(_, selNode) when not (List.isEmpty sections) ->
               let preview = findPreview trigger state.Globals selNode.Entity.Value
-              let ps = { Menus = Hidden; Focus = None; FirstNode = first; SelectedEntity = selNode.Entity.Value; Sections = sections; Body = expr; Preview = preview }
+              let ps = 
+                { Menus = Hidden; Focus = None; FirstNode = first; SelectedEntity = selNode.Entity.Value
+                  Sections = sections; Body = expr; Preview = preview }
               state |> withPivotState ps |> Some
           | _ -> None
       | _ -> None
@@ -211,16 +217,17 @@ let editorLocation (mapper:LocationMapper) startIndex endIndex =
 let selectName nd state = 
   let rng =
     match nd with
-    | { Node = Expr.Call(_, n, _) | Expr.Property(_, n) } -> n.Range
+    | { Node = Expr.Member(_, n) } -> n.Range
     | _ -> nd.Range
   let loc = editorLocation state.Mapper rng.Start (rng.End+1)
   { state with Selection = Some loc }
 
+/// Collect the chain and call specified fnction with parsed body, chain and sections
 let tryTransformChain f state = 
   match collectFirstChain state.State.Body with
-  | Some(recreate, chain) ->
-      let sections = chain |> List.map snd |> createPivotSections 
-      f state.State.Body recreate (List.map snd chain) sections |> hideMenus
+  | Some(ch) ->
+      let sections = ch |> createPivotSections 
+      f state.State.Body (List.map snd ch.Chain) sections |> hideMenus
   | _ -> hideMenus state
 
 let marker = "InsertPropertyHere"
@@ -237,21 +244,22 @@ let reconstructChain state (body:Node<_>) newNodes =
     List.tail newNodes 
     |> List.fold (fun prev part ->
       match part.Node with 
-      | Expr.Property(_, n) -> { part with Node = Expr.Property(prev, n) }
-      | Expr.Call(_, n, args) -> { part with Node = Expr.Call(Some prev, n, args) }
-      | _ -> failwith "Unexpected node in call chain") (List.head newNodes)
+      | Expr.Member(_, n) -> { part with Node = Expr.Member(prev, n) }
+      | Expr.Call(_, args) -> { part with Node = Expr.Call(prev, args) }
+      | _ -> failwith "reconstructChain: Unexpected node in call chain") (List.head newNodes)
 
   let newCode = (Ast.formatSingleExpression newBody).Trim()
   let newCode = state.Code.Substring(0, body.Range.Start) + newCode + state.Code.Substring(body.Range.End + 1)
   { state with Code = newCode }
 
-let createChainNode args name = 
+let createChainNodes args name = 
   let node nd = Ast.node {Start=0; End=0} nd
+  let mem = node (Expr.Member(node Expr.Empty, node (Expr.Variable(node {Name=name}))))
   match args with
-  | None -> node (Expr.Property(node Expr.Empty, node {Name=name}))
+  | None -> [ mem ]
   | Some args -> 
       let args = args |> List.map (fun a -> { Name = None; Value = node a })
-      node (Expr.Call(None, node {Name=name}, node args))
+      [ mem; node (Expr.Call(mem, node args)) ] 
 
 let getWhiteBeforeAndAfterSections firstNode sections =
   let dominantWhite whites = 
@@ -271,10 +279,8 @@ let insertWhiteAroundSection before after section =
       section.Nodes |> List.mapi (fun i node ->
         let node = 
           match before, node with
-          | Some before, { Node = Expr.Property(inst, n) } when i = 0 -> 
-              { node with Node = Expr.Property(inst, { n with WhiteBefore = before }) }
-          | Some before, { Node = Expr.Call(inst, n, args) } when i = 0 -> 
-              { node with Node = Expr.Call(inst, { n with WhiteBefore = before }, args) }
+          | Some before, { Node = Expr.Member(inst, n) } when i = 0 -> 
+              { node with Node = Expr.Member(inst, { n with WhiteBefore = before }) }
           | _ -> node
         let node = 
           match after, node with
@@ -296,7 +302,7 @@ let rec updatePivotState trigger state event =
       state |> withPivotState { state.State with Menus = menu } |> Some
   
   | SelectChainElement(dir) ->
-      state |> tryTransformChain (fun body recreate chain sections ->
+      state |> tryTransformChain (fun body chain sections ->
         let rec loop before (chain:Node<_> list) = 
           match chain with
           | c::chain when c.Range.End + 1 < state.Location -> loop c chain
@@ -316,25 +322,25 @@ let rec updatePivotState trigger state event =
       { state with Code = newCode; Selection = Some location } |> Some
 
   | AddElement(sym, name, args) ->
-      state |> tryTransformChain (fun body recreate chain sections ->
+      state |> tryTransformChain (fun body chain sections ->
         let newNodes =
           chain |> List.collect (fun nd -> 
             if nd.Entity.Value.Symbol <> sym then [nd]
-            else [nd; createChainNode args marker] )        
+            else nd :: (createChainNodes args marker) )        
         reconstructChain state body newNodes
         |> replaceAndSelectMarker name) |> Some
 
   | ReplaceElement(sym, name, args) ->
-      state |> tryTransformChain (fun body recreate chain sections ->
+      state |> tryTransformChain (fun body chain sections ->
         let newNodes =
-          chain |> List.map (fun nd -> 
-            if nd.Entity.Value.Symbol <> sym then nd
-            else createChainNode args marker )
+          chain |> List.collect (fun nd -> 
+            if nd.Entity.Value.Symbol <> sym then [nd]
+            else createChainNodes args marker )
         reconstructChain state body newNodes
         |> replaceAndSelectMarker name) |> Some
 
   | RemoveElement sym ->
-      state |> tryTransformChain (fun body recreate chain sections ->
+      state |> tryTransformChain (fun body chain sections ->
         let beforeDropped = chain |> List.takeWhile (fun nd -> nd.Entity.Value.Symbol <> sym) |> List.tryLast
         let beforeDropped = defaultArg beforeDropped (List.head chain)
         let newNodes = chain |> List.filter (fun nd -> nd.Entity.Value.Symbol <> sym)        
@@ -342,18 +348,20 @@ let rec updatePivotState trigger state event =
         |> selectName beforeDropped) |> Some
 
   | RemoveSection sym ->
-      state |> tryTransformChain (fun body recreate chain sections ->
+      state |> tryTransformChain (fun body chain sections ->
         let beforeDropped = 
           sections |> List.map (fun sec -> List.head sec.Nodes) 
           |> List.takeWhile (fun nd -> nd.Entity.Value.Symbol <> sym) |> List.tryLast
         let beforeDropped = defaultArg beforeDropped (List.head chain)
         let newSections = sections |> List.filter (fun sec -> (List.head sec.Nodes).Entity.Value.Symbol <> sym)
-        let newNodes = List.head chain :: (newSections |> List.collect (fun sec -> sec.Nodes))
+        let newNodes = newSections |> List.collect (fun sec -> sec.Nodes)
         reconstructChain state body newNodes
         |> selectName beforeDropped ) |> Some
 
   | AddTransform tfs ->
-      state |> tryTransformChain (fun body recreate chain sections ->
+      state |> tryTransformChain (fun body chain sections ->
+        Log.trace("live", "Adding transform to chain: %O", Array.ofSeq chain)
+        Log.trace("live", "Existing sections are: %O", Array.ofSeq sections)
         let whiteBefore, whiteAfter = getWhiteBeforeAndAfterSections (List.head chain) sections
         let node n = Ast.node { Start=0; End=0; } n
 
@@ -379,16 +387,18 @@ let rec updatePivotState trigger state event =
           | Pivot.GroupBy([], _) | Pivot.Empty -> "", []
 
         let newSection =
-          { Transformation = tfs; Nodes = List.map (createChainNode None) properties }
+          { Transformation = tfs; Nodes = List.collect (createChainNodes None) properties }
           |> insertWhiteAroundSection (Some whiteBefore) (Some whiteAfter)
 
         let closeFirstSection = function
           | section::sections -> 
               let section =
                 match section.Transformation, List.last section.Nodes with
-                | Pivot.Paging _, { Node = Expr.Call(_, n, _) } when n.Node.Name = "take" -> section 
-                | _, { Node = Expr.Property(_, n) } when n.Node.Name = "then" -> section 
-                | _ -> { section with Nodes = section.Nodes @ [createChainNode None "then"] }
+                | Pivot.Paging _, { Node = Expr.Call({ Node = Expr.Member(_, { Node = Expr.Variable(n) }) }, _) } 
+                    when n.Node.Name = "take" -> section 
+                | _, { Node = Expr.Member(_, { Node = Expr.Variable n }) } 
+                    when n.Node.Name = "then" -> section 
+                | _ -> { section with Nodes = section.Nodes @ (createChainNodes None "then") }
               (insertWhiteAroundSection None (Some whiteAfter) section) :: sections
           | [] -> []
 
@@ -399,7 +409,7 @@ let rec updatePivotState trigger state event =
           | sections -> List.rev (newSection::closeFirstSection sections)
               
         Log.trace("live", "Inserted section: %O", Array.ofSeq newSections)
-        let newNodes = List.head chain :: (newSections |> List.collect (fun sec -> sec.Nodes))
+        let newNodes = newSections |> List.collect (fun sec -> sec.Nodes)
         reconstructChain state body newNodes
         |> replaceAndSelectMarker firstProperty ) |> Some
 
@@ -411,7 +421,7 @@ let rec updatePivotState trigger state event =
 let renderNodeList trigger nodes =
   [ for nd in nodes do
       match nd.Node with
-      | Expr.Property(_, n) when n.Node.Name <> "then" ->
+      | Expr.Member(_, { Node = Expr.Variable n }) when n.Node.Name <> "then" ->
           yield h?span [] [
             h?a ["click" =!> trigger (SelectRange(n.Range)) ] [
               text n.Node.Name 
@@ -428,12 +438,14 @@ let renderContextMenu trigger =
   ]
 
 let renderAddPropertyMenu trigger f nodes =
-  [ let lastNode = nodes |> List.rev |> List.find (function { Node = Expr.Property(_, n) } -> n.Node.Name <> "then" | _ -> true) 
+  [ let lastNode = nodes |> List.rev |> List.find (function 
+      | { Node = Expr.Member(_, { Node = Expr.Variable n }) } -> n.Node.Name <> "then" 
+      | _ -> true) 
     match lastNode.Entity.Value.Type with
     | Some(Type.Object obj) ->
         let members = 
           obj.Members 
-          |> Seq.choose (function Member.Property(name=n) when f n -> Some n | _ -> None)
+          |> Seq.choose (fun m -> if f m.Name then Some m.Name else None)
           |> Seq.sort
         yield h?ul [] [
           for n in members ->
@@ -447,7 +459,7 @@ let renderSection triggerEvent section =
   let trigger action = fun _ (e:Event) -> e.cancelBubble <- true; triggerEvent (CustomEvent(action))
   let triggerWith f = fun el (e:Event) -> e.cancelBubble <- true; triggerEvent (CustomEvent(f el))
   let getNodeNameAndSymbol = function
-    | Some { Entity = Some e; Node = Expr.Property(_, n) } -> n.Node.Name, Some e.Symbol
+    | Some { Entity = Some e; Node = Expr.Member(_, { Node = Expr.Variable n }) } -> n.Node.Name, Some e.Symbol
     | _ -> "", None
   [ match section with
     | Some { Nodes = nodes; Transformation = Pivot.GetSeries _ } ->
@@ -468,12 +480,11 @@ let renderSection triggerEvent section =
                 | Some selSym -> ReplaceElement(selSym, (unbox<HTMLSelectElement> el).value, None)) ] [
               if keyName = "" then yield h?option [ "value" => ""; "selected" => "selected" ] [ text "" ]
               for m in obj.Members do
-                match m with
-                | Member.Property(name=n) when n.StartsWith("with key") ->
-                    yield h?option [  
-                      yield "value" => n
-                      if keyName = n then yield "selected" => "selected" ] [ text (n.Replace("with key ", "")) ] 
-                | _ -> ()
+                let n = m.Name
+                if n.StartsWith("with key") then
+                  yield h?option [  
+                    yield "value" => n
+                    if keyName = n then yield "selected" => "selected" ] [ text (n.Replace("with key ", "")) ] 
             ]
         | _ -> ()
         match keyNode with
@@ -485,12 +496,11 @@ let renderSection triggerEvent section =
                 | Some selSym -> ReplaceElement(selSym, (unbox<HTMLSelectElement> el).value, None)) ] [
               if valName = "" then yield h?option [ "value" => ""; "selected" => "selected" ] [ text "" ]
               for m in obj.Members do
-                match m with
-                | Member.Property(name=n) when n.StartsWith("and value") ->
-                    yield h?option [  
-                      yield "value" => n
-                      if valName = n then yield "selected" => "selected" ] [ text (n.Replace("and value ", "")) ] 
-                | _ -> ()
+                let n = m.Name
+                if n.StartsWith("and value") then
+                  yield h?option [  
+                    yield "value" => n
+                    if valName = n then yield "selected" => "selected" ] [ text (n.Replace("and value ", "")) ] 
             ]
         | _ -> ()
 
@@ -509,22 +519,22 @@ let renderSection triggerEvent section =
                 | Some selSym -> ReplaceElement(selSym, (unbox<HTMLSelectElement> el).value, None)) ] [
               if selName = "" then yield h?option [ "value" => ""; "selected" => "selected" ] [ text "" ]
               for m in obj.Members do
-                match m with
-                | Member.Property(name=n) when n.StartsWith("by") ->
-                    yield h?option [  
-                      yield "value" => n
-                      if selName = n then yield "selected" => "selected" ] [ text n ] 
-                | _ -> ()
+                let n = m.Name
+                if n.StartsWith("by") then
+                  yield h?option [  
+                    yield "value" => n
+                    if selName = n then yield "selected" => "selected" ] [ text n ] 
             ]
         | _ -> ()
         yield! renderNodeList trigger aggNodes  
         yield renderContextMenu trigger
-
+        
     | Some { Nodes = nodes; Transformation = Pivot.Paging _ } ->                    
-        let methods = nodes |> List.map (function { Node = Expr.Call(_, n, _) } -> n.Node.Name | _ -> "") |> set
+        let methods = nodes |> List.map (function { Node = Expr.Member(_, { Node = Expr.Variable n }) } -> n.Node.Name | _ -> "") |> set
         for nd in nodes do
+          Log.error("live", "Paging node: %O", nd)
           match nd.Node with
-          | Expr.Call(_, n, { Node = [arg] }) ->
+          | Expr.Call({ Node = Expr.Member(_, { Node = Expr.Variable n }) }, { Node = [arg] }) ->
               let removeOp =
                 if n.Node.Name = "take" then ReplaceElement(nd.Entity.Value.Symbol, "then", None)
                 else RemoveElement(nd.Entity.Value.Symbol)
@@ -550,7 +560,7 @@ let renderSection triggerEvent section =
 
     | Some { Nodes = nodes; Transformation = Pivot.SortBy _ } ->
         let props = nodes |> List.choose (function
-          | { Node = Expr.Property(_, n); Entity = Some { Symbol = sym} }
+          | { Node = Expr.Member(_, { Node = Expr.Variable n }); Entity = Some { Symbol = sym} }
               when n.Node.Name <> "then" && n.Node.Name <> "sort data" -> Some(sym, n) | _ -> None)
         let last = List.tryLast props
         for sym, n in props ->
@@ -595,7 +605,7 @@ let renderPivot triggerEvent (state:LiveState<_>) =
           let secSymbol = (sec.Nodes |> List.head).Entity.Value.Symbol
           let identRange = 
             match sec.Nodes with
-            | { Node = Expr.Variable n | Expr.Call(_, n, _) | Expr.Property(_, n) }::_ -> n.Range
+            | { Node = Expr.Variable n | Expr.Member(_, { Node = Expr.Variable n }) }::_ -> n.Range
             | _ -> failwith "Unexpected node in pivot call chain" 
 
           h?li ["class" => if selected then "selected" else ""] [ 
@@ -617,7 +627,7 @@ let renderPivot triggerEvent (state:LiveState<_>) =
         if state.State.Menus = AddDropdownOpen then 
           yield h?ul [] [
             yield h?li [] [ h?a [ clickHandler(Pivot.DropColumns []) ] [ text "drop columns"] ]
-            yield h?li [] [ h?a [ clickHandler(Pivot.FilterBy []) ] [ text "filter by"] ]
+            yield h?li [] [ h?a [ clickHandler(Pivot.FilterBy(Pivot.And, [])) ] [ text "filter by"] ]
             yield h?li [] [ h?a [ clickHandler(Pivot.GroupBy([], [])) ] [ text "group by"] ]
             yield h?li [] [ h?a [ clickHandler(Pivot.Paging []) ] [ text "paging"] ]
             yield h?li [] [ h?a [ clickHandler(Pivot.SortBy []) ] [ text "sort by"] ]
@@ -642,7 +652,7 @@ let renderPivot triggerEvent (state:LiveState<_>) =
         match state.State.Menus, selSec with
         | ContextualDropdownOpen, Some { Nodes = nodes; Transformation = Pivot.Paging _ } ->
             let methods = nodes |> List.choose (function 
-              | { Node = Expr.Property(_, n) | Expr.Call(_, n, _); Entity = e } -> 
+              | { Node = Expr.Member(_, { Node = Expr.Variable n }); Entity = e } -> 
                   Some(n.Node.Name, e.Value.Symbol) | _ -> None) |> dict
             let lastSym = (List.last nodes).Entity.Value.Symbol
             let firstSym = (List.head nodes).Entity.Value.Symbol
