@@ -90,7 +90,7 @@ let zzzzz() =
 let zzzzzzz() = 
   let sx : Scale<1> = Continuous(CO 1000.0, CO 2000.0)
   let sy : Scale<1> = Categorical [| CA "A"; CA "B"; CA "C" |]
-  let (xl, xh), (yl, yh) = Projections.getExtremes sx, Projections.getExtremes sy
+  let (xl, xh), (yl, yh) = Scales.getExtremes sx, Scales.getExtremes sy
   let proj = 
     Projections.Rescale((0.0, 1.0), (0.5, 0.6), 
       Projections.Padding((10.,10.,10.,10.), 
@@ -107,7 +107,7 @@ let zzzzzzz() =
 let zzzzzzzz() = 
   let sx : Scale<1> = Continuous(CO 1000.0, CO 2000.0)
   let sy : Scale<1> = Categorical [| CA "A"; CA "B"; CA "C" |]
-  let (xl, xh), (yl, yh) = Projections.getExtremes sx, Projections.getExtremes sy
+  let (xl, xh), (yl, yh) = Scales.getExtremes sx, Scales.getExtremes sy
   let proj = 
     Projections.Padding((10.,10.,5.,5.), 
       (xl, xh, yl, yh),
