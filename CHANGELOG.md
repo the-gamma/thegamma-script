@@ -1,3 +1,4 @@
+ * 0.0.20 - Refactoring members, placeholders, youguess sort bars, rework axes
  * 0.0.19 - Nesting of providers, yougess bars, compost tweaks
  * 0.0.18 - Return child entities on demand
  * 0.0.17 - Expose generics for generic types
