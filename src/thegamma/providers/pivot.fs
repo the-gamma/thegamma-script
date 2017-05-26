@@ -300,7 +300,10 @@ and handleGroupRequest ctx rest keys =
   |> makeObjectType  
 
 and handleFilterEqNeqRequest ctx rest (fld, eq) op conds = async {
-  let tfs = if List.isEmpty conds then rest else FilterBy(op, conds)::rest
+  let tfs = 
+    if op = Or then rest 
+    elif List.isEmpty conds then rest 
+    else FilterBy(op, conds)::rest
   let tfs = 
     if ctx.IgnoreFiltersInRange then tfs |> List.filter (function FilterBy _ -> false | _ -> true)
     else tfs
