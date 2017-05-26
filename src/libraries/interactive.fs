@@ -31,9 +31,7 @@ module InteractiveHelpers =
 
   let calclateMax maxValue data = 
     let max = match maxValue with Some m -> m | _ -> Seq.max (Seq.map snd data)
-    match Scales.generateContinuousRange (CO 0.0) (CO max) with
-    | Continuous(_, CO max), _, _ -> max
-    | _ -> failwith "Failed to calculate maximum"
+    snd (Scales.adjustRange (0.0, max))
 
 // ------------------------------------------------------------------------------------------------
 // You Draw
@@ -98,42 +96,43 @@ module YouDrawHelpers =
       ]
 
     let chart = 
-      Axes(true, true,
-        Interactive(
-          ( if state.Completed then []
-            else
-              [ MouseMove(fun evt (Cont x, Cont y) -> 
-                  if (int evt.buttons) &&& 1 = 1 then trigger(Draw(x, y)) )
-                TouchMove(fun evt (Cont x, Cont y) -> 
-                  trigger(Draw(x, y)) )
-                MouseDown(fun evt (Cont x, Cont y) -> trigger(Draw(x, y)) )
-                TouchStart(fun evt (Cont x, Cont y) -> trigger(Draw(x, y)) ) ]),
-          Shape.InnerScale
-            ( None, Some(CO loy, CO hiy), 
-              Layered [
-                yield labels
-                yield Style(Drawing.hideFill >> Drawing.hideStroke, Line all)
-                yield Style(
-                  (fun s -> { s with StrokeColor = (1.0, HTML leftClr); Fill = Solid(0.2, HTML leftClr) }), 
-                  Layered [ Area known; Line known ]) 
-                if state.Completed then
-                  yield Style((fun s -> 
-                    { s with 
-                        StrokeColor = (1.0, HTML rightClr)
-                        StrokeDashArray = [ Percentage 0.; Percentage 100. ]
-                        Fill = Solid(0.0, HTML rightClr)
-                        Animation = Some(1000, "ease", fun s -> 
-                          { s with
-                              StrokeDashArray = [ Percentage 100.; Percentage 0. ]
-                              Fill = Solid(0.2, HTML rightClr) } 
-                        ) }), 
-                    Layered [ Area right; Line right ])                 
-                if guessed.Length > 1 then
+      Axes(true, true, 
+        AutoScale((false, true),
+          Interactive(
+            ( if state.Completed then []
+              else
+                [ MouseMove(fun evt (Cont x, Cont y) -> 
+                    if (int evt.buttons) &&& 1 = 1 then trigger(Draw(x, y)) )
+                  TouchMove(fun evt (Cont x, Cont y) -> 
+                    trigger(Draw(x, y)) )
+                  MouseDown(fun evt (Cont x, Cont y) -> trigger(Draw(x, y)) )
+                  TouchStart(fun evt (Cont x, Cont y) -> trigger(Draw(x, y)) ) ]),
+            Shape.InnerScale
+              ( None, Some(CO loy, CO hiy), 
+                Layered [
+                  yield labels
+                  yield Style(Drawing.hideFill >> Drawing.hideStroke, Line all)
                   yield Style(
-                    (fun s -> { s with StrokeColor = (1.0, HTML guessClr); StrokeDashArray = [ Integer 5; Integer 5 ] }), 
-                    Line guessed ) 
-              ])
-        )) 
+                    (fun s -> { s with StrokeColor = (1.0, HTML leftClr); Fill = Solid(0.2, HTML leftClr) }), 
+                    Layered [ Area known; Line known ]) 
+                  if state.Completed then
+                    yield Style((fun s -> 
+                      { s with 
+                          StrokeColor = (1.0, HTML rightClr)
+                          StrokeDashArray = [ Percentage 0.; Percentage 100. ]
+                          Fill = Solid(0.0, HTML rightClr)
+                          Animation = Some(1000, "ease", fun s -> 
+                            { s with
+                                StrokeDashArray = [ Percentage 100.; Percentage 0. ]
+                                Fill = Solid(0.2, HTML rightClr) } 
+                          ) }), 
+                      Layered [ Area right; Line right ])                 
+                  if guessed.Length > 1 then
+                    yield Style(
+                      (fun s -> { s with StrokeColor = (1.0, HTML guessClr); StrokeDashArray = [ Integer 5; Integer 5 ] }), 
+                      Line guessed ) 
+                ])
+          )))
     let chart = InnerScale(Some(CO (fst (Seq.head state.Data)), CO (fst (Seq.last state.Data))), None, chart)
     
     h?div ["style"=>"text-align:center;padding-top:20px"] [
@@ -187,57 +186,58 @@ module YouGuessColsHelpers =
     if state.Completed && state.CompletionStep < 1.0 then
       window.setTimeout((fun () -> trigger Animate), 50) |> ignore
     let chart = 
-      Axes(true, true,
-        Interactive
-          ( ( if state.Completed then []
-              else
-                [ EventHandler.MouseMove(fun evt (Cat(x, _), Cont y) ->
-                    if (int evt.buttons) &&& 1 = 1 then trigger (Update(x, y)) )
-                  EventHandler.MouseDown(fun evt (Cat(x, _), Cont y) ->
-                    trigger (Update(x, y)) )
-                  EventHandler.TouchStart(fun evt (Cat(x, _), Cont y) ->
-                    trigger (Update(x, y)) )
-                  EventHandler.TouchMove(fun evt (Cat(x, _), Cont y) ->
-                    trigger (Update(x, y)) ) ] ),
-            Style
-              ( (fun s -> if state.Completed then s else { s with Cursor = "row-resize" }),
-                (Layered [
-                  yield Stack
-                    ( Horizontal, 
-                      [ for clr, (lbl, value) in Seq.zip vega10 state.Data -> 
-                          let sh = Style((fun s -> { s with Fill = Solid(0.2, HTML "#a0a0a0") }), Column(CA lbl, CO state.Maximum )) 
-                          Shape.Padding((0., 10., 0., 10.), sh) ])
-                  yield Stack
-                    ( Horizontal, 
-                      [ for clr, (lbl, value) in Seq.zip vega10 state.Data -> 
-                          let alpha, value = 
-                            match state.Completed, state.Guesses.TryFind lbl with
-                            | true, Some guess -> 0.6, state.CompletionStep * value + (1.0 - state.CompletionStep) * guess
-                            | _, Some v -> 0.6, v
-                            | _, None -> 0.2, state.Default
-                          let sh = Style((fun s -> { s with Fill = Solid(alpha, HTML clr) }), Column(CA lbl, CO value)) 
-                          Shape.Padding((0., 10., 0., 10.), sh) ])
-                  for clr, (lbl, value) in Seq.zip vega10 state.Data do
-                    match state.Guesses.TryFind lbl with
-                    | None -> () 
-                    | Some guess ->
-                        let line = Line [ CAR(CA lbl, 0.0), COV (CO guess); CAR(CA lbl, 1.0), COV (CO guess) ]
+      Axes(true, true, 
+        AutoScale((false, true), 
+          Interactive
+            ( ( if state.Completed then []
+                else
+                  [ EventHandler.MouseMove(fun evt (Cat(x, _), Cont y) ->
+                      if (int evt.buttons) &&& 1 = 1 then trigger (Update(x, y)) )
+                    EventHandler.MouseDown(fun evt (Cat(x, _), Cont y) ->
+                      trigger (Update(x, y)) )
+                    EventHandler.TouchStart(fun evt (Cat(x, _), Cont y) ->
+                      trigger (Update(x, y)) )
+                    EventHandler.TouchMove(fun evt (Cat(x, _), Cont y) ->
+                      trigger (Update(x, y)) ) ] ),
+              Style
+                ( (fun s -> if state.Completed then s else { s with Cursor = "row-resize" }),
+                  (Layered [
+                    yield Stack
+                      ( Horizontal, 
+                        [ for clr, (lbl, value) in Seq.zip vega10 state.Data -> 
+                            let sh = Style((fun s -> { s with Fill = Solid(0.2, HTML "#a0a0a0") }), Column(CA lbl, CO state.Maximum )) 
+                            Shape.Padding((0., 10., 0., 10.), sh) ])
+                    yield Stack
+                      ( Horizontal, 
+                        [ for clr, (lbl, value) in Seq.zip vega10 state.Data -> 
+                            let alpha, value = 
+                              match state.Completed, state.Guesses.TryFind lbl with
+                              | true, Some guess -> 0.6, state.CompletionStep * value + (1.0 - state.CompletionStep) * guess
+                              | _, Some v -> 0.6, v
+                              | _, None -> 0.2, state.Default
+                            let sh = Style((fun s -> { s with Fill = Solid(alpha, HTML clr) }), Column(CA lbl, CO value)) 
+                            Shape.Padding((0., 10., 0., 10.), sh) ])
+                    for clr, (lbl, value) in Seq.zip vega10 state.Data do
+                      match state.Guesses.TryFind lbl with
+                      | None -> () 
+                      | Some guess ->
+                          let line = Line [ CAR(CA lbl, 0.0), COV (CO guess); CAR(CA lbl, 1.0), COV (CO guess) ]
+                          yield Style(
+                            (fun s -> 
+                              { s with
+                                  StrokeColor = (1.0, HTML clr)
+                                  StrokeWidth = Pixels 4
+                                  StrokeDashArray = [ Integer 5; Integer 5 ] }), 
+                            Shape.Padding((0., 10., 0., 10.), line))
+                    match topLabel with
+                    | None -> ()
+                    | Some lbl ->
+                        let x = CAR(CA (fst state.Data.[state.Data.Length/2]), if state.Data.Length % 2 = 0 then 0.0 else 0.5)
+                        let y = COV(CO (state.Maximum * 0.9))
                         yield Style(
-                          (fun s -> 
-                            { s with
-                                StrokeColor = (1.0, HTML clr)
-                                StrokeWidth = Pixels 4
-                                StrokeDashArray = [ Integer 5; Integer 5 ] }), 
-                          Shape.Padding((0., 10., 0., 10.), line))
-                  match topLabel with
-                  | None -> ()
-                  | Some lbl ->
-                      let x = CAR(CA (fst state.Data.[state.Data.Length/2]), if state.Data.Length % 2 = 0 then 0.0 else 0.5)
-                      let y = COV(CO (state.Maximum * 0.9))
-                      yield Style(
-                        (fun s -> { s with Font = "13pt sans-serif"; Fill=Solid(1.0, HTML "#808080"); StrokeColor=(0.0, RGB(0,0,0)) }),
-                        Text(x, y, VerticalAlign.Baseline, HorizontalAlign.Center, lbl) )
-                ]) )))
+                          (fun s -> { s with Font = "13pt sans-serif"; Fill=Solid(1.0, HTML "#808080"); StrokeColor=(0.0, RGB(0,0,0)) }),
+                          Text(x, y, VerticalAlign.Baseline, HorizontalAlign.Center, lbl) )
+                  ]) ))))
 
     h?div ["style"=>"text-align:center;padding-top:20px"] [
       Compost.createSvg (width, height) chart
@@ -257,65 +257,66 @@ module YouGuessColsHelpers =
       window.setTimeout((fun () -> trigger Animate), 50) |> ignore
     let chart = 
       Axes(true, false, 
-        Interactive
-          ( ( if state.Completed then []
-              else
-                [ EventHandler.MouseMove(fun evt (Cont x, Cat(y, _)) ->
-                    if (int evt.buttons) &&& 1 = 1 then trigger (Update(y, x)) )
-                  EventHandler.MouseDown(fun evt (Cont x, Cat(y, _)) ->
-                    trigger (Update(y, x)) )
-                  EventHandler.TouchStart(fun evt (Cont x, Cat(y, _)) ->
-                    trigger (Update(y, x)) )
-                  EventHandler.TouchMove(fun evt (Cont x, Cat(y, _)) ->
-                    trigger (Update(y, x)) ) ] ),
-            Style
-              ( (fun s -> if state.Completed then s else { s with Cursor = "col-resize" }),
-                (Layered [
-                  yield InnerScale(Some(CO 0., CO state.Maximum), None, 
-                    Stack
+        AutoScale((true, false), 
+          Interactive
+            ( ( if state.Completed then []
+                else
+                  [ EventHandler.MouseMove(fun evt (Cont x, Cat(y, _)) ->
+                      if (int evt.buttons) &&& 1 = 1 then trigger (Update(y, x)) )
+                    EventHandler.MouseDown(fun evt (Cont x, Cat(y, _)) ->
+                      trigger (Update(y, x)) )
+                    EventHandler.TouchStart(fun evt (Cont x, Cat(y, _)) ->
+                      trigger (Update(y, x)) )
+                    EventHandler.TouchMove(fun evt (Cont x, Cat(y, _)) ->
+                      trigger (Update(y, x)) ) ] ),
+              Style
+                ( (fun s -> if state.Completed then s else { s with Cursor = "col-resize" }),
+                  (Layered [
+                    yield InnerScale(Some(CO 0., CO state.Maximum), None, 
+                      Stack
+                        ( Vertical, 
+                          [ for clr, (lbl, value) in Seq.zip vega10 state.Data -> 
+                              let sh = Style((fun s -> { s with Fill = Solid(0.2, HTML "#a0a0a0") }), Bar(CO state.Maximum, CA lbl)) 
+                              Shape.Padding((10., 0., 10., 0.), sh) ]))
+                    yield Stack
                       ( Vertical, 
                         [ for clr, (lbl, value) in Seq.zip vega10 state.Data -> 
-                            let sh = Style((fun s -> { s with Fill = Solid(0.2, HTML "#a0a0a0") }), Bar(CO state.Maximum, CA lbl)) 
-                            Shape.Padding((10., 0., 10., 0.), sh) ]))
-                  yield Stack
-                    ( Vertical, 
-                      [ for clr, (lbl, value) in Seq.zip vega10 state.Data -> 
-                          let alpha, value = 
-                            match state.Completed, state.Guesses.TryFind lbl with
-                            | true, Some guess -> 0.6, state.CompletionStep * value + (1.0 - state.CompletionStep) * guess
-                            | _, Some v -> 0.6, v
-                            | _, None -> 0.2, state.Default
-                          let sh = Style((fun s -> { s with Fill = Solid(alpha, HTML clr) }), Bar(CO value, CA lbl)) 
-                          Shape.Padding((10., 0., 10., 0.), sh) ])
+                            let alpha, value = 
+                              match state.Completed, state.Guesses.TryFind lbl with
+                              | true, Some guess -> 0.6, state.CompletionStep * value + (1.0 - state.CompletionStep) * guess
+                              | _, Some v -> 0.6, v
+                              | _, None -> 0.2, state.Default
+                            let sh = Style((fun s -> { s with Fill = Solid(alpha, HTML clr) }), Bar(CO value, CA lbl)) 
+                            Shape.Padding((10., 0., 10., 0.), sh) ])
 
-                  for clr, (lbl, _) in Seq.zip vega10 state.Data do 
-                      let x = COV(CO (state.Maximum * 0.95))
-                      let y = CAR(CA lbl, 0.5)
-                      yield Style(
-                        (fun s -> { s with Font = "13pt sans-serif"; Fill=Solid(1.0, HTML clr); StrokeColor=(0.0, RGB(0,0,0)) }),
-                        Text(x, y, VerticalAlign.Middle, HorizontalAlign.End, lbl) )
-
-                  for clr, (lbl, value) in Seq.zip vega10 state.Data do
-                    match state.Guesses.TryFind lbl with
-                    | None -> () 
-                    | Some guess ->
-                        let line = Line [ COV (CO guess), CAR(CA lbl, 0.0); COV (CO guess), CAR(CA lbl, 1.0) ]
+                    for clr, (lbl, _) in Seq.zip vega10 state.Data do 
+                        let x = COV(CO (state.Maximum * 0.95))
+                        let y = CAR(CA lbl, 0.5)
                         yield Style(
-                          (fun s -> 
-                            { s with
-                                StrokeColor = (1.0, HTML clr)
-                                StrokeWidth = Pixels 4
-                                StrokeDashArray = [ Integer 5; Integer 5 ] }), 
-                          Shape.Padding((10., 0., 10., 0.), line))
-                  match topLabel with
-                  | None -> ()
-                  | Some lbl ->
-                      let x = COV(CO (state.Maximum * 0.9))
-                      let y = CAR(CA (fst state.Data.[state.Data.Length/2]), if state.Data.Length % 2 = 0 then 0.0 else 0.5)
-                      yield Style(
-                        (fun s -> { s with Font = "13pt sans-serif"; Fill=Solid(1.0, HTML "#808080"); StrokeColor=(0.0, RGB(0,0,0)) }),
-                        Text(x, y, VerticalAlign.Baseline, HorizontalAlign.Center, lbl) )
-                ]) )))
+                          (fun s -> { s with Font = "13pt sans-serif"; Fill=Solid(1.0, HTML clr); StrokeColor=(0.0, RGB(0,0,0)) }),
+                          Text(x, y, VerticalAlign.Middle, HorizontalAlign.End, lbl) )
+
+                    for clr, (lbl, value) in Seq.zip vega10 state.Data do
+                      match state.Guesses.TryFind lbl with
+                      | None -> () 
+                      | Some guess ->
+                          let line = Line [ COV (CO guess), CAR(CA lbl, 0.0); COV (CO guess), CAR(CA lbl, 1.0) ]
+                          yield Style(
+                            (fun s -> 
+                              { s with
+                                  StrokeColor = (1.0, HTML clr)
+                                  StrokeWidth = Pixels 4
+                                  StrokeDashArray = [ Integer 5; Integer 5 ] }), 
+                            Shape.Padding((10., 0., 10., 0.), line))
+                    match topLabel with
+                    | None -> ()
+                    | Some lbl ->
+                        let x = COV(CO (state.Maximum * 0.9))
+                        let y = CAR(CA (fst state.Data.[state.Data.Length/2]), if state.Data.Length % 2 = 0 then 0.0 else 0.5)
+                        yield Style(
+                          (fun s -> { s with Font = "13pt sans-serif"; Fill=Solid(1.0, HTML "#808080"); StrokeColor=(0.0, RGB(0,0,0)) }),
+                          Text(x, y, VerticalAlign.Baseline, HorizontalAlign.Center, lbl) )
+                  ]) ))))
 
     h?div ["style"=>"text-align:center;padding-top:20px"] [
       Compost.createSvg (width, height) chart
@@ -383,42 +384,43 @@ module YouGuessSortHelpers =
       window.setTimeout((fun () -> trigger Animate), 50) |> ignore
     let chart = 
       Axes(true, false, 
-        Interactive
-          ( ( if state.Completed then [] else
-                [ EventHandler.MouseDown(fun evt (_, Cat(y, _)) -> trigger(AssignCurrent y))
-                  EventHandler.TouchStart(fun evt (_, Cat(y, _)) -> trigger(AssignCurrent y))
-                  EventHandler.TouchMove(fun evt (_, Cat(y, _)) -> trigger(AssignCurrent y)) ]),
-            Style
-              ( (fun s -> if state.Completed then s else { s with Cursor = "pointer" }),
-                (Layered [
-                  yield Stack
-                    ( Vertical, 
-                      [ for i, (lbl, original) in Seq.mapi (fun i v -> i, v) (Seq.sortBy snd state.Data) do
-                          let alpha, value, clr = 
-                            match state.Completed, state.Assignments.TryFind lbl with
-                            | true, Some assigned -> 
-                                let _, actual = state.Data |> Seq.find (fun (lbl, _) -> lbl = assigned)
-                                console.log(actual, original)
-                                0.6, state.CompletionStep * actual + (1.0 - state.CompletionStep) * original, state.Colors.[assigned]
-                            | _, Some assigned -> 0.6, original, state.Colors.[assigned]
-                            | _, None -> 0.3, original, "#a0a0a0"
+        AutoScale((true, false),
+          Interactive
+            ( ( if state.Completed then [] else
+                  [ EventHandler.MouseDown(fun evt (_, Cat(y, _)) -> trigger(AssignCurrent y))
+                    EventHandler.TouchStart(fun evt (_, Cat(y, _)) -> trigger(AssignCurrent y))
+                    EventHandler.TouchMove(fun evt (_, Cat(y, _)) -> trigger(AssignCurrent y)) ]),
+              Style
+                ( (fun s -> if state.Completed then s else { s with Cursor = "pointer" }),
+                  (Layered [
+                    yield Stack
+                      ( Vertical, 
+                        [ for i, (lbl, original) in Seq.mapi (fun i v -> i, v) (Seq.sortBy snd state.Data) do
+                            let alpha, value, clr = 
+                              match state.Completed, state.Assignments.TryFind lbl with
+                              | true, Some assigned -> 
+                                  let _, actual = state.Data |> Seq.find (fun (lbl, _) -> lbl = assigned)
+                                  console.log(actual, original)
+                                  0.6, state.CompletionStep * actual + (1.0 - state.CompletionStep) * original, state.Colors.[assigned]
+                              | _, Some assigned -> 0.6, original, state.Colors.[assigned]
+                              | _, None -> 0.3, original, "#a0a0a0"
 
-                          if i = state.Data.Length - 1 && state.Assignments.Count = 0 then
-                            let txt = Text(COV(CO(state.Maximum * 0.05)), CAR(CA lbl, 0.5), Middle, Start, "Assign highlighted value to one of the bars by clicking on it!")
-                            yield Style((fun s -> { s with Font = "13pt sans-serif"; Fill = Solid(1.0, HTML "#606060"); StrokeColor=(0.0, HTML "white") }), txt ) 
+                            if i = state.Data.Length - 1 && state.Assignments.Count = 0 then
+                              let txt = Text(COV(CO(state.Maximum * 0.05)), CAR(CA lbl, 0.5), Middle, Start, "Assign highlighted value to one of the bars by clicking on it!")
+                              yield Style((fun s -> { s with Font = "13pt sans-serif"; Fill = Solid(1.0, HTML "#606060"); StrokeColor=(0.0, HTML "white") }), txt ) 
 
-                          let sh = Style((fun s -> { s with Fill = Solid(alpha, HTML clr) }), Bar(CO value, CA lbl)) 
-                          if clr <> "#a0a0a0" then
-                            let line = Line [ COV (CO original), CAR(CA lbl, 0.0); COV (CO original), CAR(CA lbl, 1.0) ]
-                            yield Style(
-                              (fun s -> 
-                                { s with
-                                    StrokeColor = (1.0, HTML clr)
-                                    StrokeWidth = Pixels 4
-                                    StrokeDashArray = [ Integer 5; Integer 5 ] }), 
-                              Shape.Padding((5., 0., 5., 0.), line))
-                          yield Shape.Padding((5., 0., 5., 0.), sh) ])
-                ]) )))
+                            let sh = Style((fun s -> { s with Fill = Solid(alpha, HTML clr) }), Bar(CO value, CA lbl)) 
+                            if clr <> "#a0a0a0" then
+                              let line = Line [ COV (CO original), CAR(CA lbl, 0.0); COV (CO original), CAR(CA lbl, 1.0) ]
+                              yield Style(
+                                (fun s -> 
+                                  { s with
+                                      StrokeColor = (1.0, HTML clr)
+                                      StrokeWidth = Pixels 4
+                                      StrokeDashArray = [ Integer 5; Integer 5 ] }), 
+                                Shape.Padding((5., 0., 5., 0.), line))
+                            yield Shape.Padding((5., 0., 5., 0.), sh) ])
+                  ]) ))))
 
     let labs = 
       Padding(
