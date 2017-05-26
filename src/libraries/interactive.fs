@@ -9,7 +9,7 @@ open TheGamma.Html
 open TheGamma.Interactive.Compost
 
 module InteractiveHelpers =
-  let showApp outputId size (data:series<_, _>) initial render update = Async.StartImmediate <| async { 
+  let showAppAsync outputId size (data:series<_, _>) initial render update = async { 
     let id = "container" + System.Guid.NewGuid().ToString().Replace("-", "")
     h?div ["id" => id] [ ] |> renderTo (document.getElementById(outputId))        
 
@@ -28,6 +28,9 @@ module InteractiveHelpers =
         Compost.app outputId (initial data) (render data size) (update data)
       with e ->
         Log.exn("GUI", "Interactive rendering failed: %O", e) } 
+
+  let showApp outputId size data initial render update = 
+    showAppAsync outputId size data initial render update |> Async.StartImmediate 
 
   let calclateMax maxValue data = 
     let max = match maxValue with Some m -> m | _ -> Seq.max (Seq.map snd data)
@@ -72,7 +75,7 @@ module YouDrawHelpers =
             Guessed = indexed |> Array.map (fun (i, (x, y)) -> 
               if i = nearest then (x, Some downY) else (x, y)) }
 
-  let render (width, height) (topLbl, leftLbl, rightLbl) (leftClr,rightClr,guessClr) (loy, hiy) trigger state = 
+  let render (width, height) (markers:(float*obj)[]) (topLbl, leftLbl, rightLbl) (leftClr,rightClr,guessClr,markClr) (loy, hiy) trigger state = 
     let all = 
       [| for x, y in state.Data -> Cont x, Cont y |]
     let known = 
@@ -95,6 +98,26 @@ module YouDrawHelpers =
         Style(setColor guessClr, Shape.Text(COV(CO tx), COV(CO ty), VerticalAlign.Baseline, HorizontalAlign.Center, topLbl))
       ]
 
+    let LineStyle shape = 
+      Style((fun s -> 
+        { s with 
+            Fill = Solid(1.0, HTML "transparent"); 
+            StrokeWidth = Pixels 2; 
+            StrokeDashArray = [Integer 5; Integer 5]
+            StrokeColor=0.6, HTML markClr }), shape)
+    let FontStyle shape = 
+      Style((fun s -> { s with Font = "11pt sans-serif"; Fill = Solid(1.0, HTML markClr); StrokeColor = 0.0, HTML "transparent" }), shape)
+    
+    let loln, hiln = Scales.adjustRange (loy, hiy)
+    let markers = [
+        for i, (x, lbl) in Seq.mapi (fun i v -> i, v) markers do
+          let kl, kt = if i % 2 = 0 then 0.90, 0.95 else 0.80, 0.85
+          let ytx = loln + (hiln - loln) * kt
+          let hiln = loln + (hiln - loln) * kl
+          yield Line [(COV(CO x), COV(CO loln)); (COV(CO x), COV(CO hiln))] |> LineStyle
+          yield Text(COV(CO x), COV(CO ytx), VerticalAlign.Middle, HorizontalAlign.Center, string lbl) |> FontStyle
+      ]
+
     let chart = 
       Axes(true, true, 
         AutoScale((false, true),
@@ -111,6 +134,7 @@ module YouDrawHelpers =
               ( None, Some(CO loy, CO hiy), 
                 Layered [
                   yield labels
+                  yield! markers
                   yield Style(Drawing.hideFill >> Drawing.hideStroke, Line all)
                   yield Style(
                     (fun s -> { s with StrokeColor = (1.0, HTML leftClr); Fill = Solid(0.2, HTML leftClr) }), 
@@ -133,7 +157,7 @@ module YouDrawHelpers =
                       Line guessed ) 
                 ])
           )))
-    let chart = InnerScale(Some(CO (fst (Seq.head state.Data)), CO (fst (Seq.last state.Data))), None, chart)
+    //let chart = InnerScale(Some(CO (fst (Seq.head state.Data)), CO (fst (Seq.last state.Data))), None, chart)
     
     h?div ["style"=>"text-align:center;padding-top:20px"] [
       Compost.createSvg (width, height) chart
@@ -497,9 +521,11 @@ type YouGuessColsBars =
 
 type YouGuessLine = 
   { data : series<float, float> 
+    markers : series<float, obj> option
     clip : float option
     min : float option
     max : float option 
+    markerColor : string option
     knownColor : string option
     unknownColor : string option 
     drawColor : string option 
@@ -511,24 +537,31 @@ type YouGuessLine =
   member y.setClip(clip) = { y with clip = Some clip }
   member y.setColors(known, unknown) = { y with knownColor = Some known; unknownColor = Some unknown }
   member y.setDrawColor(draw) = { y with drawColor = Some draw }
+  member y.setMarkerColor(marker) = { y with markerColor = Some marker }
   member y.setLabels(top, known, guess) = { y with knownLabel = Some known; topLabel = Some top; guessLabel = Some guess }
   member y.setSize(?width, ?height) = 
     let orElse (a:option<_>) b = if a.IsSome then a else b
     { y with size = (orElse width (fst y.size), orElse height (snd y.size)) }
-  member y.show(outputId) =   
-    InteractiveHelpers.showApp outputId y.size y.data
+  member y.setMarkers(markers) = { y with markers = Some markers }
+  member y.show(outputId) = Async.StartImmediate <| async {
+    let markers = defaultArg y.markers (series<string, float>.create(async.Return [||], "", "", ""))
+    let! markers = markers.data |> Async.AwaitFuture
+    let markers = markers |> Array.sortBy fst
+    return! InteractiveHelpers.showAppAsync outputId y.size y.data
       (fun data ->
           let clipx = match y.clip with Some v -> v | _ -> fst (data.[data.Length / 2])
-          YouDrawHelpers.initState data clipx)
+          YouDrawHelpers.initState (Array.sortBy fst data) clipx)
       (fun data size -> 
           let data = Array.sortBy fst data
           let loy = match y.min with Some v -> v | _ -> data |> Seq.map snd |> Seq.min
           let hiy = match y.max with Some v -> v | _ -> data |> Seq.map snd |> Seq.max       
-          let lc, dc, gc = defaultArg y.knownColor "#606060", defaultArg y.unknownColor "#FFC700", defaultArg y.drawColor "#808080"          
-          YouDrawHelpers.render size
+          let lc, dc, gc, mc = 
+            defaultArg y.knownColor "#606060", defaultArg y.unknownColor "#FFC700", 
+            defaultArg y.drawColor "#808080", defaultArg y.markerColor "#C65E31"          
+          YouDrawHelpers.render size markers
             (defaultArg y.topLabel "", defaultArg y.knownLabel "", defaultArg y.guessLabel "") 
-            (lc,dc,gc) (loy, hiy)) 
-      (fun data -> YouDrawHelpers.handler)
+            (lc,dc,gc,mc) (loy, hiy)) 
+      (fun data -> YouDrawHelpers.handler) } 
 
 type YouGuessSortBars = 
   { data : series<string, float> 
@@ -553,5 +586,5 @@ type youguess =
     { YouGuessSortBars.data = data; maxValue = None; size = None, None }
   static member line(data:series<float, float>) =
     { YouGuessLine.data = data; clip = None; min = None; max = None 
-      guessLabel = None; topLabel = None; knownLabel = None;
+      markerColor = None; guessLabel = None; topLabel = None; knownLabel = None; markers = None
       knownColor = None; unknownColor = None; drawColor = None; size = None, None }
