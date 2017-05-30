@@ -37,7 +37,7 @@ let evaluateExpression (_stored:RuntimeValue[]) (expr:Expression) =
     TheGamma.TypeProvidersRuntime.convertTupleSequence |> ignore
     TheGamma.GoogleCharts.chart.bar |> ignore
     TheGamma.table<int, int>.create(s) |> ignore
-    TheGamma.Maps.timeline<int, int>.create(s) |> ignore
+    TheGamma.General.date.now() |> ignore
     TheGamma.Series.series<int, int>.values([| 1 |]) |> ignore    
     TheGamma.placeholder.create("") |> ignore
     TheGamma.Interactive.youguess.line |> ignore
@@ -147,6 +147,7 @@ let rec evaluateEntity (e:Entity) =
         | [l; r] -> 
             let op = 
               match op with
+              | Operator.Modulo -> BinaryModulus
               | Operator.Equals -> BinaryEqualStrict
               | Operator.Plus -> BinaryPlus
               | Operator.Minus -> BinaryMinus

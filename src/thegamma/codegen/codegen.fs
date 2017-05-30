@@ -46,7 +46,7 @@ let rec compileExpression ctx (expr:Node<Expr>) =
       let l = compileExpression ctx l
       let r = compileExpression ctx r
       let rng = rangeToLoc ctx expr.Range
-      let pow = MemberExpression(IdentifierExpression("pow", rng), IdentifierExpression("Math", rng), false, rng)
+      let pow = ident("Math")?pow
       CallExpression(pow, [l; r], rangeToLoc ctx expr.Range)
 
   | Expr.Binary(l, op, r) ->
@@ -54,6 +54,7 @@ let rec compileExpression ctx (expr:Node<Expr>) =
       let r = compileExpression ctx r
       let op = 
         match op.Node with
+        | Operator.Modulo -> BinaryModulus
         | Operator.Equals -> BinaryEqualStrict
         | Operator.Plus -> BinaryPlus
         | Operator.Minus -> BinaryMinus

@@ -111,7 +111,7 @@ let rec getTypeAndEmitter (lookupNamed:string -> Type) ty =
   | Primitive("string") -> Type.Primitive(PrimitiveType.String), id
   | Primitive("int") 
   | Primitive("float") -> Type.Primitive(PrimitiveType.Number), fun e -> ident("Number") /@/ [e]
-  | Primitive("date") -> Type.Primitive(PrimitiveType.Date), fun e -> ident("Date")?parse /@/ [e]
+  | Primitive("date") -> Type.Primitive(PrimitiveType.Date), fun e -> NewExpression(ident("Date"), [ident("Date")?parse /@/ [e]], None)
   | Generic("seq", [|Generic("tuple", [|t1; t2|])|]) -> 
       let t1, e1 = getTypeAndEmitter lookupNamed t1
       let t2, e2 = getTypeAndEmitter lookupNamed t2

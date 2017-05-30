@@ -141,7 +141,11 @@ let rec unifyTypes ctx schemas tys =
   | TypeSchema.List(_)::_, _ 
   | TypeSchema.Function(_)::_, _ 
   | [], _
-  | _, [] -> None
+  | _, [] -> 
+    match schemas, tys with
+    | s::_, t::_ -> Log.trace("providers", "Failed to unify types %O and %O", s, t)
+    | _ -> Log.trace("providers", "Failed to unify types %O and %O", schemas, tys)
+    None
 
 let rec substituteTypeParams assigns schema = 
   match schema with
@@ -193,6 +197,7 @@ let importProvidedType url lookupNamed exp =
           | "string" -> Type.Primitive PrimitiveType.String
           | "bool" -> Type.Primitive PrimitiveType.Bool
           | "unit" -> Type.Primitive PrimitiveType.Unit
+          | "date" -> Type.Primitive PrimitiveType.Date
           | t -> failwith ("provideFSharpType: Unsupported type: " + t) )
         |> TypeSchema.Primitive
     | "function"->
@@ -219,7 +224,13 @@ let importProvidedType url lookupNamed exp =
 
   let generateMembers assigns = 
     exp.members |> Array.choose (fun m ->
-      if getKind m = "method" then
+      if getKind m = "property" then
+        let m = unbox<PropertyMember> m
+        let retTyp = substituteTypeParams assigns (mapType m.returns)
+        let emitter = { Emit = fun inst -> MemberExpression(inst, IdentifierExpression(m.name, None), false, None) }
+        Some { Member.Name = m.name; Type = retTyp; Metadata = []; Emitter = emitter }
+
+      elif getKind m = "method" then
         let m = unbox<MethodMember> m
         let typars = getTypeParameters m.typepars 
         // Do not substitute bound variables

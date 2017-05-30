@@ -26,6 +26,7 @@ type Error<'Range> =
 /// Binary operators (Equals is tokenized as separate token, but after parsing it can be operator)
 type [<RequireQualifiedAccess>] Operator = 
   | Equals
+  | Modulo
   | Plus
   | Minus
   | Multiply

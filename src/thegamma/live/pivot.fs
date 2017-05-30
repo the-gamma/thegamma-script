@@ -77,6 +77,7 @@ let transformName = function
   | Pivot.GetSeries _ -> "get series"
   | Pivot.GetTheData _ -> "get the data"
   | Pivot.GroupBy _ -> "group by"
+  | Pivot.WindowBy _ -> "window by"
   | Pivot.Paging _ -> "paging"
   | Pivot.SortBy _ -> "sort by"
   | Pivot.GetRange _ | Pivot.Metadata _ -> failwith "Unexpected get range or metadata"
@@ -376,6 +377,7 @@ let rec updatePivotState trigger state event =
           | Pivot.DropColumns _ -> "drop columns", [marker; "then"]
           | Pivot.SortBy _ -> "sort data", [marker; "then"]
           | Pivot.FilterBy _ -> "filter data", [marker; "then"] // TODO
+          | Pivot.WindowBy _ -> "windowing", [marker; "then"] // TODO
           | Pivot.Paging _ -> "paging", [marker; "then"]
           | Pivot.GetSeries _ -> "get series", [marker]
           | Pivot.GetTheData -> "get the data", [marker]
@@ -627,7 +629,7 @@ let renderPivot triggerEvent (state:LiveState<_>) =
         if state.State.Menus = AddDropdownOpen then 
           yield h?ul [] [
             yield h?li [] [ h?a [ clickHandler(Pivot.DropColumns []) ] [ text "drop columns"] ]
-            yield h?li [] [ h?a [ clickHandler(Pivot.FilterBy(Pivot.And, [])) ] [ text "filter by"] ]
+            //yield h?li [] [ h?a [ clickHandler(Pivot.FilterBy(Pivot.And, [])) ] [ text "filter by"] ]
             yield h?li [] [ h?a [ clickHandler(Pivot.GroupBy([], [])) ] [ text "group by"] ]
             yield h?li [] [ h?a [ clickHandler(Pivot.Paging []) ] [ text "paging"] ]
             yield h?li [] [ h?a [ clickHandler(Pivot.SortBy []) ] [ text "sort by"] ]

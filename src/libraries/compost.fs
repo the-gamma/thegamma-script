@@ -1,5 +1,6 @@
 ﻿namespace TheGamma.Interactive.Compost
 
+open TheGamma
 open TheGamma.Html
 open Fable.Import.Browser
 open Fable.Helpers
@@ -24,15 +25,6 @@ type Number =
   | Integer of int
   | Percentage of float
 
-type Style = 
-  { StrokeColor : AlphaColor
-    StrokeWidth : Width
-    StrokeDashArray : seq<Number>
-    Fill : FillStyle 
-    Animation : option<int * string * (Style -> Style)>
-    Font : string
-    Cursor : string }
-
 type HorizontalAlign = Start | Center | End
 type VerticalAlign = Baseline | Middle | Hanging
 
@@ -46,6 +38,17 @@ type Value<[<Measure>] 'u> =
 type Scale<[<Measure>] 'v> =
   | Continuous of continuous<'v> * continuous<'v>
   | Categorical of categorical<'v>[]
+
+type Style = 
+  { StrokeColor : AlphaColor
+    StrokeWidth : Width
+    StrokeDashArray : seq<Number>
+    Fill : FillStyle 
+    Animation : option<int * string * (Style -> Style)>
+    Font : string
+    Cursor : string
+    FormatAxisXLabel : Scale<1> -> Value<1> -> string
+    FormatAxisYLabel : Scale<1> -> Value<1> -> string }
 
 type EventHandler<[<Measure>] 'vx, [<Measure>] 'vy> = 
   | MouseMove of (MouseEvent -> (Value<'vx> * Value<'vy>) -> unit)
@@ -64,10 +67,11 @@ type Orientation =
 type Shape<[<Measure>] 'vx, [<Measure>] 'vy> = 
   | Style of (Style -> Style) * Shape<'vx, 'vy>
   | Text of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * string
-  | AutoScale of (bool * bool) * Shape<'vx, 'vy>
+  | AutoScale of bool * bool * Shape<'vx, 'vy>
   | InnerScale of option<continuous<'vx> * continuous<'vx>> * option<continuous<'vy> * continuous<'vy>> * Shape<'vx, 'vy>
   | OuterScale of option<Scale<'vx>> * option<Scale<'vy>> * Shape<'vx, 'vy>
   | Line of seq<Value<'vx> * Value<'vy>>
+  | Bubble of Value<'vx> * Value<'vy> * float * float
   | Area of seq<Value<'vx> * Value<'vy>>
   | Bar of continuous<'vx> * categorical<'vy>
   | Column of categorical<'vx> * continuous<'vy>
@@ -97,6 +101,7 @@ module Svg =
 
   type Svg =
     | Path of PathSegment[] * SvgStyle
+    | Ellipse of (float * float) * (float * float) * SvgStyle
     | Text of (float * float) * string * SvgStyle
     | Combine of Svg[]
     | Empty
@@ -120,6 +125,9 @@ module Svg =
         yield s?text [ "x" => string x; "y" => string y; "style" => style ] [text t]
     | Combine ss ->
         for s in ss do yield! renderSvg s
+    | Ellipse((cx, cy),(rx, ry), style) ->
+        yield s?ellipse [ "cx" => string cx; "cy" => string cy;
+          "rx" => string rx; "ry" => string ry; "style" => style ] [] 
     | Path(p, style) ->
         yield s?path [ "d" => formatPath p; "style" => style ] [] }
 
@@ -171,6 +179,7 @@ module Scales =
     | ScaledOuterScale of option<Scale<'vx>> * option<Scale<'vy>> * ScaledShape<'vx, 'vy>
     | ScaledText of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * string    
     | ScaledLine of (Value<'vx> * Value<'vy>)[]
+    | ScaledBubble of Value<'vx> * Value<'vy> * float * float
     | ScaledArea of (Value<'vx> * Value<'vy>)[]
     | ScaledLayered of ScaledShape<'vx, 'vy>[]
     | ScaledColumn of categorical<'vx> * continuous<'vy>
@@ -182,19 +191,6 @@ module Scales =
 
   and ScaledShape<[<Measure>] 'vx, [<Measure>] 'vy> =
     Scaled of outer:(Scale<'vx> * Scale<'vy>) * inner:(Scale<'vx> * Scale<'vy>) * ScaledShapeInner<'vx, 'vy>
-
-  let niceNumber num decs =
-    let str = string num
-    let dot = str.IndexOf('.')
-    let before, after = 
-      if dot = -1 then str, ""
-      else str.Substring(0, dot), str.Substring(dot, min (decs + 1) (str.Length - dot))
-    let mutable res = before
-    if before.Length > 5 then
-      for i in before.Length-1 .. -1 .. 0 do
-        let j = before.Length - i
-        if i <> 0 && j % 3 = 0 then res <- res.Insert(i, ",")
-    res + after
 
   let getExtremes = function
     | Continuous(l, h) -> COV l, COV h
@@ -234,12 +230,13 @@ module Scales =
         generateSteps 6. 1. (float l, float h) |> Array.map (fun f -> COV(CO (unbox f)))
     | Categorical vs -> [| for CA s in vs -> CAR(CA s, 0.5) |]
 
-  let generateAxisLabels (s:Scale<'v>) : (Value<'v> * string)[] =
+  let generateAxisLabels fmt (s:Scale<'v>) : (Value<'v> * string)[] =
+    let sunit = unbox<Scale<1>> s
     match s with 
     | Continuous(CO l, CO h) ->
-        let dec = decimalPoints (unbox l, unbox h)
-        generateSteps 6. 2. (float l, float h) |> Array.map (fun f -> COV(CO (unbox f)), niceNumber (unbox f) (int dec))
-    | Categorical vs -> [| for CA s in vs -> CAR(CA s, 0.5), s |]
+        generateSteps 6. 2. (float l, float h) 
+        |> Array.map (fun f -> COV(CO (unbox f)), fmt sunit (COV(CO(unbox<float<1>> f))))
+    | Categorical vs -> [| for v & CA s in vs -> CAR(CA s, 0.5), fmt sunit (CAR(CA s, 0.5)) |]
 
   let unionScales s1 s2 =
     match s1, s2 with
@@ -259,6 +256,7 @@ module Scales =
     | ScaledText _
     | ScaledColumn _
     | ScaledBar _    
+    | ScaledBubble _
     | ScaledArea _ -> Scaled(outer, inner, shape)
     // Replace just top level scales
     | ScaledOuterScale _ -> Scaled(outer, inner, shape)
@@ -301,7 +299,9 @@ module Scales =
 *)
   // Always returns objects with the same inner and outer scales
   // but outer scales can be replaced later by replaceScales
-  let rec calculateScales<[<Measure>] 'ux, [<Measure>] 'uy> (shape:Shape<'ux, 'uy>) = 
+  let rec calculateScales<[<Measure>] 'ux, [<Measure>] 'uy> style (shape:Shape<'ux, 'uy>) = 
+    let calculateScalesStyle = calculateScales 
+    let calculateScales = calculateScales style
     match shape with
     | OuterScale(sx, sy, shape) ->
         let (Scaled((osx, osy), inner, _)) as scaled = calculateScales shape
@@ -315,7 +315,7 @@ module Scales =
           (match sy with Some sy -> Continuous(sy) | _ -> asy) 
         Scaled(scales, scales, shape) |> replaceScales scales
 
-    | AutoScale((ax, ay), shape) ->
+    | AutoScale(ax, ay, shape) ->
         let (Scaled((asx, asy), _, shape)) = calculateScales shape
         let autoScale = function
           | Continuous(CO l, CO h) -> let l, h = adjustRangeUnits (l, h) in Continuous(CO l, CO h)
@@ -329,13 +329,18 @@ module Scales =
         let (Scaled(scales, _, shape)) = calculateScales shape
         Scaled(scales, scales, ScaledOffset(offs, Scaled(scales, scales, shape)))
 
-    | Style(style, shape) ->
-        let (Scaled(scales, _, shape)) = calculateScales shape
-        Scaled(scales, scales, ScaledStyle(style, Scaled(scales, scales, shape)))
+    | Style(f, shape) ->
+        let (Scaled(scales, _, shape)) = calculateScalesStyle (f style) shape
+        Scaled(scales, scales, ScaledStyle(f, Scaled(scales, scales, shape)))
 
     | Padding(pads, shape) ->
         let (Scaled(scales, _, shape)) = calculateScales shape
         Scaled(scales, scales, ScaledPadding(pads, Scaled(scales, scales, shape)))
+
+    | Bubble(x, y, rx, ry) ->
+        let makeSingletonScale = function COV(v) -> Continuous(v, v) | CAR(v, _) -> Categorical [| v |]
+        let scales = makeSingletonScale x, makeSingletonScale y
+        Scaled(scales, scales, ScaledBubble(x, y, rx, ry))
 
     | Column(x, y) ->
         let scales = Categorical [| x |], Continuous(CO 0.0<_>, y)
@@ -377,10 +382,10 @@ module Scales =
               yield Line [lx,y; hx,y] |> LineStyle "#e4e4e4" 1.0 1 
             yield Line [lx,hy; lx,ly; hx,ly] |> LineStyle "black" 1.0 2
             if showX then
-              for x, l in generateAxisLabels sx do
+              for x, l in generateAxisLabels style.FormatAxisXLabel sx do
                 yield Offset((0., 10.), Text(x, ly, VerticalAlign.Hanging, HorizontalAlign.Center, l)) |> FontStyle "9pt sans-serif"
             if showY then
-              for y, l in generateAxisLabels sy do
+              for y, l in generateAxisLabels style.FormatAxisYLabel sy do
                 yield Offset((-10., 0.), Text(lx, y, VerticalAlign.Middle, HorizontalAlign.End, l)) |> FontStyle "9pt sans-serif"
             yield shape ] |> calculateScales
 
@@ -442,6 +447,7 @@ module Projections =
 
   type ProjectedShapeInner<[<Measure>] 'vx, [<Measure>] 'vy> = 
     | ProjectedStyle of (Style -> Style) * ProjectedShape<'vx, 'vy>
+    | ProjectedBubble of Value<'vx> * Value<'vy> * float * float
     | ProjectedText of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * string    
     | ProjectedLine of (Value<'vx> * Value<'vy>)[]
     | ProjectedArea of (Value<'vx> * Value<'vy>)[]
@@ -595,6 +601,9 @@ module Projections =
     | Scaled(scales, _, ScaledText(x, y, va, ha, t)) -> 
         Projected(projection, scales, ProjectedText(x, y, va, ha, t))
 
+    | Scaled(scales, _, ScaledBubble(x, y, rx, ry)) -> 
+        Projected(projection, scales, ProjectedBubble(x, y, rx, ry))
+
     | Scaled(scales, _, ScaledArea area) -> 
         Projected(projection, scales, ProjectedArea area)
 
@@ -603,7 +612,6 @@ module Projections =
           let (Scaled(_, (sxinner, syinner), _)) = shape 
           getExtremes sxinner, getExtremes syinner
         let ppad = Padding((t, r, b, l), (lx, hx, ly, hy), projection)
-        console.log("PPAD = %O", ppad)
         calculateProjections shape ppad
 
     | Scaled(scales, _, ScaledStack(orient, shapes)) ->
@@ -653,6 +661,9 @@ module Drawing =
         let va = match va with Baseline -> "baseline" | Hanging -> "hanging" | Middle -> "middle"
         let ha = match ha with Start -> "start" | Center -> "middle" | End -> "end"
         Text(projectCont (x, y), t, sprintf "alignment-baseline:%s; text-anchor:%s;" va ha + formatStyle defs style)
+
+    | ProjectedBubble(x, y, rx, ry), _ -> 
+        Ellipse(projectCont (x, y), (rx, ry), formatStyle defs style)
 
     | ProjectedLine line, _ -> 
         let path = 
@@ -749,6 +760,7 @@ module Events =
     match shape with
     | ProjectedLine _
     | ProjectedText _
+    | ProjectedBubble _
     | ProjectedColumn _
     | ProjectedBar _
     | ProjectedArea _ -> ()
@@ -809,18 +821,32 @@ module Compost =
     handleEvent None
     event.Publish.Add(Some >> handleEvent)
 
+  let defaultFormat scale value = 
+    match value with
+    | CAR(CA s, _) -> s
+    | COV(CO v) ->
+        let dec = 
+          match scale with
+          | Continuous(CO l, CO h) -> decimalPoints (unbox l, unbox h)
+          | _ -> 0.
+        Common.niceNumber (unbox v) (int dec)    
+    
+  let defstyle = 
+    { Fill = Solid(1.0, RGB(196, 196, 196))
+      StrokeColor = (1.0, RGB(256, 0, 0))
+      StrokeDashArray = []
+      StrokeWidth = Pixels 2
+      Animation = None 
+      Cursor = "default"
+      Font = "10pt sans-serif"
+      FormatAxisXLabel = defaultFormat
+      FormatAxisYLabel = defaultFormat }
+
   let createSvg (width, height) viz = 
-    let scaled = calculateScales viz
+    let scaled = calculateScales defstyle viz
     let master = Scale((0.0, width), (height, 0.0))
     let projected = calculateProjections scaled master
-    let defstyle = 
-      { Fill = Solid(1.0, RGB(196, 196, 196))
-        StrokeColor = (1.0, RGB(256, 0, 0))
-        StrokeDashArray = []
-        StrokeWidth = Pixels 2
-        Animation = None 
-        Cursor = "default"
-        Font = "10pt sans-serif" }
+
     let defs = ResizeArray<_>()
     let svg = drawShape defs defstyle projected
 

@@ -36,10 +36,6 @@ module InteractiveHelpers =
     let max = match maxValue with Some m -> m | _ -> Seq.max (Seq.map snd data)
     snd (Scales.adjustRange (0.0, max))
 
-// ------------------------------------------------------------------------------------------------
-// You Draw
-// ------------------------------------------------------------------------------------------------
-
 module CompostHelpers = 
   let (|Cont|) = function COV(CO x) -> x | _ -> failwith "Expected continuous value"
   let (|Cat|) = function CAR(CA x, r) -> x, r | _ -> failwith "Expected categorical value"
@@ -47,6 +43,48 @@ module CompostHelpers =
   let Cat(x, r) = CAR(CA x, r)
 
 open CompostHelpers
+
+// ------------------------------------------------------------------------------------------------
+// You Draw
+// ------------------------------------------------------------------------------------------------
+
+module Charts = 
+  let renderBubbles (width, height) bc data = 
+    let style selValue =
+      let isDate = data |> Seq.exists (selValue >> isDate)
+      if isDate then
+        let values = data |> Array.map (selValue >> dateOrNumberAsNumber)
+        let lo, hi = asDate(Seq.min values), asDate(Seq.max values)
+        if (hi - lo).TotalDays <= 1. then
+          fun _ (Cont v) -> formatTime(asDate(v))
+        else
+          fun _ (Cont v) -> formatDate(asDate(v))
+      else Compost.defaultFormat
+
+    let chart =       
+      Layered [
+        for x, y, s in data -> 
+          let size = unbox (defaultArg s (box 2.))
+          Bubble(COV(CO (dateOrNumberAsNumber x)), COV(CO (dateOrNumberAsNumber y)), size, size)
+      ]
+
+    let chart = 
+      Style(
+        (fun s -> 
+          { s with 
+              StrokeWidth = Pixels 0
+              Fill = Solid(0.6, HTML bc)
+              FormatAxisXLabel = style (fun (x, _, _) -> x)
+              FormatAxisYLabel = style (fun (_, y, _) -> y) }),
+        Axes(true, true, AutoScale(true, true, chart)) )
+
+    h?div ["style"=>"text-align:center;padding-top:20px"] [
+      Compost.createSvg (width, height) chart
+    ]
+
+// ------------------------------------------------------------------------------------------------
+// You Guess Line
+// ------------------------------------------------------------------------------------------------
 
 module YouDrawHelpers = 
   type YouDrawEvent = 
@@ -57,12 +95,16 @@ module YouDrawHelpers =
     { Completed : bool
       Clip : float
       Data : (float * float)[]
-      Guessed : (float * option<float>)[] }
+      Guessed : (float * option<float>)[] 
+      IsKeyDate : bool }
 
   let initState data clipx = 
+    let isDate = data |> Seq.exists (fst >> isDate)
+    let data = data |> Array.map (fun (k, v) -> dateOrNumberAsNumber k, v)
     { Completed = false
       Data = data
       Clip = clipx
+      IsKeyDate = isDate
       Guessed = [| for x, y in data do if x > clipx then yield x, None |] }
 
   let handler state evt = 
@@ -118,46 +160,55 @@ module YouDrawHelpers =
           yield Text(COV(CO x), COV(CO ytx), VerticalAlign.Middle, HorizontalAlign.Center, string lbl) |> FontStyle
       ]
 
+    let coreChart = 
+      Interactive(
+        ( if state.Completed then []
+          else
+            [ MouseMove(fun evt (Cont x, Cont y) -> 
+                if (int evt.buttons) &&& 1 = 1 then trigger(Draw(x, y)) )
+              TouchMove(fun evt (Cont x, Cont y) -> 
+                trigger(Draw(x, y)) )
+              MouseDown(fun evt (Cont x, Cont y) -> trigger(Draw(x, y)) )
+              TouchStart(fun evt (Cont x, Cont y) -> trigger(Draw(x, y)) ) ]),
+        Shape.InnerScale
+          ( None, Some(CO loy, CO hiy), 
+            Layered [
+              yield labels
+              yield! markers
+              yield Style(Drawing.hideFill >> Drawing.hideStroke, Line all)
+              yield Style(
+                (fun s -> { s with StrokeColor = (1.0, HTML leftClr); Fill = Solid(0.2, HTML leftClr) }), 
+                Layered [ Area known; Line known ]) 
+              if state.Completed then
+                yield Style((fun s -> 
+                  { s with 
+                      StrokeColor = (1.0, HTML rightClr)
+                      StrokeDashArray = [ Percentage 0.; Percentage 100. ]
+                      Fill = Solid(0.0, HTML rightClr)
+                      Animation = Some(1000, "ease", fun s -> 
+                        { s with
+                            StrokeDashArray = [ Percentage 100.; Percentage 0. ]
+                            Fill = Solid(0.2, HTML rightClr) } 
+                      ) }), 
+                  Layered [ Area right; Line right ])                 
+              if guessed.Length > 1 then
+                yield Style(
+                  (fun s -> { s with StrokeColor = (1.0, HTML guessClr); StrokeDashArray = [ Integer 5; Integer 5 ] }), 
+                  Line guessed ) 
+            ]) )
+
     let chart = 
-      Axes(true, true, 
-        AutoScale((false, true),
-          Interactive(
-            ( if state.Completed then []
-              else
-                [ MouseMove(fun evt (Cont x, Cont y) -> 
-                    if (int evt.buttons) &&& 1 = 1 then trigger(Draw(x, y)) )
-                  TouchMove(fun evt (Cont x, Cont y) -> 
-                    trigger(Draw(x, y)) )
-                  MouseDown(fun evt (Cont x, Cont y) -> trigger(Draw(x, y)) )
-                  TouchStart(fun evt (Cont x, Cont y) -> trigger(Draw(x, y)) ) ]),
-            Shape.InnerScale
-              ( None, Some(CO loy, CO hiy), 
-                Layered [
-                  yield labels
-                  yield! markers
-                  yield Style(Drawing.hideFill >> Drawing.hideStroke, Line all)
-                  yield Style(
-                    (fun s -> { s with StrokeColor = (1.0, HTML leftClr); Fill = Solid(0.2, HTML leftClr) }), 
-                    Layered [ Area known; Line known ]) 
-                  if state.Completed then
-                    yield Style((fun s -> 
-                      { s with 
-                          StrokeColor = (1.0, HTML rightClr)
-                          StrokeDashArray = [ Percentage 0.; Percentage 100. ]
-                          Fill = Solid(0.0, HTML rightClr)
-                          Animation = Some(1000, "ease", fun s -> 
-                            { s with
-                                StrokeDashArray = [ Percentage 100.; Percentage 0. ]
-                                Fill = Solid(0.2, HTML rightClr) } 
-                          ) }), 
-                      Layered [ Area right; Line right ])                 
-                  if guessed.Length > 1 then
-                    yield Style(
-                      (fun s -> { s with StrokeColor = (1.0, HTML guessClr); StrokeDashArray = [ Integer 5; Integer 5 ] }), 
-                      Line guessed ) 
-                ])
-          )))
-    //let chart = InnerScale(Some(CO (fst (Seq.head state.Data)), CO (fst (Seq.last state.Data))), None, chart)
+      Style(
+        (fun s -> 
+          if state.IsKeyDate then 
+            let lo, hi = asDate(fst state.Data.[0]), asDate(fst state.Data.[state.Data.Length-1])
+            if (hi - lo).TotalDays <= 1. then
+              { s with FormatAxisXLabel = fun _ (Cont v) -> formatTime(asDate(v)) }
+            else
+              { s with FormatAxisXLabel = fun _ (Cont v) -> formatDate(asDate(v)) }
+          else s),
+        Axes(true, true, 
+          AutoScale(false, true, coreChart)))
     
     h?div ["style"=>"text-align:center;padding-top:20px"] [
       Compost.createSvg (width, height) chart
@@ -211,7 +262,7 @@ module YouGuessColsHelpers =
       window.setTimeout((fun () -> trigger Animate), 50) |> ignore
     let chart = 
       Axes(true, true, 
-        AutoScale((false, true), 
+        AutoScale(false, true, 
           Interactive
             ( ( if state.Completed then []
                 else
@@ -281,7 +332,7 @@ module YouGuessColsHelpers =
       window.setTimeout((fun () -> trigger Animate), 50) |> ignore
     let chart = 
       Axes(true, false, 
-        AutoScale((true, false), 
+        AutoScale(true, false, 
           Interactive
             ( ( if state.Completed then []
                 else
@@ -408,7 +459,7 @@ module YouGuessSortHelpers =
       window.setTimeout((fun () -> trigger Animate), 50) |> ignore
     let chart = 
       Axes(true, false, 
-        AutoScale((true, false),
+        AutoScale(true, false,
           Interactive
             ( ( if state.Completed then [] else
                   [ EventHandler.MouseDown(fun evt (_, Cat(y, _)) -> trigger(AssignCurrent y))
@@ -520,7 +571,7 @@ type YouGuessColsBars =
       (fun _ -> YouGuessColsHelpers.update)
 
 type YouGuessLine = 
-  { data : series<float, float> 
+  { data : series<obj, float> 
     markers : series<float, obj> option
     clip : float option
     min : float option
@@ -534,7 +585,7 @@ type YouGuessLine =
     guessLabel : string option 
     size : float option * float option }
   member y.setRange(min, max) = { y with min = Some min; max = Some max }
-  member y.setClip(clip) = { y with clip = Some clip }
+  member y.setClip(clip) = { y with clip = Some (dateOrNumberAsNumber clip) }
   member y.setColors(known, unknown) = { y with knownColor = Some known; unknownColor = Some unknown }
   member y.setDrawColor(draw) = { y with drawColor = Some draw }
   member y.setMarkerColor(marker) = { y with markerColor = Some marker }
@@ -549,10 +600,9 @@ type YouGuessLine =
     let markers = markers |> Array.sortBy fst
     return! InteractiveHelpers.showAppAsync outputId y.size y.data
       (fun data ->
-          let clipx = match y.clip with Some v -> v | _ -> fst (data.[data.Length / 2])
-          YouDrawHelpers.initState (Array.sortBy fst data) clipx)
-      (fun data size -> 
-          let data = Array.sortBy fst data
+          let clipx = match y.clip with Some v -> v | _ -> dateOrNumberAsNumber (fst (data.[data.Length / 2]))
+          YouDrawHelpers.initState (Array.sortBy (fst >> dateOrNumberAsNumber) data) clipx)
+      (fun data size ->           
           let loy = match y.min with Some v -> v | _ -> data |> Seq.map snd |> Seq.min
           let hiy = match y.max with Some v -> v | _ -> data |> Seq.map snd |> Seq.max       
           let lc, dc, gc, mc = 
@@ -561,7 +611,7 @@ type YouGuessLine =
           YouDrawHelpers.render size markers
             (defaultArg y.topLabel "", defaultArg y.knownLabel "", defaultArg y.guessLabel "") 
             (lc,dc,gc,mc) (loy, hiy)) 
-      (fun data -> YouDrawHelpers.handler) } 
+      (fun _ -> YouDrawHelpers.handler) } 
 
 type YouGuessSortBars = 
   { data : series<string, float> 
@@ -577,6 +627,41 @@ type YouGuessSortBars =
       (fun _ size -> YouGuessSortHelpers.renderBars size)
       (fun _ -> YouGuessSortHelpers.update)
 
+type CompostBubblesChartSet =
+  { data : series<obj, obj> 
+    selectY : obj -> obj
+    selectX : obj -> obj
+    selectSize : option<obj -> obj>
+    bubbleColor : string option
+    size : float option * float option }
+  member y.setColors(?bubbleColor) = 
+    { y with bubbleColor = defaultArg bubbleColor y.bubbleColor }
+  member y.setSize(?width, ?height) = 
+    let orElse (a:option<_>) b = if a.IsSome then a else b
+    { y with size = (orElse width (fst y.size), orElse height (snd y.size)) }
+  member y.show(outputId) = 
+    InteractiveHelpers.showApp outputId y.size y.data
+      (fun _ -> ())
+      (fun data size _ _ -> 
+        let ss = match y.selectSize with Some f -> (fun x -> Some(f x)) | _ -> (fun _ -> None)
+        let data = data |> Array.map (fun (_, v) -> y.selectX v, y.selectY v, ss v)
+        let bc = defaultArg y.bubbleColor "#20a030"
+        Charts.renderBubbles size bc data)
+      (fun _ _ _ -> ())
+
+type CompostBubblesChart<'k, 'v>(data:series<'k, 'v>) = 
+  member c.set(x:'v -> obj, y:'v -> obj, ?size:'v -> obj) = 
+    { CompostBubblesChartSet.data = unbox data
+      selectX = unbox x; selectY = unbox y
+      selectSize = unbox size; size = None, None
+      bubbleColor = None }
+
+type CompostCharts() = 
+  member c.bubbles(data:series<'k, 'v>) = CompostBubblesChart<'k, 'v>(data)
+
+type compost = 
+  static member charts = CompostCharts()
+
 type youguess = 
   static member columns(data:series<string, float>) = 
     { YouGuessColsBars.data = data; topLabel = None; kind = Cols; maxValue = None; size = None, None }
@@ -584,7 +669,7 @@ type youguess =
     { YouGuessColsBars.data = data; topLabel = None; kind = Bars; maxValue = None; size = None, None }
   static member sortBars(data:series<string, float>) = 
     { YouGuessSortBars.data = data; maxValue = None; size = None, None }
-  static member line(data:series<float, float>) =
+  static member line(data:series<obj, float>) =
     { YouGuessLine.data = data; clip = None; min = None; max = None 
       markerColor = None; guessLabel = None; topLabel = None; knownLabel = None; markers = None
       knownColor = None; unknownColor = None; drawColor = None; size = None, None }

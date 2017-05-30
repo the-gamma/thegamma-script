@@ -16,14 +16,23 @@ open TheGamma.TypeProviders
 // Operations that we can do on the table
 // ------------------------------------------------------------------------------------------------
 
-type Aggregation = 
+[<RequireQualifiedAccess>]
+type GroupAggregation = 
   | GroupKey
   | CountAll
   | CountDistinct of string
-  | ReturnUnique of string
   | ConcatValues of string
   | Sum of string
   | Mean of string
+
+[<RequireQualifiedAccess>]
+type WindowAggregation = 
+  | Min of string
+  | Max of string
+  | Mean of string
+  | FirstKey
+  | LastKey
+  | MiddleKey
 
 type SortDirection =
   | Ascending
@@ -33,12 +42,24 @@ type Paging =
   | Take of string
   | Skip of string
   
-type FilterOperator = And | Or
+type FilterOperator = 
+  | And | Or
+
+type RelationalOperator = 
+  | Equals 
+  | NotEquals 
+  | LessThan
+  | GreaterThan 
+  | InRange
+
+type FilterCondition = RelationalOperator * string * string
+
 type Transformation = 
   | DropColumns of string list
   | SortBy of (string * SortDirection) list
-  | GroupBy of string list * Aggregation list
-  | FilterBy of FilterOperator * (string * bool * string) list
+  | GroupBy of string list * GroupAggregation list
+  | WindowBy of string * string * WindowAggregation list
+  | FilterBy of FilterOperator * FilterCondition list
   | Paging of Paging list
   | Empty
   // One of these may be the last one
@@ -53,14 +74,27 @@ type Field =
 
 module Transform = 
 
-  let private formatAgg = function
-    | GroupKey -> "key"
-    | CountAll -> "count-all"
-    | CountDistinct(f) -> "count-dist " + Ast.escapeIdent f
-    | ReturnUnique(f) -> "unique " + Ast.escapeIdent f
-    | ConcatValues(f) -> "concat-vals " + Ast.escapeIdent f
-    | Sum(f) -> "sum " + Ast.escapeIdent f
-    | Mean(f) -> "mean " + Ast.escapeIdent f
+  let private formatGroupAgg = function
+    | GroupAggregation.GroupKey -> "key"
+    | GroupAggregation.CountAll -> "count-all"
+    | GroupAggregation.CountDistinct(f) -> "count-dist " + Ast.escapeIdent f
+    | GroupAggregation.ConcatValues(f) -> "concat-vals " + Ast.escapeIdent f
+    | GroupAggregation.Sum(f) -> "sum " + Ast.escapeIdent f
+    | GroupAggregation.Mean(f) -> "mean " + Ast.escapeIdent f
+
+  let private formatWinAgg = function
+    | WindowAggregation.FirstKey -> "first-key"
+    | WindowAggregation.MiddleKey -> "mid-key"
+    | WindowAggregation.LastKey -> "last-key"
+    | WindowAggregation.Mean(f) -> "mean " + Ast.escapeIdent f
+    | WindowAggregation.Min(f) -> "min " + Ast.escapeIdent f
+    | WindowAggregation.Max(f) -> "max " + Ast.escapeIdent f
+
+  let formatCondition (op, f, v) =
+    let op = 
+      match op with 
+      | Equals -> "eq" | NotEquals -> "neq" | LessThan -> "lte" | GreaterThan -> "gte" | InRange -> "in"
+    Ast.escapeIdent f + " " + op + " " + Ast.escapeIdent v
 
   let toUrl transforms = 
     [ for t in transforms ->
@@ -68,10 +102,11 @@ module Transform =
         | GetTheData -> []
         | Metadata -> ["metadata", []]
         | GetRange fld -> ["range", [fld]]
-        | FilterBy(op, conds) -> ["filter", (match op with And -> "and" | Or -> "or")::(List.map (fun (f,b,v) -> Ast.escapeIdent f + (if b then " eq " else " neq ") + Ast.escapeIdent v) conds)]
+        | FilterBy(op, conds) -> ["filter", (match op with And -> "and" | Or -> "or")::(List.map formatCondition conds)]
         | DropColumns(columns) -> ["drop", columns]
         | SortBy(columns) -> ["sort", (List.map (fun (c, o) -> c + (if o = Ascending then " asc" else " desc")) columns)]
-        | GroupBy(flds, aggs) -> ["groupby", (List.map (fun fld -> "by " + Ast.escapeIdent fld) flds) @ (List.map formatAgg aggs)]
+        | GroupBy(flds, aggs) -> ["groupby", (List.map (fun fld -> "by " + Ast.escapeIdent fld) flds) @ (List.map formatGroupAgg aggs)]
+        | WindowBy(fld, size, aggs) -> ["windowby", ("by " + Ast.escapeIdent fld) :: size :: (List.map formatWinAgg aggs)]
         | Paging(ops) -> ops |> List.map (function Take k -> "take", [k] | Skip k -> "skip", [k]) 
         | GetSeries(k, v) -> ["series", [k; v]]
         | Empty -> [] ]
@@ -106,17 +141,26 @@ module Transform =
     | DropColumns(drop) ->
         let dropped = set drop
         fields |> List.filter (fun f -> not(dropped.Contains f.Name))
+    | WindowBy(key, _, aggs) ->
+        let oldFields = dict [ for f in fields -> f.Name, f ]
+        aggs 
+        |> List.collect (function
+           | WindowAggregation.FirstKey -> [ { Name = "first " + key; Type = oldFields.[key].Type } ]
+           | WindowAggregation.MiddleKey -> [ { Name = "middle " + key; Type = oldFields.[key].Type } ]
+           | WindowAggregation.LastKey -> [ { Name = "last " + key; Type = oldFields.[key].Type } ]
+           | WindowAggregation.Mean fld 
+           | WindowAggregation.Min fld 
+           | WindowAggregation.Max fld -> [ oldFields.[fld] ])
     | GroupBy(flds, aggs) ->
         let oldFields = dict [ for f in fields -> f.Name, f ]
         aggs 
         |> List.collect (function
-           | GroupKey -> List.map (fun f -> oldFields.[f]) flds
-           | ReturnUnique fld
-           | ConcatValues fld
-           | Sum fld -> [ oldFields.[fld] ]
-           | Mean fld -> [ oldFields.[fld] ]
-           | CountAll -> [ { Name = "count"; Type = PrimitiveType.Number } ]
-           | CountDistinct fld -> [ { Name = oldFields.[fld].Name; Type = PrimitiveType.Number } ])
+           | GroupAggregation.GroupKey -> List.map (fun f -> oldFields.[f]) flds
+           | GroupAggregation.ConcatValues fld
+           | GroupAggregation.Sum fld -> [ oldFields.[fld] ]
+           | GroupAggregation.Mean fld -> [ oldFields.[fld] ]
+           | GroupAggregation.CountAll -> [ { Name = "count"; Type = PrimitiveType.Number } ]
+           | GroupAggregation.CountDistinct fld -> [ { Name = oldFields.[fld].Name; Type = PrimitiveType.Number } ])
       
   let transformFields fields tfs = 
     tfs |> List.fold singleTransformFields (List.ofSeq fields) |> List.ofSeq
@@ -133,17 +177,24 @@ let trimRight c (s:string) = s.ToCharArray() |> Array.rev |> Array.skipWhile ((=
 let concatUrl (a:string) (b:string) =
   (trimRight '/' a) + "/" + (trimLeft '/' b)
 
-let makeObjectType members = 
-  { new ObjectType with 
-      member x.Members = Array.ofSeq members 
-      member x.TypeEquals _ = false } |> Type.Object
+type PivotObject(members:seq<Member>) =
+  member x.MemberNames = [ for m in members -> m.Name ]
+  interface ObjectType with 
+    member x.Members = Array.ofSeq members 
+    member x.TypeEquals y = 
+      match y with
+      | :? PivotObject as y -> y.MemberNames = x.MemberNames 
+      | _ -> false
+
+let makeObjectType members = Type.Object(PivotObject(members))
 
 let isNumeric fld = fld = PrimitiveType.Number
+let isDate fld = fld = PrimitiveType.Date
 let isConcatenable fld = fld = PrimitiveType.String
 
 let getTypeAndEmitter = function 
   | PrimitiveType.String -> Type.Primitive(PrimitiveType.String), id
-  | PrimitiveType.Date -> Type.Primitive(PrimitiveType.String), fun e -> ident("Date")?parse /@/ [e]
+  | PrimitiveType.Date -> Type.Primitive(PrimitiveType.String), fun e -> NewExpression(ident("Date"), [ident("Date")?parse /@/ [e]], None)
   | PrimitiveType.Number -> Type.Primitive(PrimitiveType.Number), fun e -> ident "Number" /@/ [e]
   | PrimitiveType.Bool -> Type.Primitive(PrimitiveType.Number), fun e -> ident "Boolean" /@/ [e]
   | PrimitiveType.Unit -> Type.Primitive(PrimitiveType.Unit), fun e -> NullLiteral(None)
@@ -156,16 +207,15 @@ let makeMethodEmitter callid pars =
       let args = arr [ for v in args -> v ]
       this?addCall /@/ [str callid; args]) }
 
-let makeDataEmitter isPreview isSeries tfs = 
+let makeDataEmitter isPreview isSeries convValues tfs = 
   { Emit = fun this -> 
-      // TODO: This is not properly recursively transforming values, but they're just int/string, so it's OK
       if isSeries then
         ident("series")?create /@/ 
-          [ this?getData /@/ [str (Transform.toUrl (List.rev tfs)); bool isPreview]
+          [ this?getData /@/ [convValues; str (Transform.toUrl (List.rev tfs)); bool isPreview]
             str "key"; str "value"; str "" ]
       else
         ident("series")?ordinal /@/ 
-          [ this?getData /@/ [str (Transform.toUrl (List.rev tfs)); bool isPreview]
+          [ this?getData /@/ [convValues; str (Transform.toUrl (List.rev tfs)); bool isPreview]
             str "key"; str "value"; str "" ] }
 
 
@@ -200,26 +250,41 @@ and makeMethod ctx name tfs callid args =
 and makeDataMember ctx name isPreview tfs =
   let fields = Transform.transformFields ctx.InputFields (List.rev tfs)
   Log.trace("providers", "Make data member using transform %O. Got fields: %O", [| box tfs; box fields |])
-  let dataTyp, isSeries = 
+  let isSeries, dataTyp, convValues = 
     match tfs with 
     | (GetSeries _)::_ -> 
         match fields with
         | [kf; vf] ->  
-            FSharpProvider.applyTypes (ctx.LookupNamed "series") [Type.Primitive kf.Type; Type.Primitive vf.Type], true
+            true,
+            FSharpProvider.applyTypes (ctx.LookupNamed "series") [Type.Primitive kf.Type; Type.Primitive vf.Type], 
+            func "o" (fun arg -> 
+              arr [ snd (getTypeAndEmitter kf.Type) (arg /?/ num 0.)
+                    snd (getTypeAndEmitter vf.Type) (arg /?/ num 1.) ])
         | _ -> failwith "makeDataMember: Series should have key and value"
     | _ -> 
-        let membs = 
-          fields |> Array.ofSeq |> Array.map (fun fld ->
-            let memTy, memConv = getTypeAndEmitter fld.Type
-            let emitter = { Emit = fun inst -> memConv <| (inst /?/ str fld.Name) }
-            { Member.Name = fld.Name; Type = memTy; Metadata = [docMeta (Documentation.Text "")]; Emitter = emitter })
+        let convs, membs = 
+          fields 
+            |> Array.ofSeq 
+            |> Array.map (fun fld ->
+              let memTy, memConv = getTypeAndEmitter fld.Type
+              let emitter = { Emit = fun inst -> inst /?/ str fld.Name }
+              (fld.Name, memConv),
+              { Member.Name = fld.Name; Type = memTy; Emitter = emitter;
+                Metadata = [docMeta (Documentation.Text "")] })
+            |> Array.unzip
         let recTyp = makeObjectType membs
-        FSharpProvider.applyTypes (ctx.LookupNamed "series") [Type.Primitive PrimitiveType.Number; recTyp ], false
+        false,
+        FSharpProvider.applyTypes (ctx.LookupNamed "series") [Type.Primitive PrimitiveType.Number; recTyp ],
+        func "o" (fun arg ->
+          let mems = 
+            [ for fld, conv in convs ->
+                ObjectProperty(str fld, conv (arg /?/ str fld), true, None) ]
+          ObjectExpression(mems, None) )
 
   let tfs = if isSeries then tfs else GetTheData::tfs
   let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box tfs }
   let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box ctx.Fields  }
-  { Member.Name = name; Type = dataTyp; Metadata = [meta1; meta2]; Emitter = makeDataEmitter isPreview isSeries tfs }
+  { Member.Name = name; Type = dataTyp; Metadata = [meta1; meta2]; Emitter = makeDataEmitter isPreview isSeries convValues tfs }
 
 and handleGetSeriesRequest ctx rest k v = 
   match k, v with
@@ -266,26 +331,58 @@ and handleSortRequest ctx rest keys =
         yield makeProperty ctx (prefix + field.Name + " descending") (SortBy((field.Name, Descending)::keys)::rest) ]
   |> makeObjectType    
 
+and handleWindowRequest ctx rest wndid = 
+  [ for field in ctx.Fields do 
+      if isDate field.Type then
+        yield makeMethod ctx ("window by " + field.Name) (WindowBy(field.Name, wndid, [])::rest) wndid ["size", PrimitiveType.Number] ]
+  |> makeObjectType  
+
+and handleWindowAggRequest ctx rest fld size aggs = 
+  let containsKey = aggs |> Seq.exists(function
+    | WindowAggregation.FirstKey | WindowAggregation.LastKey | WindowAggregation.MiddleKey -> true
+    | _ -> false)
+  let containsField fld = aggs |> Seq.exists (function 
+    | WindowAggregation.Max f | WindowAggregation.Min f | WindowAggregation.Mean f -> f = fld 
+    | WindowAggregation.FirstKey | WindowAggregation.LastKey | WindowAggregation.MiddleKey -> false)
+
+  let makeAggMember name agg = 
+    makeProperty ctx name (WindowBy(fld, size, agg::aggs)::rest) 
+
+  [ if not (List.isEmpty aggs) then
+      yield makeProperty ctx "then" (Empty::WindowBy(fld, size, aggs)::rest) 
+    if not containsKey then
+      yield makeAggMember ("first " + fld) WindowAggregation.FirstKey
+      yield makeAggMember ("last " + fld) WindowAggregation.LastKey
+      yield makeAggMember ("middle " + fld) WindowAggregation.MiddleKey
+    for fld in ctx.Fields do
+      if not (containsField fld.Name) then
+        if isNumeric fld.Type then
+          yield makeAggMember ("min " + fld.Name) (WindowAggregation.Min fld.Name)
+          yield makeAggMember ("max " + fld.Name) (WindowAggregation.Max fld.Name)
+          yield makeAggMember ("mean " + fld.Name) (WindowAggregation.Mean fld.Name) ]
+  |> makeObjectType  
 
 and aggregationMembers ctx rest keys aggs = 
-  let containsCountAll = aggs |> Seq.exists ((=) CountAll)
+  let containsCountAll = aggs |> Seq.exists ((=) GroupAggregation.CountAll)
   let containsField fld = aggs |> Seq.exists (function 
-    | CountDistinct f | ReturnUnique f | ConcatValues f | Sum f | Mean f -> f = fld | CountAll | GroupKey -> false)
+    | GroupAggregation.CountDistinct f | GroupAggregation.ConcatValues f 
+    | GroupAggregation.Sum f | GroupAggregation.Mean f -> f = fld 
+    | GroupAggregation.CountAll | GroupAggregation.GroupKey -> false)
+
   let makeAggMember name agg = 
     makeProperty ctx name (GroupBy(keys,agg::aggs)::rest) 
 
   [ yield makeProperty ctx "then" (Empty::GroupBy(keys, aggs)::rest) 
     if not containsCountAll then 
-      yield makeAggMember "count all" CountAll
+      yield makeAggMember "count all" GroupAggregation.CountAll
     for fld in ctx.Fields do
       if not (containsField fld.Name) then
-        yield makeAggMember ("count distinct " + fld.Name) (CountDistinct fld.Name) 
-        yield makeAggMember ("return unique " + fld.Name) (ReturnUnique fld.Name) 
+        yield makeAggMember ("count distinct " + fld.Name) (GroupAggregation.CountDistinct fld.Name) 
         if isConcatenable fld.Type then
-          yield makeAggMember ("concatenate values of " + fld.Name) (ConcatValues fld.Name)
+          yield makeAggMember ("concatenate values of " + fld.Name) (GroupAggregation.ConcatValues fld.Name)
         if isNumeric fld.Type then
-          yield makeAggMember ("average " + fld.Name) (Mean fld.Name)
-          yield makeAggMember ("sum " + fld.Name) (Sum fld.Name) ]
+          yield makeAggMember ("average " + fld.Name) (GroupAggregation.Mean fld.Name)
+          yield makeAggMember ("sum " + fld.Name) (GroupAggregation.Sum fld.Name) ]
 
 and handleGroupAggRequest ctx rest keys aggs =
   aggregationMembers ctx rest keys aggs  
@@ -296,7 +393,7 @@ and handleGroupRequest ctx rest keys =
   [ for field in ctx.Fields ->
       makeProperty ctx (prefix + field.Name) (GroupBy(field.Name::keys, [])::rest) 
     if not (List.isEmpty keys) then
-      yield! aggregationMembers ctx rest keys [GroupKey] ]
+      yield! aggregationMembers ctx rest keys [GroupAggregation.GroupKey] ]
   |> makeObjectType  
 
 and handleFilterEqNeqRequest ctx rest (fld, eq) op conds = async {
@@ -312,10 +409,10 @@ and handleFilterEqNeqRequest ctx rest (fld, eq) op conds = async {
   let options = jsonParse<string[]> options
   return
     [ for opt in options do
-        yield makeProperty ctx opt (FilterBy(op, (fld, eq, opt)::conds)::rest) ] 
+        yield makeProperty ctx opt (FilterBy(op, (eq, fld, opt)::conds)::rest) ] 
     |> makeObjectType }
 
-and handleFilterRequest ctx rest op conds = 
+and handleFilterRequest ctx rest flid op conds = 
   let prefixes = 
     match conds, op with
     | [], _ -> ["", And] 
@@ -324,8 +421,13 @@ and handleFilterRequest ctx rest op conds =
     | _, Or -> ["or ", Or]
   [ for prefix, op in prefixes do
       for field in ctx.Fields do
-        yield makeProperty ctx (prefix + field.Name + " is") (FilterBy(op, (field.Name, true, "!")::conds)::rest) 
-        yield makeProperty ctx (prefix + field.Name + " is not") (FilterBy(op, (field.Name, false, "!")::conds)::rest) 
+        if field.Type = PrimitiveType.String then
+          yield makeProperty ctx (prefix + field.Name + " is") (FilterBy(op, (Equals, field.Name, "!")::conds)::rest) 
+          yield makeProperty ctx (prefix + field.Name + " is not") (FilterBy(op, (NotEquals, field.Name, "!")::conds)::rest) 
+        if field.Type = PrimitiveType.Number then
+          yield makeMethod ctx (prefix + field.Name + " is less than") (FilterBy(op, (LessThan, field.Name, flid)::conds)::rest) flid ["value", PrimitiveType.Number]
+          yield makeMethod ctx (prefix + field.Name + " is greater than") (FilterBy(op, (GreaterThan, field.Name, flid)::conds)::rest) flid ["value", PrimitiveType.Number]
+          yield makeMethod ctx (prefix + field.Name + " is in range") (FilterBy(op, (InRange, field.Name, flid)::conds)::rest) flid ["minimum", PrimitiveType.Number; "maximum", PrimitiveType.Number]
     if not (List.isEmpty conds) then
       yield makeProperty ctx "then" (Empty::FilterBy(op, conds)::rest) ]
   |> makeObjectType  
@@ -337,13 +439,15 @@ and makePivotTypeImmediate ctx tfs = async {
   // Starting a new pivoting operation
   | Empty ->
     return
-      [ makeProperty ctx "group data" (GroupBy([], [])::rest) 
-        makeProperty ctx "filter data" (FilterBy(And, [])::rest) 
-        makeProperty ctx "sort data" (SortBy([])::rest) 
-        makeProperty ctx "drop columns" (DropColumns([])::rest) 
-        makeProperty ctx "paging" (Paging([])::rest) 
-        makeProperty ctx "get series" (GetSeries("!","!")::rest) 
-        makeDataMember ctx "get the data" false rest ]
+      [ yield makeProperty ctx "group data" (GroupBy([], [])::rest) 
+        yield makeProperty ctx "filter data" (FilterBy(And, [])::rest) 
+        yield makeProperty ctx "sort data" (SortBy([])::rest) 
+        yield makeProperty ctx "drop columns" (DropColumns([])::rest) 
+        yield makeProperty ctx "paging" (Paging([])::rest) 
+        yield makeProperty ctx "get series" (GetSeries("!","!")::rest) 
+        yield makeDataMember ctx "get the data" false rest 
+        if ctx.Fields |> List.exists (fun fld -> fld.Type = PrimitiveType.Date) then
+          yield makeProperty ctx "windowing" (WindowBy("!", "!", [])::rest) ]
       |> makeObjectType    
   // 
   | GetSeries(k, v) ->
@@ -355,10 +459,16 @@ and makePivotTypeImmediate ctx tfs = async {
       return handleSortRequest ctx rest keys
   | DropColumns(dropped) ->
       return handleDropRequest ctx rest dropped
-  | FilterBy(op, (fld, eq, "!")::conds) ->
-      return! handleFilterEqNeqRequest ctx rest (fld, eq) op conds
+  | FilterBy(fop, (rop & (Equals | NotEquals), fld, "!")::conds) ->
+      return! handleFilterEqNeqRequest ctx rest (fld, rop) fop conds
   | FilterBy(op, conds) ->
-      return handleFilterRequest ctx rest op conds
+      let flid = conds.Length + (Seq.sumBy (function FilterBy(_, cds) -> cds.Length | _ -> 0) rest)
+      return handleFilterRequest ctx rest (sprintf "flid-%d" flid) op conds
+  | WindowBy("!", "!", []) ->
+      let wnid = rest |> Seq.sumBy (function WindowBy _ -> 1 | _ -> 0) |> sprintf "wnid-%d"
+      return handleWindowRequest ctx rest wnid
+  | WindowBy(fld, size, aggs) ->
+      return handleWindowAggRequest ctx rest fld size aggs
   | GroupBy(flds, []) ->
       return handleGroupRequest ctx rest flds
   | GroupBy(flds, aggs) ->
@@ -368,8 +478,9 @@ and makePivotTypeImmediate ctx tfs = async {
 
 and adjustForPreview tfs = 
   match tfs with
+  | WindowBy(_,"!",_)::tfs -> tfs // We do not yet know the size 
   | GroupBy([], _)::tfs -> tfs // We do not yet know the grouping key, so return original data
-  | GroupBy(k, [])::tfs -> GroupBy(k, [GroupKey])::tfs // We do not have any aggregations yet
+  | GroupBy(k, [])::tfs -> GroupBy(k, [GroupAggregation.GroupKey])::tfs // We do not have any aggregations yet
   | GetSeries _::tfs -> tfs // We do not yet know the key/value of the series, so return original data
   | _ -> tfs
 
@@ -409,6 +520,7 @@ let providePivotType root ignoreFilter name lookupNamed = async {
       | "string" -> PrimitiveType.String
       | "bool" -> PrimitiveType.Bool
       | "number" -> PrimitiveType.Number
+      | "date" -> PrimitiveType.Date
       | s -> failwith (sprintf "The property '%s' has invalid type '%s'. Only 'string', 'number' and 'bool' are supported." kv.key s)
     kv.key, typ)
   return makePivotGlobalValue root name lookupNamed ignoreFilter fields }

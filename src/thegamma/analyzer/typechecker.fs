@@ -153,7 +153,10 @@ and typeCheckEntity ctx (e:Entity) =
         let typ = getType ctx operand 
         if not (typesEqual typ (Type.Primitive PrimitiveType.Number)) then
           Errors.TypeChecker.numericOperatorExpectsNumbers operator idx typ |> addError ctx operand )
-      Type.Primitive PrimitiveType.Number
+      match operator with
+      | Operator.Equals | Operator.LessThan | Operator.GreaterThan 
+      | Operator.LessThanOrEqual | Operator.GreaterThanOrEqual -> Type.Primitive PrimitiveType.Bool
+      | _ -> Type.Primitive PrimitiveType.Number
 
   | EntityKind.List(elems) ->      
       let typs = elems |> List.map (getType ctx)

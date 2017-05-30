@@ -123,7 +123,7 @@ let precedence = function
   | Operator.GreaterThan | Operator.GreaterThanOrEqual
   | Operator.LessThan | Operator.LessThanOrEqual -> 1, Left
   | Operator.Plus | Operator.Minus -> 2, Left
-  | Operator.Multiply | Operator.Divide -> 3, Left
+  | Operator.Modulo | Operator.Multiply | Operator.Divide -> 3, Left
   | Operator.Power -> 4, Right
   
 /// Represnts a sequence of expressions separated by binary operators

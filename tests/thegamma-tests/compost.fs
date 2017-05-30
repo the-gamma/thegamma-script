@@ -131,7 +131,7 @@ let zzzzzz() =
       [ OuterScale(None, Some(Continuous(CO 0.0, CO 1.0)), s1e) 
         OuterScale(None, Some(Continuous(CO 1.0, CO 2.0)), s2e) ]
 
-  let scaled = Scales.calculateScales s
+  let scaled = Scales.calculateScales Compost.defstyle s
   let master = Projections.Scale((0.0, 500.0), (500.0, 0.0))
   let projected = Projections.calculateProjections scaled master
   

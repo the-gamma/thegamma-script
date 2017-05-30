@@ -57,6 +57,8 @@ type PropertyMember =
     name : string 
     returns:Type }
   interface Member
+  static member Create(m, r) =
+    { kind = "property"; name = m; returns = r } :> Member
 
 type ExportedType = 
   { name : string
@@ -85,7 +87,7 @@ let rec formatType ctx (genPars:Map<_, _>) (typ:System.Type) =
   | "Boolean" -> PrimitiveType.Create("bool")
   | "String" -> PrimitiveType.Create("string")
   | "Double" -> PrimitiveType.Create("float")
-  | "DateTime" -> PrimitiveType.Create("object") // you wish
+  | "DateTime" -> PrimitiveType.Create("date")
   | "Object" -> PrimitiveType.Create("object")
   | "Int32" -> PrimitiveType.Create("int")
   | "Void" -> PrimitiveType.Create("unit")
@@ -127,10 +129,15 @@ let exportType ctx (typ:System.Type) kind =
               ( m.Name, [ for t in typArgsSrc -> GenericParameterType.Create(t.Name) ], 
                 pars, formatType ctx typArgsNew m.ReturnType) ]
 
+  let properties = 
+    [ for m in typ.GetProperties(BindingFlags.DeclaredOnly ||| kind ||| BindingFlags.Public) do
+        if not m.IsSpecialName then
+          printfn "%s.%s" typ.Name m.Name
+          yield PropertyMember.Create( m.Name, formatType ctx typArgs m.PropertyType) ]
 
   { typepars = [| for t in typArgs -> GenericParameterType.Create(t.Key) |]
     ``static`` = isStatic; instance = [||]
-    members = Array.ofSeq methods 
+    members = Array.ofSeq (methods  @ properties)
     name = defaultArg (ctx.KnownTypes.TryFind(typ.Name)) typ.Name }
 
 
@@ -162,23 +169,27 @@ let recordTypes =
   [ for t in asm.GetTypes() do 
       if t.FullName.StartsWith("TheGamma.GoogleCharts.Options+") then yield t ]
 
+let ignoredTypes = 
+  [ "IEnumerable`1"; "FSharpAsync`1"; "ChartData"; "IComparer"; "IEqualityComparer"; "DomNode";
+    "YouGuessColsBarsKind"; "FSharpSet`1"; "FSharpList`1" ]
+        
 let knownTypes = 
   [ yield! 
-      [ "IEnumerable`1", "seq" // wishful thinking
-        "FSharpAsync`1", "async" // dtto
-        "IComparer", "object"
-        "IEqualityComparer", "object"
-        "DomNode", "object"
-        "table`2", "table"
-        "youguess", "youguess"
-        "YouGuessLine", "YouuGuessLine"
+      [ "table`2", "table"
+        "placeholder", "placeholder"
+        "series`2", "series"
+        //"youguess", "youguess"
+        "YouGuessLine", "YouGuessLine"
         "YouGuessSortBars", "YouGuessSortBars"
         "YouGuessColsBars", "YouGuessColsBars"
-        "YouGuessColsBarsKind", "object"
 
-        "placeholder", "placeholder"
-        "timeline`2", "timeline"
-        "series`2", "series"; "value`1", "value"; "options", "options" ]
+        "CompostBubblesChartSet", "CompostBubblesChartSet"
+        "CompostBubblesChart`2", "CompostBubblesChart"
+        "CompostCharts", "CompostCharts"
+        //"value`1", "value"
+        //"options", "options" 
+        ]
+    for t in ignoredTypes do yield t, "object"
     for t in recordTypes do yield t.Name, t.Name 
     for t in chartTypes do yield t.Name, t.Name ] |> Map.ofSeq 
 
@@ -195,22 +206,30 @@ let e =
       yield { exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Static 
                 with instance = [| "table" |] }
       yield exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Instance
+
       yield exportType ctx (asm.GetType("TheGamma.Interactive.YouGuessLine")) BindingFlags.Instance 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.YouGuessColsBars")) BindingFlags.Instance 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.YouGuessSortBars")) BindingFlags.Instance 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.youguess")) BindingFlags.Instance 
       yield { exportType ctx (asm.GetType("TheGamma.Interactive.youguess")) BindingFlags.Static 
                 with instance = [| "youguess" |] }
-      yield exportType ctx (asm.GetType("TheGamma.Maps.timeline`2")) BindingFlags.Instance 
-      yield { exportType ctx (asm.GetType("TheGamma.Maps.timeline`2")) BindingFlags.Static 
-                with instance = [| "timeline$1" |] }
-      yield { exportType ctx (asm.GetType("TheGamma.Maps.geo")) BindingFlags.Static 
-                with instance = [| "geo" |] }
-      yield { exportType ctx (asm.GetType("TheGamma.Maps.math")) BindingFlags.Static 
+            
+      yield exportType ctx (asm.GetType("TheGamma.Interactive.CompostBubblesChartSet")) BindingFlags.Instance 
+      yield exportType ctx (asm.GetType("TheGamma.Interactive.CompostBubblesChart`2")) BindingFlags.Instance 
+      yield exportType ctx (asm.GetType("TheGamma.Interactive.CompostCharts")) BindingFlags.Instance 
+      yield exportType ctx (asm.GetType("TheGamma.Interactive.compost")) BindingFlags.Instance 
+      yield { exportType ctx (asm.GetType("TheGamma.Interactive.compost")) BindingFlags.Static 
+                with instance = [| "compost" |] }
+
+      yield { exportType ctx (asm.GetType("TheGamma.General.date")) BindingFlags.Static 
+                with instance = [| "date$1" |] }
+      yield { exportType ctx (asm.GetType("TheGamma.General.math")) BindingFlags.Static 
                 with instance = [| "math" |] }
+
       yield exportType ctx (asm.GetType("TheGamma.Series.series`2")) BindingFlags.Instance 
       yield { exportType ctx (asm.GetType("TheGamma.Series.series`2")) BindingFlags.Static 
                 with instance = [| "series" |] }
+
       yield { exportType ctx (asm.GetType("TheGamma.html")) BindingFlags.Static 
                 with instance = [| "html" |] } |]
 

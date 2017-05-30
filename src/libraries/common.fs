@@ -6,6 +6,51 @@ open Fable.Import.Browser
 open System.Collections.Generic
 module FsOption = Microsoft.FSharp.Core.Option
 
+[<Emit("(typeof($0)=='number')")>]
+let isNumber(n:obj) : bool = failwith "!"
+
+[<Emit("($0 instanceof Date)")>]
+let isDate(n:obj) : bool = failwith "!"
+
+[<Emit("new Date($0)")>]
+let asDate(n:float) : System.DateTime = failwith "!"
+
+[<Emit("($0 instanceof Date) ? $0.getTime() : $0")>]
+let dateOrNumberAsNumber(n:obj) : float = failwith "!"
+
+[<Emit("""($0.toLocaleString("en-US",{day:"numeric",year:"numeric",month:"short"}))""")>]
+let formatDate(d:obj) : string = failwith "!"
+
+[<Emit("""($0.toLocaleString("en-US",{hour:"numeric",minute:"numeric",second:"numeric"}))""")>]
+let formatTime(d:obj) : string = failwith "!"
+
+[<Emit("""($0.toLocaleString("en-US",{hour:"numeric",minute:"numeric",second:"numeric"}) + ", " +
+    $0.toLocaleString("en-US",{day:"numeric",year:"numeric",month:"short"}))""")>]
+let formatDateTime(d:obj) : string = failwith "!"
+
+[<Emit("(typeof($0)=='object')")>]
+let isObject(n:obj) : bool = failwith "!"
+
+[<Emit("isNaN($0)")>]
+let isNaN(n:float) : bool = failwith "!"
+
+let niceNumber num decs =
+  let str = string num
+  let dot = str.IndexOf('.')
+  let before, after = 
+    if dot = -1 then str, ""
+    else str.Substring(0, dot), str.Substring(dot + 1, min decs (str.Length - dot - 1))
+  let after = 
+    if after.Length < decs then after + System.String [| for i in 1 .. (decs - after.Length) -> '0' |]
+    else after 
+  let mutable res = before
+  if before.Length > 5 then
+    for i in before.Length-1 .. -1 .. 0 do
+      let j = before.Length - i
+      if i <> 0 && j % 3 = 0 then res <- res.Insert(i, ",")
+  if Seq.forall ((=) '0') after then res
+  else res + "." + after
+
 [<Emit("JSON.stringify($0)")>]
 let jsonStringify json : string = failwith "JS Only"
 
