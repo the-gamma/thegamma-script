@@ -163,7 +163,10 @@ let chartTypes =
   [ for t in asm.GetTypes() do 
       if t.FullName.StartsWith("TheGamma.GoogleCharts.Extensions+") &&
         not (t.FullName.Contains("@")) &&
-        not (t.Name = "options") then yield t ]
+        not (t.Name = "options") then yield t 
+    for t in asm.GetTypes() do 
+      if t.FullName.StartsWith("TheGamma.GoogleCharts.Options+") then
+        yield t ]
 
 let recordTypes = 
   [ for t in asm.GetTypes() do 
