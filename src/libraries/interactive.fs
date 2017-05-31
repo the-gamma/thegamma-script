@@ -7,6 +7,7 @@ open TheGamma.Common
 open TheGamma.Series
 open TheGamma.Html
 open TheGamma.Interactive.Compost
+module FsOption = Microsoft.FSharp.Core.Option
 
 module InteractiveHelpers =
   let showAppAsync outputId size (data:series<_, _>) initial render update = async { 
@@ -78,11 +79,11 @@ type ChartOptions =
       xAxis = AxisOptions.Default
       yAxis = AxisOptions.Default }
 
-module Charts = 
+module Internal = 
   
   // Helpers
 
-  let private applyScales xdata ydata chartOptions chart = 
+  let applyScales xdata ydata chartOptions chart = 
     let getInnerScale axis data = 
       if axis.minValue = None && axis.maxValue = None then None
       else
@@ -96,7 +97,7 @@ module Charts =
     let sy = getInnerScale chartOptions.yAxis ydata
     AutoScale(sx.IsNone, sy.IsNone, InnerScale(sx, sy, chart))      
 
-  let private applyAxes xdata ydata chart = 
+  let applyAxes xdata ydata chart = 
     let style data =
       let isDate = data |> Seq.exists isDate
       if isDate then
@@ -114,23 +115,25 @@ module Charts =
             FormatAxisYLabel = style ydata }),
       Axes(true, true, chart) )
 
-  let private applyStyle f chart = 
+  let applyStyle f chart = 
     Style(f, chart)
 
-  let private applyLabels chartOptions xdata ydata chart =     
-    let lowAndMid data = 
+  let applyLabels chartOptions xdata ydata chart =     
+    let lowAndMid axis data = 
       if Array.forall (fun v -> isNumber v || isDate v) data then 
         let data = Array.map dateOrNumberAsNumber data 
         let lo, hi = Seq.min data, Seq.max data
         let lo, hi = Scales.adjustRange (lo, hi)
+        let lo = if axis.minValue.IsSome then dateOrNumberAsNumber (axis.minValue.Value) else lo
+        let hi = if axis.maxValue.IsSome then dateOrNumberAsNumber (axis.maxValue.Value) else hi
         COV(CO lo),
         COV(CO ((lo + hi) / 2.))
       else 
         CAR(CA (string (data.[0])), 0.0),
         ( if data.Length % 2 = 1 then CAR(CA (string (data.[data.Length/2])), 0.5)
           else CAR(CA (string (data.[data.Length/2])), 0.0) )
-    let lmx = lazy lowAndMid xdata
-    let lmy = lazy lowAndMid ydata
+    let lmx = lazy lowAndMid chartOptions.xAxis xdata
+    let lmy = lazy lowAndMid chartOptions.yAxis ydata
     let lblStyle = applyStyle (fun s -> { s with StrokeWidth = Pixels 0; Fill = Solid(1., HTML "black"); Font = "bold 9pt sans-serif" })
     let chart, pbot = 
       match chartOptions.xAxis.label with
@@ -146,7 +149,10 @@ module Charts =
       | _ -> chart, 0.
     Padding((0., 0., pbot, pleft), chart)
 
-  let private createChart size chart =   
+module Charts = 
+  open Internal
+
+  let createChart size chart =   
     h?div ["style"=>"text-align:center;padding-top:20px"] [
       Compost.createSvg size chart
     ]
@@ -202,6 +208,8 @@ module YouDrawHelpers =
     { Completed : bool
       Clip : float
       Data : (float * float)[]
+      XData : obj[]
+      YData : obj[]
       Guessed : (float * option<float>)[] 
       IsKeyDate : bool }
 
@@ -210,6 +218,8 @@ module YouDrawHelpers =
     let data = data |> Array.map (fun (k, v) -> dateOrNumberAsNumber k, v)
     { Completed = false
       Data = data
+      XData = Array.map (fst >> box) data
+      YData = Array.map (snd >> box) data
       Clip = clipx
       IsKeyDate = isDate
       Guessed = [| for x, y in data do if x > clipx then yield x, None |] }
@@ -224,7 +234,9 @@ module YouDrawHelpers =
             Guessed = indexed |> Array.map (fun (i, (x, y)) -> 
               if i = nearest then (x, Some downY) else (x, y)) }
 
-  let render (width, height) (markers:(float*obj)[]) (topLbl, leftLbl, rightLbl) (leftClr,rightClr,guessClr,markClr) (loy, hiy) trigger state = 
+  let render chartOptions (width, height) (markers:(float*obj)[]) (topLbl, leftLbl, rightLbl) 
+    (leftClr,rightClr,guessClr,markClr) (loy, hiy) trigger state = 
+
     let all = 
       [| for x, y in state.Data -> Cont x, Cont y |]
     let known = 
@@ -303,7 +315,7 @@ module YouDrawHelpers =
                   (fun s -> { s with StrokeColor = (1.0, HTML guessClr); StrokeDashArray = [ Integer 5; Integer 5 ] }), 
                   Line guessed ) 
             ]) )
-
+    
     let chart = 
       Style(
         (fun s -> 
@@ -316,6 +328,10 @@ module YouDrawHelpers =
           else s),
         Axes(true, true, 
           AutoScale(false, true, coreChart)))
+    
+    let chart = 
+      chart 
+      |> Internal.applyLabels chartOptions state.XData state.YData
     
     h?div ["style"=>"text-align:center;padding-top:20px"] [
       Compost.createSvg (width, height) chart
@@ -578,7 +594,6 @@ module YouGuessSortHelpers =
                               match state.Completed, state.Assignments.TryFind lbl with
                               | true, Some assigned -> 
                                   let _, actual = state.Data |> Seq.find (fun (lbl, _) -> lbl = assigned)
-                                  console.log(actual, original)
                                   0.6, state.CompletionStep * actual + (1.0 - state.CompletionStep) * original, state.Colors.[assigned]
                               | _, Some assigned -> 0.6, original, state.Colors.[assigned]
                               | _, None -> 0.3, original, "#a0a0a0"
@@ -678,8 +693,6 @@ type YouGuessLine =
     { data : series<obj, float> 
       markers : series<float, obj> option
       clip : float option
-      min : float option
-      max : float option 
       markerColor : string option
       knownColor : string option
       unknownColor : string option 
@@ -687,31 +700,42 @@ type YouGuessLine =
       topLabel : string option
       knownLabel : string option
       guessLabel : string option 
-      size : float option * float option }
-  member y.setRange(min, max) = { y with min = Some min; max = Some max }
+  // [copy-paste]
+      options : ChartOptions }  
+  member y.setSize(?width, ?height) = 
+    { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
+  member y.setAxisX(?minValue, ?maxValue, ?label) = 
+    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label }
+    { y with options = { y.options with xAxis = ax } }
+  member y.setAxisY(?minValue, ?maxValue, ?label) = 
+    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label }
+    { y with options = { y.options with yAxis = ax } }
+  // [/copy-paste]
+  
+  member y.setRange(min, max) = y.setAxisY(min, max) // TODO: Deprecated
   member y.setClip(clip) = { y with clip = Some (dateOrNumberAsNumber clip) }
   member y.setColors(known, unknown) = { y with knownColor = Some known; unknownColor = Some unknown }
   member y.setDrawColor(draw) = { y with drawColor = Some draw }
   member y.setMarkerColor(marker) = { y with markerColor = Some marker }
   member y.setLabels(top, known, guess) = { y with knownLabel = Some known; topLabel = Some top; guessLabel = Some guess }
-  member y.setSize(?width, ?height) = 
-    { y with size = (orElse width (fst y.size), orElse height (snd y.size)) }
   member y.setMarkers(markers) = { y with markers = Some markers }
   member y.show(outputId) = Async.StartImmediate <| async {
     let markers = defaultArg y.markers (series<string, float>.create(async.Return [||], "", "", ""))
     let! markers = markers.data |> Async.AwaitFuture
     let markers = markers |> Array.sortBy fst
-    return! InteractiveHelpers.showAppAsync outputId y.size y.data
+    return! InteractiveHelpers.showAppAsync outputId y.options.size y.data
       (fun data ->
           let clipx = match y.clip with Some v -> v | _ -> dateOrNumberAsNumber (fst (data.[data.Length / 2]))
           YouDrawHelpers.initState (Array.sortBy (fst >> dateOrNumberAsNumber) data) clipx)
       (fun data size ->           
-          let loy = match y.min with Some v -> v | _ -> data |> Seq.map snd |> Seq.min
-          let hiy = match y.max with Some v -> v | _ -> data |> Seq.map snd |> Seq.max       
+          let loy = match y.options.yAxis.minValue with Some v -> unbox v | _ -> data |> Seq.map snd |> Seq.min
+          let hiy = match y.options.yAxis.maxValue with Some v -> unbox v | _ -> data |> Seq.map snd |> Seq.max       
           let lc, dc, gc, mc = 
             defaultArg y.knownColor "#606060", defaultArg y.unknownColor "#FFC700", 
-            defaultArg y.drawColor "#808080", defaultArg y.markerColor "#C65E31"          
-          YouDrawHelpers.render size markers
+            defaultArg y.drawColor "#808080", defaultArg y.markerColor "#C65E31"    
+          let data = Array.sortBy (fst >> dateOrNumberAsNumber) data
+          let co = { y.options with xAxis = { y.options.xAxis with minValue = Some (box (fst data.[0])); maxValue = Some (box (fst data.[data.Length-1])) } }
+          YouDrawHelpers.render co size markers
             (defaultArg y.topLabel "", defaultArg y.knownLabel "", defaultArg y.guessLabel "") 
             (lc,dc,gc,mc) (loy, hiy)) 
       (fun _ -> YouDrawHelpers.handler) } 
@@ -738,9 +762,10 @@ type youguess =
   static member sortBars(data:series<string, float>) = 
     { YouGuessSortBars.data = data; maxValue = None; size = None, None }
   static member line(data:series<obj, float>) =
-    { YouGuessLine.data = data; clip = None; min = None; max = None 
+    { YouGuessLine.data = data; clip = None; 
       markerColor = None; guessLabel = None; topLabel = None; knownLabel = None; markers = None
-      knownColor = None; unknownColor = None; drawColor = None; size = None, None }
+      knownColor = None; unknownColor = None; drawColor = None; 
+      options = ChartOptions.Default }
 
 // ------------------------------------------------------------------------------------------------
 // Compost Charts API
@@ -753,8 +778,8 @@ type CompostBubblesChartSet =
       selectX : obj -> obj
       selectSize : option<obj -> obj>
       bubbleColor : string option
-      options : ChartOptions }
   // [copy-paste]
+      options : ChartOptions }
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
   member y.setAxisX(?minValue, ?maxValue, ?label) = 
@@ -787,8 +812,8 @@ type CompostColBarChart =
     { isBar : bool
       data : series<string, float>
       colors : string[] option
-      options : ChartOptions }  
   // [copy-paste]
+      options : ChartOptions }  
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
   member y.setAxisX(?minValue, ?maxValue, ?label) = 
@@ -811,8 +836,8 @@ type CompostLineChart =
   private 
     { data : series<obj, obj>
       lineColor : string option
-      options : ChartOptions }  
   // [copy-paste]
+      options : ChartOptions }  
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
   member y.setAxisX(?minValue, ?maxValue, ?label) = 
@@ -835,8 +860,8 @@ type CompostLinesChart =
   private 
     { data : series<obj, obj>[]
       lineColors : string[] option
-      options : ChartOptions }  
   // [copy-paste]
+      options : ChartOptions }  
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
   member y.setAxisX(?minValue, ?maxValue, ?label) = 
