@@ -66,7 +66,7 @@ type Orientation =
 
 type Shape<[<Measure>] 'vx, [<Measure>] 'vy> = 
   | Style of (Style -> Style) * Shape<'vx, 'vy>
-  | Text of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * string
+  | Text of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * float * string
   | AutoScale of bool * bool * Shape<'vx, 'vy>
   | InnerScale of option<continuous<'vx> * continuous<'vx>> * option<continuous<'vy> * continuous<'vy>> * Shape<'vx, 'vy>
   | OuterScale of option<Scale<'vx>> * option<Scale<'vy>> * Shape<'vx, 'vy>
@@ -98,11 +98,11 @@ module Svg =
     | LineTo of (float * float)
 
   type SvgStyle = string
-
+  
   type Svg =
     | Path of PathSegment[] * SvgStyle
     | Ellipse of (float * float) * (float * float) * SvgStyle
-    | Text of (float * float) * string * SvgStyle
+    | Text of (float * float) * string * float * SvgStyle 
     | Combine of Svg[]
     | Empty
 
@@ -121,8 +121,12 @@ module Svg =
   let rec renderSvg svg = seq { 
     match svg with
     | Empty -> ()
-    | Text((x,y), t, style) ->
-        yield s?text [ "x" => string x; "y" => string y; "style" => style ] [text t]
+    | Text((x,y), t, rotation, style) ->
+        if rotation = 0.0 then
+          yield s?text [ "x" => string x; "y" => string y; "style" => style ] [text t]
+        else
+          yield s?text [ "x" => "0"; "y" => "0"; "transform" => sprintf "translate(%f,%f) rotate(%f)" x y rotation; 
+                         "style" => style ] [text t]
     | Combine ss ->
         for s in ss do yield! renderSvg s
     | Ellipse((cx, cy),(rx, ry), style) ->
@@ -177,7 +181,7 @@ module Scales =
   type ScaledShapeInner<[<Measure>] 'vx, [<Measure>] 'vy> = 
     | ScaledStyle of (Style -> Style) * ScaledShape<'vx, 'vy>
     | ScaledOuterScale of option<Scale<'vx>> * option<Scale<'vy>> * ScaledShape<'vx, 'vy>
-    | ScaledText of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * string    
+    | ScaledText of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * float * string    
     | ScaledLine of (Value<'vx> * Value<'vy>)[]
     | ScaledBubble of Value<'vx> * Value<'vy> * float * float
     | ScaledArea of (Value<'vx> * Value<'vy>)[]
@@ -350,10 +354,10 @@ module Scales =
         let scales = Continuous(CO 0.0<_>, x), Categorical [| y |]
         Scaled(scales, scales, ScaledBar(x, y))
 
-    | Shape.Text(x, y, va, ha, t) ->
+    | Shape.Text(x, y, va, ha, r, t) ->
         let makeSingletonScale = function COV(v) -> Continuous(v, v) | CAR(v, _) -> Categorical [| v |]
         let scales = makeSingletonScale x, makeSingletonScale y
-        Scaled(scales, scales, ScaledText(x, y, va, ha, t))    
+        Scaled(scales, scales, ScaledText(x, y, va, ha, r, t))    
 
     | Line line -> 
         let line = Seq.toArray line 
@@ -383,10 +387,10 @@ module Scales =
             yield Line [lx,hy; lx,ly; hx,ly] |> LineStyle "black" 1.0 2
             if showX then
               for x, l in generateAxisLabels style.FormatAxisXLabel sx do
-                yield Offset((0., 10.), Text(x, ly, VerticalAlign.Hanging, HorizontalAlign.Center, l)) |> FontStyle "9pt sans-serif"
+                yield Offset((0., 10.), Text(x, ly, VerticalAlign.Hanging, HorizontalAlign.Center, 0.0, l)) |> FontStyle "9pt sans-serif"
             if showY then
               for y, l in generateAxisLabels style.FormatAxisYLabel sy do
-                yield Offset((-10., 0.), Text(lx, y, VerticalAlign.Middle, HorizontalAlign.End, l)) |> FontStyle "9pt sans-serif"
+                yield Offset((-10., 0.), Text(lx, y, VerticalAlign.Middle, HorizontalAlign.End, 0.0, l)) |> FontStyle "9pt sans-serif"
             yield shape ] |> calculateScales
 
         match shape with 
@@ -448,7 +452,7 @@ module Projections =
   type ProjectedShapeInner<[<Measure>] 'vx, [<Measure>] 'vy> = 
     | ProjectedStyle of (Style -> Style) * ProjectedShape<'vx, 'vy>
     | ProjectedBubble of Value<'vx> * Value<'vy> * float * float
-    | ProjectedText of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * string    
+    | ProjectedText of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * float * string    
     | ProjectedLine of (Value<'vx> * Value<'vy>)[]
     | ProjectedArea of (Value<'vx> * Value<'vy>)[]
     | ProjectedLayered of ProjectedShape<'vx, 'vy>[]
@@ -598,8 +602,8 @@ module Projections =
     | Scaled(scales, _, ScaledColumn(x,y)) -> 
         Projected(projection, scales, ProjectedColumn(x, y))
 
-    | Scaled(scales, _, ScaledText(x, y, va, ha, t)) -> 
-        Projected(projection, scales, ProjectedText(x, y, va, ha, t))
+    | Scaled(scales, _, ScaledText(x, y, va, ha, r, t)) -> 
+        Projected(projection, scales, ProjectedText(x, y, va, ha, r, t))
 
     | Scaled(scales, _, ScaledBubble(x, y, rx, ry)) -> 
         Projected(projection, scales, ProjectedBubble(x, y, rx, ry))
@@ -649,7 +653,7 @@ module Drawing =
     | ProjectedOffset((dx, dy), shape), _ ->
         drawShape defs style shape
         |> mapSvg (function 
-            | Text((x, y), t, s) -> Text((x + dx, y + dy), t, s)
+            | Text((x, y), t, r, s) -> Text((x + dx, y + dy), t, r, s)
             | Path(seg, s) -> Path(Array.map (function 
                 MoveTo(x, y) -> MoveTo(x + dx, y + dy) | LineTo(x, y) -> LineTo(x + dx, y + dy)) seg, s)
             | s -> s)
@@ -657,10 +661,11 @@ module Drawing =
     | ProjectedStyle(sf, shape), _ ->
         drawShape defs (sf style) shape
 
-    | ProjectedText(x, y, va, ha, t), _ -> 
+    | ProjectedText(x, y, va, ha, r, t), _ -> 
         let va = match va with Baseline -> "baseline" | Hanging -> "hanging" | Middle -> "middle"
         let ha = match ha with Start -> "start" | Center -> "middle" | End -> "end"
-        Text(projectCont (x, y), t, sprintf "alignment-baseline:%s; text-anchor:%s;" va ha + formatStyle defs style)
+        let xy = projectCont (x, y)
+        Text(xy, t, r, sprintf "alignment-baseline:%s; text-anchor:%s;" va ha + formatStyle defs style)
 
     | ProjectedBubble(x, y, rx, ry), _ -> 
         Ellipse(projectCont (x, y), (rx, ry), formatStyle defs style)

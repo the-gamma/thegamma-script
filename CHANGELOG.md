@@ -1,3 +1,4 @@
+ * 0.1.2 - Compost bars, columns, lines and labels
  * 0.1.1 - Fix export of chart types
  * 0.1.0 - Bubble charts, windowing, date formatting, remove geo, modulo, F# properties
  * 0.0.21 - Add support for markers in youguess line
