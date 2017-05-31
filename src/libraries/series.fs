@@ -202,9 +202,6 @@ and series<'k, 'v> =
   member s.filter(f) =
     s |> helpers.lift (Array.filter (snd >> f))
 
-  member s.filterIndex(f) =
-    s |> helpers.lift (Array.mapi (fun i v -> f i, v) >> Array.filter fst >> Array.map snd)
-
   member s.choose(f) =
     s |> helpers.lift (Array.choose (fun (k, v) -> match f v with None -> None | Some r -> Some(k, r)))
 

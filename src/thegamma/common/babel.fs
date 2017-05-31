@@ -1,9 +1,5 @@
 ﻿namespace TheGamma.Babel
 
-// ------------------------------------------------------------------------------------------------
-// Babel AST and formatting it as JSON
-// ------------------------------------------------------------------------------------------------
-
 open Fable
 open Fable.Core
 
@@ -61,9 +57,6 @@ type VariableDeclarationKind =
 type VariableDeclarator = 
   | VariableDeclarator of id:Pattern * init:Expression option * location:SourceLocation option
 
-and ObjectMember = 
-  | ObjectProperty of key:Expression * value:Expression * computed:bool * location:SourceLocation option
-
 and Expression = 
   | IdentifierExpression of name:string * location:SourceLocation option
   | FunctionExpression of id:string option * ``params``:Pattern list * body:Statement * generator:bool * async:bool * location:SourceLocation option
@@ -77,7 +70,6 @@ and Expression =
   | MemberExpression of obj:Expression * property:Expression * computed:bool * location:SourceLocation option
   | NewExpression of callee:Expression * arguments:Expression list * location:SourceLocation option
   | BinaryExpression of operator:BinaryOperator * left:Expression * right:Expression * location:SourceLocation option
-  | ObjectExpression of properties:ObjectMember list * location:SourceLocation option
 
 and Statement =
   | ExpressionStatement of expression:Expression * location:SourceLocation option
@@ -138,15 +130,7 @@ module Serializer =
     | IdentifierPattern(name, loc) ->
         createObj [ "type" => "Identifier"; "name" => name; "loc" =?> loc ]
 
-  let rec serializeMember mem = 
-    match mem with
-    | ObjectProperty(key, value, computed, loc) ->
-        createObj [ 
-          "type" => "ObjectProperty"; "key" => serializeExpression key
-          "value" => serializeExpression value; "computed" => computed       
-          "loc" =?> loc ]
-
-  and serializeDeclarator (VariableDeclarator(id, init, loc)) = 
+  let rec serializeDeclarator (VariableDeclarator(id, init, loc)) = 
     createObj [ 
       "type" => "VariableDeclarator"; "id" => serializePattern id; 
       "init" =?> Option.map serializeExpression init; "loc" =?> loc ]
@@ -179,12 +163,9 @@ module Serializer =
         createObj [ 
           "type" => "BinaryExpression"; "left" => serializeExpression l; "right" => serializeExpression r;
           "operator" => serializeBinaryOperator op; "loc" =?> loc ]
-    | ObjectExpression(props, loc) ->
-        createObj [ "type" => "ObjectExpression"; "properties" => Array.ofList (List.map serializeMember props); "loc" =?> loc ]
     
     | ArrayExpression(elements, loc) ->
         createObj [ "type" => "ArrayExpression"; "elements" => Array.ofSeq (List.map serializeExpression elements); "loc" =?> loc ]
-
     | NullLiteral(loc) ->
         createObj [ "type" => "NullLiteral"; "loc" =?> loc ]
     | StringLiteral(v, loc) ->
@@ -218,33 +199,6 @@ module Serializer =
       "body" => Array.ofList (List.map serializeStatement prog.body)
       "directives" => box [||]
     ]
-
-// ------------------------------------------------------------------------------------------------
-// Operators that make constructing Babel ASTs easier
-// ------------------------------------------------------------------------------------------------
-
-module BabelOperators = 
-  let ident s = IdentifierExpression(s, None)
-  let str v = StringLiteral(v, None)
-  let num v = NumericLiteral(v, None)
-  let bool v = BooleanLiteral(v, None)
-  let arr l = ArrayExpression(l, None)
-
-  let (?) (e:Expression) (s:string) = MemberExpression(e, IdentifierExpression(s, None), false, None)
-  let (/?/) (e:Expression) a = MemberExpression(e, a, true, None)
-
-  let (/@/) (e:Expression) (args) = CallExpression(e, args, None)
-
-  let func v f = 
-    let body = BlockStatement([ReturnStatement(f (ident v), None)], None)
-    FunctionExpression(None, [IdentifierPattern(v, None)], body, false, false, None)
-  
-  let funcN n f = 
-    let args = List.init n (fun i -> "_arg" + string i)
-    let body = BlockStatement([ReturnStatement(f (List.map ident args), None)], None)
-    FunctionExpression(None, List.map (fun s -> IdentifierPattern(s, None)) args, body, false, false, None)
-
-
 
 (*
 type NumberKind =

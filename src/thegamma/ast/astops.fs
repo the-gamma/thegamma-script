@@ -15,8 +15,7 @@ let needsEscaping (s:string) =
 
 /// Escape identifier if it needs escaping
 let escapeIdent s = 
-  if s = "" then ""
-  elif needsEscaping s then "'" + s + "'" else s
+  if needsEscaping s then "'" + s + "'" else s
 
 /// Union ranges, assuming Start <= End for each of them
 let unionRanges r1 r2 =
@@ -34,13 +33,11 @@ let formatToken = function
   | TokenKind.Equals -> "="
   | TokenKind.Dot -> "."
   | TokenKind.Comma -> ","
-  | TokenKind.Colon -> ":"
   | TokenKind.Let -> "let"
   | TokenKind.LSquare -> "["
   | TokenKind.RSquare -> "]"
   | TokenKind.Fun -> "fun"
   | TokenKind.Arrow -> "->"
-  | TokenKind.Operator Operator.Modulo -> "%"
   | TokenKind.Operator Operator.Divide -> "/"
   | TokenKind.Operator Operator.GreaterThan -> ">"
   | TokenKind.Operator Operator.GreaterThanOrEqual -> ">="
@@ -61,6 +58,7 @@ let formatToken = function
   | TokenKind.Newline -> "\n"
   | TokenKind.Error(c) -> string c
   | TokenKind.EndOfFile -> ""
+  | TokenKind.By | TokenKind.To -> failwith "Unsupported token"
 
 /// Return human readable description of a token
 let formatTokenInfo = function
@@ -69,7 +67,6 @@ let formatTokenInfo = function
   | TokenKind.Equals -> "equals sign `=`"
   | TokenKind.Dot -> "dot character `.`"
   | TokenKind.Comma -> "comma character `,`"
-  | TokenKind.Colon -> "colon character `:`"
   | TokenKind.Let -> "`let` keyword"
   | TokenKind.LSquare -> "left square bracket `[`"
   | TokenKind.RSquare -> "right square bracket `]`"
@@ -77,7 +74,6 @@ let formatTokenInfo = function
   | TokenKind.Arrow -> "arrow sign `->`"
   | TokenKind.Operator Operator.Equals -> "equals operator `=`"
   | TokenKind.Operator Operator.Divide -> "division sign `/`"
-  | TokenKind.Operator Operator.Modulo -> "modulo operator `%`"
   | TokenKind.Operator Operator.GreaterThan -> "greater than sign `>`"
   | TokenKind.Operator Operator.GreaterThanOrEqual -> "greater than or equals sign `>=`"
   | TokenKind.Operator Operator.LessThan -> "less than sign `<`"
@@ -97,6 +93,7 @@ let formatTokenInfo = function
   | TokenKind.Error('`') -> "back-tick character"
   | TokenKind.Error(c) -> sprintf "other character `%s`" (string c)
   | TokenKind.EndOfFile -> "end of file"
+  | TokenKind.By | TokenKind.To -> failwith "Unsupported token"
 
 /// Turns series of tokens into string, using their Token value
 let formatTokens (tokens:seq<Token>) = 
@@ -130,12 +127,14 @@ and formatExpression (ctx:FormattingContext) expr =
   match expr with
   | Expr.Variable(n) -> 
       formatNode ctx formatName n
-  | Expr.Member(inst, mem) -> 
+  | Expr.Property(inst, n) -> 
       formatNode ctx formatExpression inst
       ctx.Add(TokenKind.Dot)
-      formatNode ctx formatExpression mem
-  | Expr.Call(inst, args) ->
-      formatNode ctx formatExpression inst
+      formatNode ctx formatName n
+  | Expr.Call(inst, n, args) ->
+      match inst with Some inst -> formatNode ctx formatExpression inst | _ -> ()
+      ctx.Add(TokenKind.Dot)
+      formatNode ctx formatName n
       ctx.Add(TokenKind.LParen)
       args |> formatNode ctx (fun ctx args -> 
         args |> List.iteri (fun i arg ->
@@ -154,12 +153,6 @@ and formatExpression (ctx:FormattingContext) expr =
       formatNode ctx formatName n
       ctx.Add(TokenKind.Arrow)
       formatNode ctx formatExpression e
-  | Expr.Placeholder(n, e) ->
-      ctx.Add(TokenKind.LSquare)
-      formatNode ctx formatName n
-      ctx.Add(TokenKind.Colon)
-      formatNode ctx formatExpression e
-      ctx.Add(TokenKind.RSquare)
   | Expr.List els ->
       ctx.Add(TokenKind.LSquare)
       for e in els do formatNode ctx formatExpression e
@@ -194,7 +187,8 @@ let formatProgram (prog:Program) =
 let formatWhiteAfterExpr nd = 
   let wa = 
     match nd.Node with 
-    | Expr.Variable(n) -> n.WhiteAfter @ nd.WhiteAfter 
+    | Expr.Variable(n)
+    | Expr.Property(_, n) -> n.WhiteAfter @ nd.WhiteAfter 
     | _ -> nd.WhiteAfter
   String.concat "" [ for t in wa -> formatToken t.Token ]
 
@@ -203,7 +197,8 @@ let formatWhiteBeforeExpr nd =
   let wa = 
     match nd.Node with 
     | Expr.Variable(n) -> nd.WhiteBefore @ n.WhiteBefore 
-    | Expr.Member(_, m & { Node = Expr.Variable n }) -> nd.WhiteBefore @ m.WhiteBefore @ n.WhiteBefore
+    | Expr.Call(_, n, _)
+    | Expr.Property(_, n) -> n.WhiteBefore
     | _ -> nd.WhiteBefore
   String.concat "" [ for t in wa -> formatToken t.Token ]
 
@@ -226,43 +221,35 @@ let formatEntityKind = function
   | EntityKind.Root _ -> "root"
   | EntityKind.CallSite _ -> "call site"
   | EntityKind.NamedParam _ -> "named param"
-  | EntityKind.Call _ -> "call"
+  | EntityKind.ChainElement _ -> "chain element"
   | EntityKind.ArgumentList _ -> "argument list"
-  | EntityKind.Member _ -> "member access"
-  | EntityKind.MemberName _ -> "member name"
-  | EntityKind.Placeholder _ -> "placeholder"
+  | EntityKind.NamedMember _ -> "property or method"
+
+/// Used for entities with no name
+let anonymous = ""
 
 /// Return entity name (or anonymous) and all its antecedants
-let rec entityCodeNameAndAntecedents = function
-  | EntityKind.Root -> 0, [], "<root>"
-  | EntityKind.Program(ans) -> 1, ans, "<program>"
-  | EntityKind.RunCommand(an) -> 2, [an], "<do>"
-  | EntityKind.LetCommand(an1, an2) -> 3, [an1; an2], "<let>"
+let entityCodeNameAndAntecedents = function
+  | EntityKind.Root -> 0, [], anonymous
+  | EntityKind.Program(ans) -> 1, ans, anonymous
+  | EntityKind.RunCommand(an) -> 2, [an], anonymous
+  | EntityKind.LetCommand(an1, an2) -> 3, [an1; an2], anonymous
   | EntityKind.Operator(an1, op, an2) -> 4, [an1; an2], (formatToken (TokenKind.Operator op))
-  | EntityKind.List(ans) -> 5, ans, "<list>"
+  | EntityKind.List(ans) -> 5, ans, anonymous
   | EntityKind.Constant(Constant.String s) -> 6, [], s
   | EntityKind.Constant(Constant.Number n) -> 7, [], (string n)
   | EntityKind.Constant(Constant.Boolean b) -> 8, [], (string b)
-  | EntityKind.Constant(Constant.Empty) -> 9, [], "<empty>"
-  | EntityKind.Function(an1, an2) -> 10, [an1; an2], "<function>"
+  | EntityKind.Constant(Constant.Empty) -> 9, [], anonymous
+  | EntityKind.Function(an1, an2) -> 10, [an1; an2], anonymous
   | EntityKind.GlobalValue(n, _) -> 11, [], n.Name
   | EntityKind.Variable(n, an) -> 12, [an], n.Name
   | EntityKind.Binding(n, an) -> 13, [an], n.Name
-  | EntityKind.ArgumentList(ans) -> 14, ans, "<args>"
-  | EntityKind.Call(an1, an2) -> 15, [an1; an2], "<call>"
-  | EntityKind.Member(an1, an2) -> 16, [an1; an2], "<member>"
+  | EntityKind.ArgumentList(ans) -> 14, ans, anonymous
+  | EntityKind.CallSite(an1, n, Choice1Of2 s) -> 15, [an1], (n.Name + "." + s)
+  | EntityKind.CallSite(an1, n, Choice2Of2 m) -> 16, [an1], (n.Name + "." + string m)
   | EntityKind.NamedParam(n, an) -> 17, [an], n.Name
-  | EntityKind.Placeholder(n, an) -> 18, [an], n.Name
-  | EntityKind.CallSite(an, Choice1Of2 s) -> 19, [an], s
-  | EntityKind.CallSite(an, Choice2Of2 m) -> 20, [an], string m
-  | EntityKind.MemberName(n) -> 21, [], n.Name
-
-/// Return the entity representing the name just before call in call chain
-let rec lastChainElement ent = 
-  match ent.Kind with
-  | EntityKind.Variable _ -> ent
-  | EntityKind.Member(_, mem) -> mem
-  | _ -> ent
+  | EntityKind.NamedMember(n, an) -> 18, [an], n.Name
+  | EntityKind.ChainElement(b, n, an1, an2, an3) -> 19, List.choose id [Some an1; an2; an3], (n.Name + "." + string b)
 
 // Provide easy access to entity's antecedents
 type Entity with
@@ -283,10 +270,7 @@ let rec formatType = function
         let mems = mem |> Seq.truncate 5 |> Seq.map (fun m -> m.Name) |> String.concat ", "
         "{ " + if mem.Length > 5 then mems + ", ..." else mems + " }"
       with _ -> "{ members }"
-  | Type.Method(tin, tout) -> 
-      let tout = match tout [for _, _, t in tin -> t] with Some t -> formatType t | _ -> "?"
-      let tin = String.concat ", " [for n, o, t in tin -> sprintf "%s%s:%s" (if o then "?" else "") n (formatType t) ]
-      "(" + tin + ") -> " + tout
+  | Type.Function(tin, tout) -> "(" + String.concat ", " (List.map formatType tin) + ") -> " + formatType tout
   | Type.List t -> "list<" + formatType t + ">"
   | Type.Any -> "any"
 
@@ -299,7 +283,7 @@ let formatTypeInfo = function
   | Type.Primitive PrimitiveType.String -> "string"
   | Type.Primitive PrimitiveType.Unit -> "unit"
   | Type.Object _ -> "object type"
-  | Type.Method _ -> "method type"
+  | Type.Function _ -> "function type"
   | Type.List _ -> "list type"
   | Type.Any _ -> "unknown"
 
@@ -307,23 +291,22 @@ let formatTypeInfo = function
 /// the original node from the original expression, new expressions & names
 let rebuildExprNode e es ns =
   match e, es, ns with
-  | Expr.Placeholder(_, _), [e], [n] -> Expr.Placeholder(n, e)
   | Expr.List(_), els, [] -> Expr.List(els)
   | Expr.Function(_), [e], [n] -> Expr.Function(n, e)
-  | Expr.Member(_, _), [e1; e2], [] -> Expr.Member(e1, e2)
+  | Expr.Property(_, _), [e], [n] -> Expr.Property(e, n)
   | Expr.Binary(_, op, _), [e1; e2], [] -> Expr.Binary(e1, op, e2)
-  | Expr.Call(_, args), e::es, ns ->
+  | Expr.Call(inst, _, args), e::es, n::ns ->
+      let e, es = if inst.IsSome then Some e, es else None, e::es
       let rec rebuildArgs args es ns =
         match args, es, ns with
         | { Argument.Name = None }::args, e::es, ns -> { Value = e; Name = None }::(rebuildArgs args es ns)
         | { Argument.Name = Some _ }::args, e::es, n::ns -> { Value = e; Name = Some n }::(rebuildArgs args es ns)
         | [], [], [] -> []
         | _ -> failwith "rebuildExprNode: Wrong call length"
-      Expr.Call(e, { args with Node = rebuildArgs args.Node es ns })
+      Expr.Call(e, n, { args with Node = rebuildArgs args.Node es ns })
   | Expr.Variable _, [], [n] -> Expr.Variable(n)
-  | Expr.Placeholder _, _, _ -> failwith "rebuildExprNode: Wrong placeholder length"
   | Expr.Variable _, _, _ -> failwith "rebuildExprNode: Wrong variable length"
-  | Expr.Member _, _, _ -> failwith "rebuildExprNode: Wrong member length"
+  | Expr.Property _, _, _ -> failwith "rebuildExprNode: Wrong property length"
   | Expr.Call _, _, _ -> failwith "rebuildExprNode: Wrong call length"
   | Expr.List _, _, _ -> failwith "rebuildExprNode: Wrong list length"
   | Expr.Function _, _, _ -> failwith "rebuildExprNode: Wrong function length"
@@ -337,9 +320,9 @@ let rebuildExprNode e es ns =
 /// ExprLeaf matches when an expression is a primitive (number, bool, etc..)
 let (|ExprLeaf|ExprNode|) e = 
   match e with
-  | Expr.Placeholder(n, e) -> ExprNode([e], [n])
-  | Expr.Member(e1, e2) -> ExprNode([e1; e2], [])
-  | Expr.Call(e, args) -> ExprNode(e::[for a in args.Node -> a.Value ], (args.Node |> List.choose (fun a -> a.Name)))
+  | Expr.Property(e, n) -> ExprNode([e], [n])
+  | Expr.Call(Some e, n, args) -> ExprNode(e::[for a in args.Node -> a.Value ], n::(args.Node |> List.choose (fun a -> a.Name)))
+  | Expr.Call(None, n, args) -> ExprNode([for a in args.Node -> a.Value ], n::(args.Node |> List.choose (fun a -> a.Name)))
   | Expr.Variable(n) -> ExprNode([], [n])
   | Expr.List(els) -> ExprNode(els, [])
   | Expr.Function(n, b) -> ExprNode([b], [n])
@@ -348,7 +331,3 @@ let (|ExprLeaf|ExprNode|) e =
   | Expr.Boolean _
   | Expr.String _
   | Expr.Empty -> ExprLeaf()
-
-/// Find object member with the specified name 
-let (|FindMember|_|) (name:Name) (obj:ObjectType) = 
-  obj.Members |> Seq.tryPick (fun m -> if m.Name = name.Name then Some(m) else None) 

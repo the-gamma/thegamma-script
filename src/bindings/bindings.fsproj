@@ -49,7 +49,6 @@
   <ItemGroup>
     <Compile Include="monaco.fs" />
     <Compile Include="virtualdom.fs" />
-    <Compile Include="babel.fs" />
   </ItemGroup>
   <PropertyGroup>
     <MinimumVisualStudioVersion Condition="'$(MinimumVisualStudioVersion)' == ''">11</MinimumVisualStudioVersion>

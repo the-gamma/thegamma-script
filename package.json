@@ -14,7 +14,6 @@
   "license": "MIT",
   "dependencies": {
     "babel-standalone": "^6.18.1",
-    "fable-core": "^0.7.26",
     "monaco-editor": "^0.7.0",
     "virtual-dom": "^2.1.1"
   },

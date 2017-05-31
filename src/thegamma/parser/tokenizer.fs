@@ -25,8 +25,7 @@ let letter c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 let number c = c >= '0' && c <= '9'
 
 
-/// Add newly parsed token to the context, increment 
-/// offset correctly & continue tokenizing
+/// Add newly parsed token to the context & continue tokenizing
 let rec addAndTokenize ctx tok i l =
   { Token = tok
     Range = { Start = i; End = i + l - 1 } } |> ctx.Tokens.Add 
@@ -93,7 +92,7 @@ and tokenizeWhite ctx start l =
     addAndTokenize ctx (TokenKind.White(ctx.Input.Substring(start, l))) start l
 
 
-/// Tokenize number - consume all numbers, or '.' when 'decimal = false'
+/// Tokenize number - consume all numbers, or '.' when 'decimal = true'
 and tokenizeNumber ctx decimal start l =
   if start + l < ctx.Input.Length && number ctx.Input.[start+l] then
     tokenizeNumber ctx decimal start (l+1)
@@ -131,7 +130,6 @@ and tokenizeInput ctx i =
   | '=' -> addAndTokenize ctx TokenKind.Equals i 1
   | '.' -> addAndTokenize ctx TokenKind.Dot i 1
   | ',' -> addAndTokenize ctx TokenKind.Comma i 1
-  | ':' -> addAndTokenize ctx TokenKind.Colon i 1
   | '[' -> addAndTokenize ctx TokenKind.LSquare i 1
   | ']' -> addAndTokenize ctx TokenKind.RSquare i 1
   | '\n' -> addAndTokenize ctx TokenKind.Newline i 1
@@ -142,7 +140,6 @@ and tokenizeInput ctx i =
   | '+' -> addAndTokenize ctx (TokenKind.Operator(Operator.Plus)) i 1
   | '-' -> addAndTokenize ctx (TokenKind.Operator(Operator.Minus)) i 1
   | '*' -> addAndTokenize ctx (TokenKind.Operator(Operator.Multiply)) i 1
-  | '%' -> addAndTokenize ctx (TokenKind.Operator(Operator.Modulo)) i 1
   | '/' -> addAndTokenize ctx (TokenKind.Operator(Operator.Divide)) i 1
   | '^' -> addAndTokenize ctx (TokenKind.Operator(Operator.Power)) i 1
   
