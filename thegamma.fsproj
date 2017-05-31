@@ -1,0 +1,55 @@
+<Project Sdk="FSharp.NET.Sdk;Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard1.6</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+      <Compile Include="src/bindings/monaco.fs" />
+      <Compile Include="src/bindings/virtualdom.fs" />
+    </ItemGroup>
+    <ItemGroup>
+    <Compile Include="src/libraries/common.fs" />
+    <Compile Include="src/libraries/html.fs" />
+    <Compile Include="src/libraries/series.fs" />
+    <Compile Include="src/libraries/tables.fs" />
+    <Compile Include="src/libraries/maps.fs" />
+    <Compile Include="src/libraries/compost.fs" />
+    <Compile Include="src/libraries/interactive.fs" />
+    <Compile Include="src/libraries/google/core.fs" />
+    <Compile Include="src/libraries/google/options.fs" />
+    <Compile Include="src/libraries/google/extensions.fs" />
+    <Compile Include="src/libraries/google/charts.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="src/thegamma/common/locations.fs" />
+    <Compile Include="src/thegamma/common/babel.fs" />
+    <Compile Include="src/thegamma/ast/ast.fs" />
+    <Compile Include="src/thegamma/ast/astops.fs" />
+    <Compile Include="src/thegamma/ast/typeops.fs" />
+    <Compile Include="src/thegamma/ast/errors.fs" />
+    <Compile Include="src/thegamma/parser/tokenizer.fs" />
+    <Compile Include="src/thegamma/parser/parser.fs" />
+    <Compile Include="src/thegamma/codegen/runtime.fs" />
+    <Compile Include="src/thegamma/codegen/codegen.fs" />
+    <Compile Include="src/thegamma/analyzer/binder.fs" />
+    <Compile Include="src/thegamma/analyzer/typechecker.fs" />
+    <Compile Include="src/thegamma/analyzer/interpreter.fs" />
+    <Compile Include="src/thegamma/providers/providers.fs" />
+    <Compile Include="src/thegamma/providers/fsharp.fs" />
+    <Compile Include="src/thegamma/providers/rest.fs" />
+    <Compile Include="src/thegamma/providers/pivot.fs" />
+    <Compile Include="src/thegamma/live/live.fs" />
+    <Compile Include="src/thegamma/live/pivot.fs" />
+    <Compile Include="src/thegamma/live/showable.fs" />
+    <Compile Include="src/thegamma/editors.fs" />
+    <Compile Include="src/thegamma/services.fs" />
+    <Compile Include="src/thegamma/monaco.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="src/main.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.NET.Sdk" Version="1.0.*" PrivateAssets="All" />
+    <DotNetCliToolReference Include="dotnet-fable" Version="1.0.4" />
+  </ItemGroup>
+  <Import Project=".paket\Paket.Restore.targets" />
+</Project>

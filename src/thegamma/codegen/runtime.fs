@@ -35,12 +35,11 @@ type RuntimeContext(root:string, cookies:string, trace:string) =
 type PivotContext(root, calls) = 
   member x.addCall(callid:string, values:obj[]) =
     PivotContext(root, Array.append [| callid, values |] calls)
-
-  member x.getData(conv:obj -> obj, tfs:string, isPreview) = async {
+  member x.getData(tfs:string, isPreview) = async {
     let url = calls |> Array.fold (fun (tfs:string) (id, vals) -> 
-      let vals = String.concat "," (Seq.map string vals)
-      tfs.Replace(id, string vals)) tfs
+      if vals.Length <> 1 then failwith "PivotContext.getData: Expected one argument"
+      tfs.Replace(id, string vals.[0])) tfs
     let url = root + "?" + url + if isPreview then "&preview" else ""
     Log.trace("runtime", "Pivot: %s", url)
     let! res = Http.Request("GET", url)
-    return jsonParse<obj[]> res |> Array.map conv }
+    return jsonParse<obj> res }

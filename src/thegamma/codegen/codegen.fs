@@ -1,11 +1,7 @@
-﻿// ------------------------------------------------------------------------------------------------
-// Code generator is used to compile complete well-typed programs
-// ------------------------------------------------------------------------------------------------
-module TheGamma.CodeGenerator
+﻿module TheGamma.CodeGenerator
 
 open TheGamma
 open TheGamma.Babel
-open TheGamma.Babel.BabelOperators
 open TheGamma.Common
 
 // ------------------------------------------------------------------------------------------------
@@ -20,33 +16,30 @@ let rec offsetToLocation lines offs lengths =
   match lengths with
   | l::lengths when offs <= l -> { line = lines; column = offs }
   | l::lengths -> offsetToLocation (lines+1) (offs-l-1) lengths
-  | [] -> failwith "offsetToLocation: Out of range" // { line = lines; column = offs  } 
+  | [] -> { line = lines; column = offs  } // error? out of range
 
 let rangeToLoc ctx rng = 
-  { start = offsetToLocation 1 rng.Start ctx.LineLengths 
-    ``end`` = offsetToLocation 1 rng.Start ctx.LineLengths } |> Some
+  Some { start = offsetToLocation 1 rng.Start ctx.LineLengths 
+         ``end`` = offsetToLocation 1 rng.Start ctx.LineLengths }
 
-let rec getMember name typ = 
+let rec getEmitterAndParams name typ = 
   match typ with
   | Type.Object(o) -> 
-      match o.Members |> Seq.tryPick (fun m -> if m.Name = name then Some(m) else None) with
-      | Some res -> res
-      | _ ->
-        Log.exn("codegen", "getMember: Member %s not found in object %O", name, o)
-        failwith "getMember: Member not found" 
+      o.Members |> Seq.pick (function 
+        | Member.Method(name=n; arguments=args; emitter=e) when n = name -> Some(e, args)
+        | Member.Property(name=n; emitter=e) when n=name -> Some(e, []) 
+        | _ -> None) 
   | t -> 
-    Log.exn("codegen", "getMember: Not an object %O", t)
-    failwith "getMember: Not an object" 
+    Log.exn("codegen", "getEmitterAndParams: Not an object %O", t)
+    failwith "getEmitterAndParams: Not an object" 
 
 let rec compileExpression ctx (expr:Node<Expr>) = 
-  Log.trace("codegen", "Compiling expression: %O", expr)
   match expr.Node with 
-  // Binary operators map to BinaryExpression, except for pow, which is a JS function
   | Expr.Binary(l, { Node = Operator.Power }, r) ->
       let l = compileExpression ctx l
       let r = compileExpression ctx r
       let rng = rangeToLoc ctx expr.Range
-      let pow = ident("Math")?pow
+      let pow = MemberExpression(IdentifierExpression("pow", rng), IdentifierExpression("Math", rng), false, rng)
       CallExpression(pow, [l; r], rangeToLoc ctx expr.Range)
 
   | Expr.Binary(l, op, r) ->
@@ -54,7 +47,6 @@ let rec compileExpression ctx (expr:Node<Expr>) =
       let r = compileExpression ctx r
       let op = 
         match op.Node with
-        | Operator.Modulo -> BinaryModulus
         | Operator.Equals -> BinaryEqualStrict
         | Operator.Plus -> BinaryPlus
         | Operator.Minus -> BinaryMinus
@@ -64,70 +56,55 @@ let rec compileExpression ctx (expr:Node<Expr>) =
         | Operator.LessThan -> BinaryLess
         | Operator.GreaterThanOrEqual -> BinaryGreaterOrEqual
         | Operator.LessThanOrEqual -> BinaryLessOrEqual
-        | Operator.Power -> failwith "compileExpression: Power is not a binary operator"
+        | Operator.Power -> failwith "compileExpression: Power is not a binary operation"
       BinaryExpression(op, l, r, rangeToLoc ctx expr.Range)
       
-  // Handle member access and calls - method call is a combination of the two
-  | Expr.Member(inst, { Node = Expr.Placeholder(_, { Node = Expr.Variable n }) })
-  | Expr.Member(inst, { Node = Expr.Variable n }) ->
-      let mem = getMember n.Node.Name inst.Entity.Value.Type.Value
-      let inst = compileExpression ctx inst
-      mem.Emitter.Emit(inst)
-
-  | Expr.Member(inst, _) ->
-      failwith "compileExpression: Member in member access is not a variable"
-
-  | Expr.Call(inst, args) ->
+  | Expr.Call(Some inst, n, args) ->
       // Split arguments between position & name based
       let compiledArgs = args.Node |> List.map (fun a -> a.Name, compileExpression ctx a.Value)
       let positionArgs = compiledArgs |> Seq.takeWhile (fun (n, _) -> n.IsNone) |> Seq.map snd |> Array.ofSeq
       let namedArgs = compiledArgs |> Seq.choose (function (Some n, a) -> Some(n.Node.Name, a) | _ -> None) |> dict
 
-      // Get expected arguments from the method type
-      let expectedArgs = 
-        match inst.Entity.Value.Type.Value with
-        | Type.Method(args, resTy) -> args
-        | _ -> []
-
-      // Compile the instance, the arguments and call the emitter
+      // Compile the instance
+      let emitter, pars = getEmitterAndParams n.Node.Name inst.Entity.Value.Type.Value
       let inst = compileExpression ctx inst
-      let pars = expectedArgs |> List.mapi (fun i (name, _, _) ->
+      let pars = pars |> List.mapi (fun i (name, _, _) ->
         if i < positionArgs.Length then positionArgs.[i]
         elif namedArgs.ContainsKey name then namedArgs.[name]
         else NullLiteral(rangeToLoc ctx args.Range))
-      CallExpression(inst, pars, rangeToLoc ctx expr.Range)
+      emitter.Emit(inst, pars)
 
-  // Variables and literals are easy       
-  | Expr.Variable(n) when ctx.Globals.ContainsKey(n.Node.Name) ->
-      ctx.Globals.[n.Node.Name]
-  | Expr.Variable(n) ->
-      IdentifierExpression(n.Node.Name, rangeToLoc ctx n.Range) 
+  | Expr.Call(None, n, args) ->
+      failwith "compileExpression: Call without instance is not supported"
 
+  | Expr.Property(inst, n) ->
+      let emitter, _ = getEmitterAndParams n.Node.Name inst.Entity.Value.Type.Value
+      let inst = compileExpression ctx inst
+      emitter.Emit(inst, [])
+      
+  //| Expr.Null ->
+    //  NullLiteral(rangeToLoc ctx expr.Range)
   | Expr.Number(n) ->
       NumericLiteral(n, rangeToLoc ctx expr.Range)
   | Expr.String(s) ->
       StringLiteral(s, rangeToLoc ctx expr.Range)
   | Expr.Boolean(b) ->
       BooleanLiteral(b, rangeToLoc ctx expr.Range)
-
-  // Other constructs that map fairly directly to JS 
-  | Expr.Placeholder(_, body) ->
-      compileExpression ctx body
-
+  | Expr.Variable(n) when ctx.Globals.ContainsKey(n.Node.Name) ->
+      ctx.Globals.[n.Node.Name]
+  | Expr.Variable(n) ->
+      IdentifierExpression(n.Node.Name, rangeToLoc ctx n.Range) 
   | Expr.List(es) ->
       let es = List.map (compileExpression ctx) es
       ArrayExpression(es, rangeToLoc ctx expr.Range)
-
   | Expr.Function(n, e) ->
       let var = IdentifierExpression(n.Node.Name, rangeToLoc ctx n.Range)
       let ce = compileExpression { ctx with Globals = Map.add n.Node.Name var ctx.Globals } e
       let body = BlockStatement([ReturnStatement(ce, rangeToLoc ctx e.Range)], rangeToLoc ctx e.Range)
       FunctionExpression(None, [IdentifierPattern(n.Node.Name, rangeToLoc ctx n.Range)], body, false, false, rangeToLoc ctx expr.Range)
-
-  // Empty expressions should not happen...
   | Expr.Empty ->      
-      Log.error("codegen", "getEmitterAndParams: Empty expression in the AST")
-      NullLiteral(rangeToLoc ctx expr.Range)
+      Fable.Import.Browser.console.log("compileExpression: %O", expr.Node) 
+      failwith "!" 
     
 
 let compileCommand ctx (cmd:Node<Command>) = 
@@ -141,16 +118,24 @@ let compileCommand ctx (cmd:Node<Command>) =
       let e = compileExpression ctx e
       ExpressionStatement(e, rangeToLoc ctx cmd.Range)
 
-
 let compileProgram ctx (prog:TheGamma.Program) = 
   let body = List.map (compileCommand ctx) prog.Body.Node
   { location = rangeToLoc ctx prog.Body.Range; body = body }
 
 // ------------------------------------------------------------------------------------------------
-// Cmpile program and return JS source code
+// Running compiled ASTs
 // ------------------------------------------------------------------------------------------------
 
-open Fable.Helpers.Babel
+type BabelOptions = 
+  { presets : string[] }
+
+type BabelResult = 
+  { code : string }
+type Babel =
+  abstract transformFromAst : obj * string * BabelOptions -> BabelResult
+
+[<Emit("Babel")>]
+let babel : Babel = Unchecked.defaultof<_> 
 
 let compile globals (text:string) prog = async {
   try
@@ -163,8 +148,7 @@ let compile globals (text:string) prog = async {
     let res = compileProgram ctx prog
     let code = babel.transformFromAst(Serializer.serializeProgram res, text, { presets = [| "es2015" |] })
     Log.trace("codegen", "Evaluating: %O", code)
-    return code.code
-
+    return code.code;
   with e ->
     Log.exn("codegen", "Evaluating code failed: %O", e)
     return "" }

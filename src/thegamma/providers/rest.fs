@@ -1,17 +1,13 @@
-﻿// ------------------------------------------------------------------------------------------------
-// REST type provider
-// ------------------------------------------------------------------------------------------------
-module TheGamma.TypeProviders.RestProvider
+﻿module TheGamma.TypeProviders.RestProvider
 
 open TheGamma
 open TheGamma.Babel
-open TheGamma.Babel.BabelOperators
 open TheGamma.Common
 open TheGamma.TypeProviders.ProviderHelpers
 open Fable.Import
 
 // ------------------------------------------------------------------------------------------------
-// Types to represent JSON data returned by REST service
+// REST provider
 // ------------------------------------------------------------------------------------------------
 
 type AnyType = { kind:string }
@@ -34,7 +30,7 @@ type Member =
   { name : string
     returns : AnyType
     parameters : Parameter[] option
-    documentation : obj option
+    documentation : obj option // This can be Documentation or string or an endpoint
     schema : obj option
     trace : string[] }
 
@@ -67,51 +63,59 @@ let rec fromRawType (json:obj) =
     let res = unbox<RawResultType> json
     if res.name = "record" then res.fields |> Array.map (fun f -> f.name, fromRawType f.``type``) |> Record
     else Generic(res.name, res.``params`` |> Array.map fromRawType)
-
-// ------------------------------------------------------------------------------------------------
-// Code generation for provided members
-// ------------------------------------------------------------------------------------------------
  
+let load url cookies = async {
+  let! json = Http.Request("GET", url, cookies=cookies)
+  let members = jsonParse<Member[]> json
+  return members }
+
 let trimLeft c (s:string) = s.ToCharArray() |> Array.skipWhile ((=) c) |> System.String
 let trimRight c (s:string) = s.ToCharArray() |> Array.rev |> Array.skipWhile ((=) c) |> Array.rev |> System.String
 
 let concatUrl (a:string) (b:string) =
   (trimRight '/' a) + "/" + (trimLeft '/' b)
 
-let load url cookies = async {
-  let! json = Http.Request("GET", url, cookies=cookies)
-  let members = jsonParse<Member[]> json
-  return members }
-
 let addTraceCall inst trace =
   if Seq.isEmpty trace then inst 
-  else inst?addTrace /@/ [str (String.concat "&" trace)]
+  else
+    let trace = StringLiteral(String.concat "&" trace, None)    
+    let mem = MemberExpression(inst, IdentifierExpression("addTrace", None), false, None)
+    CallExpression(mem, [trace], None)
 
 let propAccess trace = 
-  { Emit = fun inst -> addTraceCall inst trace }
+  { Emit = fun (inst, _args) -> addTraceCall inst trace }
 
 let methCall argNames trace =
-  { Emit = fun inst -> funcN (Seq.length argNames) (fun args ->
+  { Emit = fun (inst, args) ->
       let withTrace = addTraceCall inst trace
       Seq.zip argNames args |> Seq.fold (fun inst (name, value) ->
-        let trace = BinaryExpression(BinaryPlus, str(name + "="), value, None)
-        inst?addTrace /@/ [trace] ) withTrace) }
+        let trace = BinaryExpression(BinaryPlus, StringLiteral(name + "=", None), value, None)
+        let mem = MemberExpression(inst, IdentifierExpression("addTrace", None), false, None)
+        CallExpression(mem, [trace], None) ) withTrace }
 
 let dataCall parser trace endp = 
-  { Emit = fun inst ->
-      let tr = (propAccess trace).Emit(inst) 
+  { Emit = fun (inst, args) ->
+      let tr = (propAccess trace).Emit(inst, args) 
       let mem = MemberExpression(tr, IdentifierExpression("getValue", None), false, None)
       CallExpression(mem, [StringLiteral(endp, None)], None) |> parser }
- 
+
+let ident s = IdentifierExpression(s, None)
+let str v = StringLiteral(v, None)
+let (?) (e:Expression) (s:string) = MemberExpression(e, IdentifierExpression(s, None), false, None)
+let (/@/) (e:Expression) (args) = CallExpression(e, args, None)
+let func v f = 
+  let body = BlockStatement([ReturnStatement(f (ident v), None)], None)
+  FunctionExpression(None, [IdentifierPattern(v, None)], body, false, false, None)
+
 
 // Turn "Async<string>" into the required type
 // I guess we should keep a flag whether the input is still async (or something)
-let rec getTypeAndEmitter (lookupNamed:string -> Type) ty = 
+let rec getTypeAndEmitter (lookupNamed:string -> TheGamma.Type) ty = 
   match ty with
   | Primitive("string") -> Type.Primitive(PrimitiveType.String), id
   | Primitive("int") 
   | Primitive("float") -> Type.Primitive(PrimitiveType.Number), fun e -> ident("Number") /@/ [e]
-  | Primitive("date") -> Type.Primitive(PrimitiveType.Date), fun e -> NewExpression(ident("Date"), [ident("Date")?parse /@/ [e]], None)
+  | Primitive("date") -> Type.Primitive(PrimitiveType.Date), fun e -> ident("Date")?parse /@/ [e]
   | Generic("seq", [|Generic("tuple", [|t1; t2|])|]) -> 
       let t1, e1 = getTypeAndEmitter lookupNamed t1
       let t2, e2 = getTypeAndEmitter lookupNamed t2
@@ -134,8 +138,8 @@ let rec getTypeAndEmitter (lookupNamed:string -> Type) ty =
       let membs = 
         membs |> Array.map (fun (name, ty) ->
           let memTy, memConv = getTypeAndEmitter lookupNamed ty
-          let emitter = { Emit = fun inst -> memConv <| inst?(name) }
-          { Member.Name = name; Type = memTy; Metadata = [docMeta(Documentation.Text "")]; Emitter = emitter })
+          let emitter = { Emit = fun (inst, _) -> memConv <| inst?(name) }
+          Member.Property(name, memTy, [docMeta(Documentation.Text "")], emitter))
       let obj = 
         { new ObjectType with
             member x.Members = membs
@@ -145,10 +149,6 @@ let rec getTypeAndEmitter (lookupNamed:string -> Type) ty =
   | _ -> 
       Browser.console.log("getTypeAndEmitter: Cannot handle %O", ty)
       failwith "getTypeAndEmitter: Cannot handle type"
-
-// ------------------------------------------------------------------------------------------------
-// Type provider
-// ------------------------------------------------------------------------------------------------
 
 [<Fable.Core.Emit("$0[$1]")>]
 let getProperty<'T> (obj:obj) (name:string) : 'T = failwith "never"
@@ -175,7 +175,7 @@ let rec createRestType lookupNamed resolveProvider root cookies url =
         | "provider" ->
             let returns = unbox<TypeProvider> m.returns 
             let typ, emitter = resolveProvider returns.provider returns.endpoint
-            { Member.Name = m.name; Type = typ; Metadata = (docMeta (parseDoc m.documentation))::schema; Emitter = emitter }
+            Member.Property(m.name, typ, (docMeta (parseDoc m.documentation))::schema, emitter)
         | "nested" ->
             let returns = unbox<TypeNested> m.returns 
             let retTyp = createRestType lookupNamed resolveProvider root cookies returns.endpoint
@@ -184,17 +184,16 @@ let rec createRestType lookupNamed resolveProvider root cookies url =
                 let args = [ for p in parameters -> p.name, false, Type.Primitive (mapParamType p.``type``)] // TODO: Check this is OK type
                 let argNames = [ for p in parameters -> p.name ]
                 let retFunc tys = 
-                  if Types.listsEqual tys [ for _, _, t in args -> t ] Types.typesEqual then Some retTyp
+                  if tys = [ for _, _, t in args -> t ] then Some retTyp
                   else None
-                { Member.Name = m.name; Metadata = [docMeta (parseDoc m.documentation)]
-                  Type = Type.Method(args, retFunc); Emitter = methCall argNames m.trace }
+                Member.Method(m.name, args, retFunc, [docMeta (parseDoc m.documentation)], methCall argNames m.trace)
             | None -> 
-                { Member.Name = m.name; Type = retTyp; Metadata = (docMeta (parseDoc m.documentation))::schema; Emitter = propAccess m.trace }
+                Member.Property(m.name, retTyp, (docMeta (parseDoc m.documentation))::schema, propAccess m.trace) 
         | "primitive" ->  
             let returns = unbox<TypePrimitive> m.returns                      
             let ty = fromRawType returns.``type``
             let typ, parser = getTypeAndEmitter lookupNamed ty
-            { Member.Name = m.name; Type = typ; Metadata = (docMeta (parseDoc m.documentation))::schema; Emitter = dataCall parser m.trace returns.endpoint }
+            Member.Property(m.name, typ, (docMeta (parseDoc m.documentation))::schema, dataCall parser m.trace returns.endpoint)
         | _ -> failwith "?" )
       return 
         { new ObjectType with 
