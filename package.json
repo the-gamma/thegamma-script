@@ -1,6 +1,6 @@
 {
   "name": "thegamma-script",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "The Gamma project",
   "scripts": {
     "pretest": "fable tests",
