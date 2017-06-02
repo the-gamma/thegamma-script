@@ -223,6 +223,7 @@ let e =
       yield { exportType ctx (asm.GetType("TheGamma.Interactive.youguess")) BindingFlags.Static 
                 with instance = [| "youguess" |] }
             
+      yield exportType ctx (asm.GetType("TheGamma.Interactive.LegendOptions")) BindingFlags.Instance 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.AxisOptions")) BindingFlags.Instance 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.ChartOptions")) BindingFlags.Instance 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.CompostBubblesChartSet")) BindingFlags.Instance 

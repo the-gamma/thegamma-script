@@ -56,7 +56,9 @@ module CompostHelpers =
   let Cat(x, r) = CAR(CA x, r)
   let orElse (a:option<_>) b = if a.IsSome then a else b
   let vega10 = [| "#1f77b4"; "#ff7f0e"; "#2ca02c"; "#d62728"; "#9467bd"; "#8c564b"; "#e377c2"; "#7f7f7f"; "#bcbd22"; "#17becf" |]
-  let infinitely s = seq { while true do yield! s }
+  let infinitely s = 
+    if Seq.isEmpty s then seq { while true do yield "black" }
+    else seq { while true do yield! s }
 
 open CompostHelpers
 
@@ -70,12 +72,19 @@ type AxisOptions =
     label : string option }
   static member Default = { minValue = None; maxValue = None; label = None }
 
+type LegendOptions = 
+  { position : string }
+  static member Default = { position = "none" }
+
 type ChartOptions =
   { size : float option * float option 
     xAxis : AxisOptions
-    yAxis : AxisOptions } 
+    yAxis : AxisOptions 
+    title : string option
+    legend : LegendOptions } 
   static member Default = 
-    { size = None, None
+    { size = None, None; title = None
+      legend = LegendOptions.Default
       xAxis = AxisOptions.Default
       yAxis = AxisOptions.Default }
 
@@ -118,8 +127,26 @@ module Internal =
   let applyStyle f chart = 
     Style(f, chart)
 
+  let applyLegend (width, height) chartOptions labels chart =     
+    if chartOptions.legend.position = "right" then
+      let labels = Array.ofSeq labels
+      let labs = 
+        InnerScale(Some(CO 0., CO 100.), None, 
+            Layered
+              [ for clr, lbl in labels do
+                  let style clr = applyStyle (fun s -> { s with Font = "9pt sans-serif"; Fill=Solid(1., HTML clr); StrokeColor=(0.0, RGB(0,0,0)) })
+                  yield Padding((4., 0., 4., 0.), Bar(CO 4., CA lbl)) |> style clr
+                  yield Text(COV(CO 5.), CAR(CA lbl, 0.5), VerticalAlign.Middle, HorizontalAlign.Start, 0., lbl) |> style "black"
+              ] ) 
+      let lwid, lhgt = (width - 250.) / width, (float labels.Length * 20.) / height    
+      console.log(lwid, lhgt)
+      Layered
+        [ OuterScale(Some(Continuous(CO 0.0, CO lwid)), Some(Continuous(CO 0.0, CO 1.0)), chart)
+          OuterScale(Some(Continuous(CO lwid, CO 1.0)), Some(Continuous(CO 0.0, CO lhgt)), labs)  ]
+    else chart
+
   let applyLabels chartOptions xdata ydata chart =     
-    let lowAndMid axis data = 
+    let lowMidHigh axis data = 
       if Array.forall (fun v -> isNumber v || isDate v) data then 
         let data = Array.map dateOrNumberAsNumber data 
         let lo, hi = Seq.min data, Seq.max data
@@ -127,27 +154,45 @@ module Internal =
         let lo = if axis.minValue.IsSome then dateOrNumberAsNumber (axis.minValue.Value) else lo
         let hi = if axis.maxValue.IsSome then dateOrNumberAsNumber (axis.maxValue.Value) else hi
         COV(CO lo),
-        COV(CO ((lo + hi) / 2.))
+        COV(CO ((lo + hi) / 2.)),
+        COV(CO hi)
       else 
         CAR(CA (string (data.[0])), 0.0),
         ( if data.Length % 2 = 1 then CAR(CA (string (data.[data.Length/2])), 0.5)
-          else CAR(CA (string (data.[data.Length/2])), 0.0) )
-    let lmx = lazy lowAndMid chartOptions.xAxis xdata
-    let lmy = lazy lowAndMid chartOptions.yAxis ydata
-    let lblStyle = applyStyle (fun s -> { s with StrokeWidth = Pixels 0; Fill = Solid(1., HTML "black"); Font = "bold 9pt sans-serif" })
+          else CAR(CA (string (data.[data.Length/2])), 0.0) ),
+        CAR(CA (string (data.[data.Length-1])), 1.0)
+    let lmhx = lazy lowMidHigh chartOptions.xAxis xdata
+    let lmhy = lazy lowMidHigh chartOptions.yAxis ydata
+    let plo, pmid, phi = (fun (v,_,_) -> v), (fun (_,v,_) -> v), (fun (_,_,v) -> v)
+
+    let lblStyle font chart = 
+      // Apply padding as if the label was inside chart area
+      Padding((300., 20., 40., 100.), chart)
+      |> applyStyle (fun s -> { s with StrokeWidth = Pixels 0; Fill = Solid(1., HTML "black"); Font = font })
+
+    // X axis label, Y axis label
     let chart, pbot = 
       match chartOptions.xAxis.label with
       | Some xl -> 
-          let lbl = Text(snd lmx.Value, fst lmy.Value, VerticalAlign.Middle, HorizontalAlign.Center, 0.0, xl)
-          Layered [ chart; Offset((0., 0.0), lblStyle lbl) ], 40.
+          let lbl = Text(pmid lmhx.Value, plo lmhy.Value, VerticalAlign.Middle, HorizontalAlign.Center, 0.0, xl)
+          Layered [ chart; lblStyle "bold 9pt sans-serif" lbl ], 40.
       | _ -> chart, 0.
     let chart, pleft = 
       match chartOptions.yAxis.label with
       | Some yl -> 
-          let lbl = Text(fst lmx.Value, snd lmy.Value, VerticalAlign.Middle, HorizontalAlign.Center, -90.0, yl)
-          Layered [ chart; Offset((0., 0.), lblStyle lbl) ], 50.
+          let lbl = Text(plo lmhx.Value, pmid lmhy.Value, VerticalAlign.Middle, HorizontalAlign.Center, -90.0, yl)
+          Layered [ chart; lblStyle "bold 9pt sans-serif" lbl ], 50.
       | _ -> chart, 0.
-    Padding((0., 0., pbot, pleft), chart)
+
+    // Chart title
+    let chart, ptop = 
+      match chartOptions.title with 
+      | None -> chart, 0.
+      | Some title ->
+          let ttl = Text(pmid lmhx.Value, phi lmhy.Value, VerticalAlign.Hanging, HorizontalAlign.Center, 0.0, title)
+          Layered [ chart; lblStyle "13pt sans-serif" ttl ], 0.
+
+    Padding((ptop, 0., pbot, pleft), chart)
 
 module Charts = 
   open Internal
@@ -167,11 +212,12 @@ module Charts =
         Bubble(COV(CO (dateOrNumberAsNumber x)), COV(CO (dateOrNumberAsNumber y)), size, size) ]
     |> applyScales xdata ydata chartOptions 
     |> applyAxes xdata ydata
-    |> applyStyle (fun s -> { s with StrokeWidth = Pixels 0; Fill = Solid(0.6, HTML bc) })            
     |> applyLabels chartOptions xdata ydata 
+    |> applyStyle (fun s -> { s with StrokeWidth = Pixels 0; Fill = Solid(0.6, HTML bc) })            
+    // |> applyLegend chartOptions
     |> createChart size 
 
-  let renderLines chartOptions size lcs (data:(obj * obj)[][]) =   
+  let renderLines chartOptions size lcs labels (data:(obj * obj)[][]) =   
     let xdata, ydata = Array.collect (Array.map fst) data, Array.collect (Array.map snd) data    
     Layered [
       for clr, line in Seq.zip (infinitely lcs) data ->
@@ -179,12 +225,15 @@ module Charts =
         |> applyStyle (fun s -> { s with StrokeColor = 1.0, HTML clr }) ]
     |> applyScales xdata ydata chartOptions 
     |> applyAxes xdata ydata
-    |> applyStyle (fun s -> { s with StrokeWidth = Pixels 2 })
     |> applyLabels chartOptions xdata ydata 
+    |> applyStyle (fun s -> { s with StrokeWidth = Pixels 2 })
+    |> applyLegend size chartOptions (Seq.zip (infinitely lcs) labels)
     |> createChart size 
 
-  let renderColsBars isBar chartOptions size clrs (data:(string * float)[]) =   
-    let xdata, ydata = Array.map fst data, Array.map snd data    
+  let renderColsBars isBar chartOptions size clrs labels (data:(string * float)[]) =   
+    let xdata, ydata = 
+      if isBar then Array.map (snd >> box) data, Array.map (fst >> box) data    
+      else Array.map (fst >> box) data, Array.map (snd >> box) data    
     Layered [
       for clr, (lbl, v) in Seq.zip (infinitely clrs) data ->
         ( if isBar then Padding((6.,0.,6.,1.), Bar(CO v, CA lbl))
@@ -193,6 +242,7 @@ module Charts =
     |> applyScales xdata ydata chartOptions 
     |> applyAxes xdata ydata
     |> applyLabels chartOptions (unbox xdata) (unbox ydata)
+    |> applyLegend size chartOptions (Seq.zip (infinitely clrs) labels)
     |> createChart size 
 
 // ------------------------------------------------------------------------------------------------
@@ -702,6 +752,10 @@ type YouGuessLine =
       guessLabel : string option 
   // [copy-paste]
       options : ChartOptions }  
+  member y.setTitle(title) =
+    { y with options = { y.options with title = title } }
+  member y.setLegend(position) = 
+    { y with options = { y.options with legend = { position = position } } }
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
   member y.setAxisX(?minValue, ?maxValue, ?label) = 
@@ -780,6 +834,10 @@ type CompostBubblesChartSet =
       bubbleColor : string option
   // [copy-paste]
       options : ChartOptions }
+  member y.setTitle(title) =
+    { y with options = { y.options with title = title } }
+  member y.setLegend(position) = 
+    { y with options = { y.options with legend = { position = position } } }
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
   member y.setAxisX(?minValue, ?maxValue, ?label) = 
@@ -814,6 +872,10 @@ type CompostColBarChart =
       colors : string[] option
   // [copy-paste]
       options : ChartOptions }  
+  member y.setTitle(title) =
+    { y with options = { y.options with title = title } }
+  member y.setLegend(position) = 
+    { y with options = { y.options with legend = { position = position } } }
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
   member y.setAxisX(?minValue, ?maxValue, ?label) = 
@@ -829,7 +891,7 @@ type CompostColBarChart =
     InteractiveHelpers.showStaticApp outputId y.options.size y.data
       (fun data size -> 
         let cc = defaultArg y.colors vega10
-        Charts.renderColsBars y.isBar y.options size cc data)
+        Charts.renderColsBars y.isBar y.options size cc (Seq.map fst data) data)
 
 
 type CompostLineChart =
@@ -838,6 +900,10 @@ type CompostLineChart =
       lineColor : string option
   // [copy-paste]
       options : ChartOptions }  
+  member y.setTitle(title) =
+    { y with options = { y.options with title = title } }
+  member y.setLegend(position) = 
+    { y with options = { y.options with legend = { position = position } } }
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
   member y.setAxisX(?minValue, ?maxValue, ?label) = 
@@ -853,7 +919,7 @@ type CompostLineChart =
     InteractiveHelpers.showStaticApp outputId y.options.size y.data
       (fun data size -> 
         let lc = defaultArg y.lineColor "#1f77b4"
-        Charts.renderLines y.options size [| lc |] [| data |])
+        Charts.renderLines y.options size [| lc |] ["Data"] [| data |])
 
 
 type CompostLinesChart =
@@ -862,6 +928,10 @@ type CompostLinesChart =
       lineColors : string[] option
   // [copy-paste]
       options : ChartOptions }  
+  member y.setTitle(title) =
+    { y with options = { y.options with title = title } }
+  member y.setLegend(position) = 
+    { y with options = { y.options with legend = { position = position } } }
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
   member y.setAxisX(?minValue, ?maxValue, ?label) = 
@@ -878,7 +948,7 @@ type CompostLinesChart =
     return! InteractiveHelpers.showStaticAppAsync outputId y.options.size
       (fun size -> 
         let lcs = defaultArg y.lineColors vega10
-        Charts.renderLines y.options size lcs data) }
+        Charts.renderLines y.options size lcs (y.data |> Seq.map (fun s -> s.seriesName)) data) }
       
 type CompostCharts() = 
   member c.bubbles(data:series<'k, 'v>) = 

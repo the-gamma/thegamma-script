@@ -65,6 +65,7 @@ type Orientation =
   | Horizontal
 
 type Shape<[<Measure>] 'vx, [<Measure>] 'vy> = 
+  | Clip of (Value<'vx> * Value<'vy>) * (Value<'vx> * Value<'vy>) * Shape<'vx, 'vy>
   | Style of (Style -> Style) * Shape<'vx, 'vy>
   | Text of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * float * string
   | AutoScale of bool * bool * Shape<'vx, 'vy>
@@ -100,8 +101,10 @@ module Svg =
   type SvgStyle = string
   
   type Svg =
+    | ClipPath of Svg * Svg
     | Path of PathSegment[] * SvgStyle
     | Ellipse of (float * float) * (float * float) * SvgStyle
+    | Rect of (float * float) * (float * float) * SvgStyle
     | Text of (float * float) * string * float * SvgStyle 
     | Combine of Svg[]
     | Empty
@@ -118,22 +121,56 @@ module Svg =
       | LineTo(x, y) -> sb.Append("L" + string x + " " + string y + " ")
     sb.ToString()
 
-  let rec renderSvg svg = seq { 
+  type RenderingContext = 
+    { Clip : (string * DomAttribute) list
+      Definitions : ResizeArray<DomNode>
+      NextClip : unit -> string }
+
+  let rec renderSvg ctx svg = seq { 
     match svg with
+    | ClipPath(clip, svg) ->
+        let id = ctx.NextClip()
+        s?defs [] [
+          s?clipPath [ "id" => id ] (List.ofSeq (renderSvg ctx clip)) ] 
+        |> ctx.Definitions.Add
+        yield! renderSvg { ctx with Clip = ["clip-path" => "url(#" + id + ")"] } svg
+
     | Empty -> ()
     | Text((x,y), t, rotation, style) ->
-        if rotation = 0.0 then
-          yield s?text [ "x" => string x; "y" => string y; "style" => style ] [text t]
-        else
-          yield s?text [ "x" => "0"; "y" => "0"; "transform" => sprintf "translate(%f,%f) rotate(%f)" x y rotation; 
-                         "style" => style ] [text t]
+        let attrs = 
+          [ yield! ctx.Clip
+            yield "style" => style 
+            if rotation = 0.0 then
+              yield "x" => string x
+              yield "y" => string y
+            else
+              yield "x" => "0"
+              yield "y" => "0"
+              yield "transform" => sprintf "translate(%f,%f) rotate(%f)" x y rotation ]
+        yield s?text attrs [ text t ]
+
     | Combine ss ->
-        for s in ss do yield! renderSvg s
+        for s in ss do yield! renderSvg ctx s
+
     | Ellipse((cx, cy),(rx, ry), style) ->
-        yield s?ellipse [ "cx" => string cx; "cy" => string cy;
-          "rx" => string rx; "ry" => string ry; "style" => style ] [] 
+        let attrs = 
+          ctx.Clip @
+          [ "cx" => string cx; "cy" => string cy;
+            "rx" => string rx; "ry" => string ry; "style" => style ]
+        yield s?ellipse attrs []
+
+    | Rect((x1, y1),(x2, y2), style) ->
+        let l, t = min x1 x2, min y1 y2
+        let w, h = abs (x1 - x2), abs (y1 - y2)
+        let attrs = 
+          ctx.Clip @
+          [ "x" => string l; "y" => string t; "width" => string w; 
+            "height" => string h; "style" => style ]
+        yield s?rect attrs []
+
     | Path(p, style) ->
-        yield s?path [ "d" => formatPath p; "style" => style ] [] }
+        let attrs = ctx.Clip @ [ "d" => formatPath p; "style" => style ]
+        yield s?path attrs  [] }
 
   let formatColor = function
     | RGB(r,g,b) -> sprintf "rgb(%d, %d, %d)" r g b
@@ -179,6 +216,7 @@ module Svg =
 
 module Scales = 
   type ScaledShapeInner<[<Measure>] 'vx, [<Measure>] 'vy> = 
+    | ScaledClip of (Value<'vx> * Value<'vy>) * (Value<'vx> * Value<'vy>) * ScaledShape<'vx, 'vy>
     | ScaledStyle of (Style -> Style) * ScaledShape<'vx, 'vy>
     | ScaledOuterScale of option<Scale<'vx>> * option<Scale<'vy>> * ScaledShape<'vx, 'vy>
     | ScaledText of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * float * string    
@@ -265,6 +303,7 @@ module Scales =
     // Replace just top level scales
     | ScaledOuterScale _ -> Scaled(outer, inner, shape)
     // Propagate recursively
+    | ScaledClip(lt, rb, shape) -> Scaled(outer, inner, ScaledClip(lt, rb, replaceScales outer shape))
     | ScaledOffset(d, shape) -> Scaled(outer, inner, ScaledOffset(d, replaceScales outer shape))
     | ScaledStyle(f, shape) -> Scaled(outer, inner, ScaledStyle(f, replaceScales outer shape))
     | ScaledPadding(pad, shape) -> Scaled(outer, inner, ScaledPadding(pad, replaceScales outer shape))
@@ -307,6 +346,10 @@ module Scales =
     let calculateScalesStyle = calculateScales 
     let calculateScales = calculateScales style
     match shape with
+    | Clip(lt, rb, shape) ->
+        let (Scaled(scales, _, _)) as scaled = calculateScales shape
+        Scaled(scales, scales, ScaledClip(lt, rb, scaled))
+
     | OuterScale(sx, sy, shape) ->
         let (Scaled((osx, osy), inner, _)) as scaled = calculateScales shape
         let scales = defaultArg sx osx, defaultArg sy osy
@@ -390,8 +433,8 @@ module Scales =
                 yield Offset((0., 10.), Text(x, ly, VerticalAlign.Hanging, HorizontalAlign.Center, 0.0, l)) |> FontStyle "9pt sans-serif"
             if showY then
               for y, l in generateAxisLabels style.FormatAxisYLabel sy do
-                yield Offset((-10., 0.), Text(lx, y, VerticalAlign.Middle, HorizontalAlign.End, 0.0, l)) |> FontStyle "9pt sans-serif"
-            yield shape ] |> calculateScales
+                yield Offset((-10., 0.), Text(lx, y, VerticalAlign.Middle, HorizontalAlign.End, 0.0, l)) |> FontStyle "9pt sans-serif"            
+            yield Clip((lx, ly), (hx, hy), shape) ] |> calculateScales
 
         match shape with 
         | Scaled(_, _, ScaledLayered(shapes)) ->
@@ -450,6 +493,7 @@ module Projections =
         Projection<'vx, 'vy, 'ux, 'uy>
 
   type ProjectedShapeInner<[<Measure>] 'vx, [<Measure>] 'vy> = 
+    | ProjectedClip of (Value<'vx> * Value<'vy>) * (Value<'vx> * Value<'vy>) * ProjectedShape<'vx, 'vy>
     | ProjectedStyle of (Style -> Style) * ProjectedShape<'vx, 'vy>
     | ProjectedBubble of Value<'vx> * Value<'vy> * float * float
     | ProjectedText of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * float * string    
@@ -566,6 +610,9 @@ module Projections =
 
   let rec calculateProjections<[<Measure>] 'ux, [<Measure>] 'uy> (shape:ScaledShape<'ux, 'uy>) projection = 
     match shape with
+    | Scaled(scales, _, ScaledClip(lt, rb, shape)) ->
+        Projected(projection, scales, ProjectedClip(lt, rb, calculateProjections shape projection))
+
     | Scaled(scales, _, ScaledOffset(offs, shape)) ->
         Projected(projection, scales, ProjectedOffset(offs, calculateProjections shape projection))
 
@@ -577,20 +624,22 @@ module Projections =
 
         // projection + shape scales determines mapping from shape scales to pixel space
         // get range of osx/osy within scales and transform projection so that it only maps on this subrange
-        let projection = 
-          match osy with
-          | Some(oy) ->
-              let lsy, hsy = getExtremes sy
-              let lsy', hsy' = scaleOne (0.0, 1.0) sy lsy, scaleOne (0.0, 1.0) sy hsy
-              let loy, hoy = getExtremes oy
-              let (CO loy'), (CO hoy') = scaleOne (0.0, 1.0) sy loy, scaleOne (0.0, 1.0) sy hoy
-              Rescale((0.0, 1.0), (loy', hoy'), projection)
+        let adaptProjection os s = 
+          match os with
+          | Some(o) ->
+              let ls, hs = getExtremes s
+              let ls', hs' = scaleOne (0.0, 1.0) s ls, scaleOne (0.0, 1.0) s hs
+              let lo, ho = getExtremes o
+              let (CO lo'), (CO ho') = scaleOne (0.0, 1.0) s lo, scaleOne (0.0, 1.0) s ho
+              (lo', ho')
           | _ -> 
-              projection
+              (0.0, 1.0)
+
+        let px = adaptProjection osx sx
+        let py = adaptProjection osy sy 
+        let projection = Rescale(px, py, projection)
 
         let (Projected(pbody, scales, nested)) = calculateProjections shape projection
-        //Projected(projection, scales, ProjectedStyle(style, ))
-        //failwith "hard!"
         Projected(pbody, scales, nested)
 
     | Scaled(scales, _, ScaledLine line) -> 
@@ -636,12 +685,16 @@ module Drawing =
   open Scales
   open Projections
 
+  type DrawingContext = 
+    { Style : Style
+      Definitions : ResizeArray<DomNode> }
+
   let rec hideFill style = 
     { style with Fill = Solid(0.0, RGB(0, 0, 0)); Animation = match style.Animation with Some(n,e,f) -> Some(n,e,f >> hideFill) | _ -> None }
   let rec hideStroke style = 
     { style with StrokeColor = (0.0, snd style.StrokeColor); Animation = match style.Animation with Some(n,e,f) -> Some(n,e,f >> hideStroke) | _ -> None }
 
-  let rec drawShape<[<Measure>] 'ux, [<Measure>] 'uy> defs style (shape:ProjectedShape<'ux, 'uy>) = 
+  let rec drawShape<[<Measure>] 'ux, [<Measure>] 'uy> ctx (shape:ProjectedShape<'ux, 'uy>) = 
     let (Projected(projection, (sx, sy), shape)) = shape
 
     let projectCont (x, y) = 
@@ -650,8 +703,11 @@ module Drawing =
     let projectContCov (x, y) = projectCont (COV x, COV y)
 
     match shape, (sx, sy) with
+    | ProjectedClip(lt, rb, shape), _ ->
+        ClipPath(Rect(projectCont lt, projectCont rb, ""), drawShape ctx shape)
+
     | ProjectedOffset((dx, dy), shape), _ ->
-        drawShape defs style shape
+        drawShape ctx shape
         |> mapSvg (function 
             | Text((x, y), t, r, s) -> Text((x + dx, y + dy), t, r, s)
             | Path(seg, s) -> Path(Array.map (function 
@@ -659,23 +715,23 @@ module Drawing =
             | s -> s)
 
     | ProjectedStyle(sf, shape), _ ->
-        drawShape defs (sf style) shape
+        drawShape { ctx with Style =  sf ctx.Style } shape
 
     | ProjectedText(x, y, va, ha, r, t), _ -> 
         let va = match va with Baseline -> "baseline" | Hanging -> "hanging" | Middle -> "middle"
         let ha = match ha with Start -> "start" | Center -> "middle" | End -> "end"
         let xy = projectCont (x, y)
-        Text(xy, t, r, sprintf "alignment-baseline:%s; text-anchor:%s;" va ha + formatStyle defs style)
+        Text(xy, t, r, sprintf "alignment-baseline:%s; text-anchor:%s;" va ha + formatStyle ctx.Definitions ctx.Style)
 
     | ProjectedBubble(x, y, rx, ry), _ -> 
-        Ellipse(projectCont (x, y), (rx, ry), formatStyle defs style)
+        Ellipse(projectCont (x, y), (rx, ry), formatStyle ctx.Definitions ctx.Style)
 
     | ProjectedLine line, _ -> 
         let path = 
           [ yield MoveTo(projectCont (Seq.head line)) 
             for pt in Seq.skip 1 line do yield LineTo (projectCont pt) ]
           |> Array.ofList
-        Path(path, formatStyle defs (hideFill style)) 
+        Path(path, formatStyle ctx.Definitions (hideFill ctx.Style))
 
     | ProjectedColumn(x, y), (Continuous _, _)
     | ProjectedColumn(x, y), (_, Categorical _) -> 
@@ -687,7 +743,7 @@ module Drawing =
               LineTo(projectCont (CAR(x, 1.0), COV ly))
               LineTo(projectCont (CAR(x, 0.0), COV ly))
               LineTo(projectCont (CAR(x, 0.0), COV y)) |]           
-        Path(path, formatStyle defs (hideStroke style)) 
+        Path(path, formatStyle ctx.Definitions (hideStroke ctx.Style)) 
 
     | ProjectedBar(x, y), (_, Continuous _)
     | ProjectedBar(x, y), (Categorical _, _) -> 
@@ -699,7 +755,7 @@ module Drawing =
               LineTo(projectCont (COV lx, CAR(y, 1.0)))
               LineTo(projectCont (COV lx, CAR(y, 0.0)))
               LineTo(projectCont (COV x, CAR(y, 0.0))) |]           
-        Path(path, formatStyle defs (hideStroke style)) 
+        Path(path, formatStyle ctx.Definitions (hideStroke ctx.Style)) 
 
     | ProjectedArea line, (Categorical _, _)
     | ProjectedArea line, (_, Categorical _) -> 
@@ -712,16 +768,16 @@ module Drawing =
             yield LineTo(projectCont (lastX, COV ly))
             yield LineTo(projectCont (firstX, COV ly)) ]
           |> Array.ofList        
-        Path(path, formatStyle defs (hideStroke style)) 
+        Path(path, formatStyle ctx.Definitions (hideStroke ctx.Style)) 
 
     | ProjectedLayered shapes, _ ->
-        Combine(shapes |> Array.map (fun s -> drawShape defs style s))
+        Combine(shapes |> Array.map (fun s -> drawShape ctx s))
 
     | ProjectedStack(_, shapes), _ ->
-        Combine(shapes |> Array.map (fun s -> drawShape defs style s))
+        Combine(shapes |> Array.map (fun s -> drawShape ctx s))
 
     | ProjectedInteractive(f, shape), _ ->
-        drawShape defs style shape
+        drawShape ctx shape
 
 // ------------------------------------------------------------------------------------------------
 // Event handling
@@ -770,6 +826,7 @@ module Events =
     | ProjectedBar _
     | ProjectedArea _ -> ()
     | ProjectedStyle(_, shape)
+    | ProjectedClip(_, _, shape) 
     | ProjectedOffset(_, shape) -> triggerEvent shape jse event
     | ProjectedStack(_, shapes)
     | ProjectedLayered shapes -> for shape in shapes do triggerEvent shape jse event
@@ -853,7 +910,7 @@ module Compost =
     let projected = calculateProjections scaled master
 
     let defs = ResizeArray<_>()
-    let svg = drawShape defs defstyle projected
+    let svg = drawShape { Definitions = defs; Style = defstyle } projected
 
     let getRelativeLocation el x y =
       let rec getOffset (parent:HTMLElement) (x, y) = 
@@ -875,6 +932,11 @@ module Compost =
       let x, y = getRelativeLocation el touch.pageX touch.pageY
       triggerEvent projected evt (TouchEvent(kind, (COV(CO x), COV(CO y))))
 
+    let counter = ref 0
+    let renderCtx = 
+      { Clip = []; Definitions = defs; 
+        NextClip = fun () -> incr counter; sprintf "clip-%d" counter.Value }
+
     h?div ["style"=>sprintf "width:%dpx;height:%dpx;margin:0px auto 0px auto" (int width) (int height)] [
       s?svg [
           "width"=>string (int width); "height"=> string(int height); 
@@ -887,7 +949,8 @@ module Compost =
           "touchdown" =!> touchHandler TouchEventKind.Start
           "touchup" =!> touchHandler TouchEventKind.End
         ] [
+          let body = renderSvg renderCtx svg |> Array.ofSeq
           yield! defs
-          yield! renderSvg svg
+          yield! body
         ]
     ]
