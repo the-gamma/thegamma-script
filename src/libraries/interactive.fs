@@ -201,15 +201,21 @@ module Charts =
     h?div ["style"=>"text-align:center;padding-top:20px"] [
       Compost.createSvg size chart
     ]
-            
+        
+  let inAxis axis value =
+    if axis.minValue.IsSome && dateOrNumberAsNumber value < dateOrNumberAsNumber axis.minValue.Value then false
+    elif axis.maxValue.IsSome && dateOrNumberAsNumber value > dateOrNumberAsNumber axis.maxValue.Value then false
+    else true
+                
   // Charts
 
   let renderBubbles chartOptions size bc (data:(obj * obj * obj option)[]) =   
     let xdata, ydata = Array.map (fun (x, _, _) -> x) data, Array.map (fun (_, y, _) -> y) data
     Layered [
-      for x, y, s in data -> 
-        let size = unbox (defaultArg s (box 2.))
-        Bubble(COV(CO (dateOrNumberAsNumber x)), COV(CO (dateOrNumberAsNumber y)), size, size) ]
+      for x, y, s in data do
+        if inAxis chartOptions.xAxis x && inAxis chartOptions.yAxis y then
+          let size = unbox (defaultArg s (box 2.))
+          yield Bubble(COV(CO (dateOrNumberAsNumber x)), COV(CO (dateOrNumberAsNumber y)), size, size) ]
     |> applyScales xdata ydata chartOptions 
     |> applyAxes xdata ydata
     |> applyLabels chartOptions xdata ydata 
@@ -220,9 +226,13 @@ module Charts =
   let renderLines chartOptions size lcs labels (data:(obj * obj)[][]) =   
     let xdata, ydata = Array.collect (Array.map fst) data, Array.collect (Array.map snd) data    
     Layered [
-      for clr, line in Seq.zip (infinitely lcs) data ->
-        Line [ for x, y in line -> COV(CO (dateOrNumberAsNumber x)), COV(CO (dateOrNumberAsNumber y)) ]
-        |> applyStyle (fun s -> { s with StrokeColor = 1.0, HTML clr }) ]
+      for clr, line in Seq.zip (infinitely lcs) data do
+        let points = 
+          [ for x, y in line do
+              if inAxis chartOptions.xAxis x && inAxis chartOptions.yAxis y then
+                yield COV(CO (dateOrNumberAsNumber x)), COV(CO (dateOrNumberAsNumber y)) ]
+        if not (List.isEmpty points) then 
+          yield Line points |> applyStyle (fun s -> { s with StrokeColor = 1.0, HTML clr }) ]
     |> applyScales xdata ydata chartOptions 
     |> applyAxes xdata ydata
     |> applyLabels chartOptions xdata ydata 

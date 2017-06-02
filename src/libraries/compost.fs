@@ -65,7 +65,6 @@ type Orientation =
   | Horizontal
 
 type Shape<[<Measure>] 'vx, [<Measure>] 'vy> = 
-  | Clip of (Value<'vx> * Value<'vy>) * (Value<'vx> * Value<'vy>) * Shape<'vx, 'vy>
   | Style of (Style -> Style) * Shape<'vx, 'vy>
   | Text of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * float * string
   | AutoScale of bool * bool * Shape<'vx, 'vy>
@@ -101,7 +100,6 @@ module Svg =
   type SvgStyle = string
   
   type Svg =
-    | ClipPath of Svg * Svg
     | Path of PathSegment[] * SvgStyle
     | Ellipse of (float * float) * (float * float) * SvgStyle
     | Rect of (float * float) * (float * float) * SvgStyle
@@ -122,24 +120,14 @@ module Svg =
     sb.ToString()
 
   type RenderingContext = 
-    { Clip : (string * DomAttribute) list
-      Definitions : ResizeArray<DomNode>
-      NextClip : unit -> string }
+    { Definitions : ResizeArray<DomNode> }
 
   let rec renderSvg ctx svg = seq { 
     match svg with
-    | ClipPath(clip, svg) ->
-        let id = ctx.NextClip()
-        s?defs [] [
-          s?clipPath [ "id" => id ] (List.ofSeq (renderSvg ctx clip)) ] 
-        |> ctx.Definitions.Add
-        yield! renderSvg { ctx with Clip = ["clip-path" => "url(#" + id + ")"] } svg
-
     | Empty -> ()
     | Text((x,y), t, rotation, style) ->
         let attrs = 
-          [ yield! ctx.Clip
-            yield "style" => style 
+          [ yield "style" => style 
             if rotation = 0.0 then
               yield "x" => string x
               yield "y" => string y
@@ -154,7 +142,6 @@ module Svg =
 
     | Ellipse((cx, cy),(rx, ry), style) ->
         let attrs = 
-          ctx.Clip @
           [ "cx" => string cx; "cy" => string cy;
             "rx" => string rx; "ry" => string ry; "style" => style ]
         yield s?ellipse attrs []
@@ -163,13 +150,12 @@ module Svg =
         let l, t = min x1 x2, min y1 y2
         let w, h = abs (x1 - x2), abs (y1 - y2)
         let attrs = 
-          ctx.Clip @
           [ "x" => string l; "y" => string t; "width" => string w; 
             "height" => string h; "style" => style ]
         yield s?rect attrs []
 
     | Path(p, style) ->
-        let attrs = ctx.Clip @ [ "d" => formatPath p; "style" => style ]
+        let attrs = [ "d" => formatPath p; "style" => style ]
         yield s?path attrs  [] }
 
   let formatColor = function
@@ -216,7 +202,6 @@ module Svg =
 
 module Scales = 
   type ScaledShapeInner<[<Measure>] 'vx, [<Measure>] 'vy> = 
-    | ScaledClip of (Value<'vx> * Value<'vy>) * (Value<'vx> * Value<'vy>) * ScaledShape<'vx, 'vy>
     | ScaledStyle of (Style -> Style) * ScaledShape<'vx, 'vy>
     | ScaledOuterScale of option<Scale<'vx>> * option<Scale<'vy>> * ScaledShape<'vx, 'vy>
     | ScaledText of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * float * string    
@@ -303,7 +288,6 @@ module Scales =
     // Replace just top level scales
     | ScaledOuterScale _ -> Scaled(outer, inner, shape)
     // Propagate recursively
-    | ScaledClip(lt, rb, shape) -> Scaled(outer, inner, ScaledClip(lt, rb, replaceScales outer shape))
     | ScaledOffset(d, shape) -> Scaled(outer, inner, ScaledOffset(d, replaceScales outer shape))
     | ScaledStyle(f, shape) -> Scaled(outer, inner, ScaledStyle(f, replaceScales outer shape))
     | ScaledPadding(pad, shape) -> Scaled(outer, inner, ScaledPadding(pad, replaceScales outer shape))
@@ -346,10 +330,6 @@ module Scales =
     let calculateScalesStyle = calculateScales 
     let calculateScales = calculateScales style
     match shape with
-    | Clip(lt, rb, shape) ->
-        let (Scaled(scales, _, _)) as scaled = calculateScales shape
-        Scaled(scales, scales, ScaledClip(lt, rb, scaled))
-
     | OuterScale(sx, sy, shape) ->
         let (Scaled((osx, osy), inner, _)) as scaled = calculateScales shape
         let scales = defaultArg sx osx, defaultArg sy osy
@@ -434,7 +414,7 @@ module Scales =
             if showY then
               for y, l in generateAxisLabels style.FormatAxisYLabel sy do
                 yield Offset((-10., 0.), Text(lx, y, VerticalAlign.Middle, HorizontalAlign.End, 0.0, l)) |> FontStyle "9pt sans-serif"            
-            yield Clip((lx, ly), (hx, hy), shape) ] |> calculateScales
+            yield shape ] |> calculateScales
 
         match shape with 
         | Scaled(_, _, ScaledLayered(shapes)) ->
@@ -493,7 +473,6 @@ module Projections =
         Projection<'vx, 'vy, 'ux, 'uy>
 
   type ProjectedShapeInner<[<Measure>] 'vx, [<Measure>] 'vy> = 
-    | ProjectedClip of (Value<'vx> * Value<'vy>) * (Value<'vx> * Value<'vy>) * ProjectedShape<'vx, 'vy>
     | ProjectedStyle of (Style -> Style) * ProjectedShape<'vx, 'vy>
     | ProjectedBubble of Value<'vx> * Value<'vy> * float * float
     | ProjectedText of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * float * string    
@@ -610,9 +589,6 @@ module Projections =
 
   let rec calculateProjections<[<Measure>] 'ux, [<Measure>] 'uy> (shape:ScaledShape<'ux, 'uy>) projection = 
     match shape with
-    | Scaled(scales, _, ScaledClip(lt, rb, shape)) ->
-        Projected(projection, scales, ProjectedClip(lt, rb, calculateProjections shape projection))
-
     | Scaled(scales, _, ScaledOffset(offs, shape)) ->
         Projected(projection, scales, ProjectedOffset(offs, calculateProjections shape projection))
 
@@ -703,9 +679,6 @@ module Drawing =
     let projectContCov (x, y) = projectCont (COV x, COV y)
 
     match shape, (sx, sy) with
-    | ProjectedClip(lt, rb, shape), _ ->
-        ClipPath(Rect(projectCont lt, projectCont rb, ""), drawShape ctx shape)
-
     | ProjectedOffset((dx, dy), shape), _ ->
         drawShape ctx shape
         |> mapSvg (function 
@@ -826,7 +799,6 @@ module Events =
     | ProjectedBar _
     | ProjectedArea _ -> ()
     | ProjectedStyle(_, shape)
-    | ProjectedClip(_, _, shape) 
     | ProjectedOffset(_, shape) -> triggerEvent shape jse event
     | ProjectedStack(_, shapes)
     | ProjectedLayered shapes -> for shape in shapes do triggerEvent shape jse event
@@ -934,8 +906,7 @@ module Compost =
 
     let counter = ref 0
     let renderCtx = 
-      { Clip = []; Definitions = defs; 
-        NextClip = fun () -> incr counter; sprintf "clip-%d" counter.Value }
+      { Definitions = defs }
 
     h?div ["style"=>sprintf "width:%dpx;height:%dpx;margin:0px auto 0px auto" (int width) (int height)] [
       s?svg [

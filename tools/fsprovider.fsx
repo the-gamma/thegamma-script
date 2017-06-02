@@ -187,6 +187,7 @@ let knownTypes =
         "YouGuessSortBars", "YouGuessSortBars"
         "YouGuessColsBars", "YouGuessColsBars"
 
+        "LegendOptions", "LegendOptions"
         "AxisOptions", "AxisOptions"
         "ChartOptions", "ChartOptions"
         "CompostBubblesChartSet", "CompostBubblesChartSet"
