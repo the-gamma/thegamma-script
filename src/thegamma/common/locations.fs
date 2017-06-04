@@ -8,14 +8,15 @@ type LineColumnRange =
     EndColumn : int }
 
 type LocationMapper(code:string) = 
-  let lengths = code.Split('\n') |> Array.map (fun s -> s.Length)
+  // ResizeArray is workaround for "TypeError: TypedArray.from requires its this argument subclass a TypedArray constructor" in Safari
+  let lengths = ResizeArray<_>(code.Split('\n') |> Seq.map (fun s -> s.Length)) 
 
   /// Convert absolute 0-based location to 1-based line and 1-based column location
   member x.AbsoluteToLineCol(offs) = 
     let mutable line = 0
     let mutable col = 0
     let mutable offs = offs
-    while line <= lengths.Length && offs > lengths.[line] do
+    while line <= lengths.Count && offs > lengths.[line] do
       offs <- offs - lengths.[line] - 1
       line <- line + 1
     line + 1, offs + 1

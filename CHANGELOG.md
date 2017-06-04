@@ -1,3 +1,4 @@
+ * 0.1.5 - Improve compost axes, labels, legends and clipping; support Safari 
  * 0.1.4 - Clip body of chart, minimal legends & titles, fixes in axis labels
  * 0.1.3 - Labels for youdraw.line, fix labels for ordinary line charts
  * 0.1.2 - Compost bars, columns, lines and labels

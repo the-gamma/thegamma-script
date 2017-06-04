@@ -69,8 +69,9 @@ open CompostHelpers
 type AxisOptions = 
   { minValue : obj option
     maxValue : obj option 
-    label : string option }
-  static member Default = { minValue = None; maxValue = None; label = None }
+    label : string option
+    labelOffset : float option }
+  static member Default = { minValue = None; maxValue = None; label = None; labelOffset = None }
 
 type LegendOptions = 
   { position : string }
@@ -91,115 +92,136 @@ type ChartOptions =
 module Internal = 
   
   // Helpers
+  let arrayMap f s = Array.map f s // REVIEW: Hack to avoid Float64Array (which behaves oddly in Safari) see: https://github.com/zloirock/core-js/issues/285
 
-  let applyScales xdata ydata chartOptions chart = 
-    let getInnerScale axis data = 
-      if axis.minValue = None && axis.maxValue = None then None
-      else
-        let numbers = Array.map dateOrNumberAsNumber data
-        let extremes = Seq.min numbers, Seq.max numbers
-        let lo, hi = Scales.adjustRange extremes
-        let lo, hi = defaultArg axis.minValue (box lo), defaultArg axis.maxValue (box hi)
-        Some(CO(unbox lo), CO(unbox hi))
+  let mapColor f (clr:string) = 
+    let r = parseInt (clr.Substring(1,2)) 16
+    let g = parseInt (clr.Substring(3,2)) 16
+    let b = parseInt (clr.Substring(5,2)) 16
+    let r, g, b = f (float r, float g, float b)
+    let fi n = (formatInt (int n) 16).PadLeft(2, '0')
+    "#" + fi r + fi g + fi b
 
-    let sx = getInnerScale chartOptions.xAxis xdata
-    let sy = getInnerScale chartOptions.yAxis ydata
-    AutoScale(sx.IsNone, sy.IsNone, InnerScale(sx, sy, chart))      
+  type ScalePoints = 
+    { Minimum : Value<1>; Maximum : Value<1>; Middle : Value<1> }
 
-  let applyAxes xdata ydata chart = 
-    let style data =
-      let isDate = data |> Seq.exists isDate
-      if isDate then
-        let values = data |> Array.map dateOrNumberAsNumber
-        let lo, hi = asDate(Seq.min values), asDate(Seq.max values)
-        if (hi - lo).TotalDays <= 1. then
-          fun _ (Cont v) -> formatTime(asDate(v))
-        else
-          fun _ (Cont v) -> formatDate(asDate(v))
-      else Compost.defaultFormat
-    Style(
-      (fun s -> 
-        { s with 
-            FormatAxisXLabel = style xdata
-            FormatAxisYLabel = style ydata }),
-      Axes(true, true, chart) )
+  type ChartContext = 
+    { Chart : Shape<1, 1> 
+      XPoints : ScalePoints 
+      YPoints : ScalePoints
+      XData : obj[]
+      YData : obj[]
+      Padding : float * float * float * float
+      ChartOptions : ChartOptions }
+
+  let calculateScales chart = 
+    let (Scales.Scaled((sx, sy), _, _)) = Scales.calculateScales Compost.defstyle chart
+    let getPoints = function
+      | Continuous(CO lo, CO hi) -> { Minimum = COV(CO lo); Maximum = COV(CO hi); Middle = COV(CO ((hi + lo) / 2.)) }
+      | Categorical(vals) -> 
+        { Minimum = CAR(vals.[0], 0.0); Maximum = CAR(vals.[vals.Length-1], 1.0)
+          Middle = if vals.Length % 2 = 1 then CAR(vals.[vals.Length/2], 0.5)
+                   else CAR(vals.[vals.Length/2], 0.0) }
+    getPoints sx, getPoints sy
+
+  let initChart xdata ydata options chart =
+    let px, py = calculateScales chart 
+    { Chart = chart; XPoints = px; YPoints = py; Padding = (0., 0., 0., 0.)
+      XData = xdata; YData = ydata; ChartOptions = options }
 
   let applyStyle f chart = 
     Style(f, chart)
 
-  let applyLegend (width, height) chartOptions labels chart =     
-    if chartOptions.legend.position = "right" then
+  let applyInteractive e chart = 
+    Interactive(e, chart)
+
+  /// Add InnerScale (when scales are set explicitly) and AutoScale for the rest
+  /// Recalculate points after changing the scales to make sure they're up to date
+  let applyScales ctx = 
+    let getInnerScale axis sp = 
+      match sp with
+      | _ when axis.minValue = None && axis.maxValue = None -> None 
+      | { Minimum = COV(CO lo); Maximum = COV(CO hi) } ->
+          let lo, hi = defaultArg axis.minValue (box lo), defaultArg axis.maxValue (box hi)
+          Some(CO(unbox lo), CO(unbox hi))
+      | _ -> None
+    let sx = getInnerScale ctx.ChartOptions.xAxis ctx.XPoints
+    let sy = getInnerScale ctx.ChartOptions.yAxis ctx.YPoints
+    let chart = AutoScale(sx.IsNone, sy.IsNone, InnerScale(sx, sy, ctx.Chart))
+    let xp, yp = calculateScales chart 
+    { ctx with Chart = chart; XPoints = xp; YPoints = yp }
+
+  /// 
+  let applyAxes xlab ylab ctx = 
+    let style data =
+      let isDate = data |> Seq.exists isDate
+      if isDate then
+        let values = data |> arrayMap dateOrNumberAsNumber
+        let lo, hi = asDate(Seq.min values), asDate(Seq.max values)
+        if (hi - lo).TotalDays <= 1. then fun _ (Cont v) -> formatTime(asDate(v))
+        else fun _ (Cont v) -> formatDate(asDate(v))
+      else Compost.defaultFormat
+    let chart =
+      Axes(xlab, ylab, ctx.Chart) |> applyStyle (fun s -> 
+        { s with FormatAxisXLabel = style ctx.XData; FormatAxisYLabel = style ctx.YData })
+    { ctx with Chart = Padding(ctx.Padding, chart) }    
+
+
+  let applyLegend (width, height) labels ctx =     
+    if ctx.ChartOptions.legend.position = "right" then
       let labels = Array.ofSeq labels
       let labs = 
         InnerScale(Some(CO 0., CO 100.), None, 
             Layered
               [ for clr, lbl in labels do
-                  let style clr = applyStyle (fun s -> { s with Font = "9pt sans-serif"; Fill=Solid(1., HTML clr); StrokeColor=(0.0, RGB(0,0,0)) })
-                  yield Padding((4., 0., 4., 0.), Bar(CO 4., CA lbl)) |> style clr
-                  yield Text(COV(CO 5.), CAR(CA lbl, 0.5), VerticalAlign.Middle, HorizontalAlign.Start, 0., lbl) |> style "black"
+                  let style clr = applyStyle (fun s -> { s with Font = "9pt Roboto,sans-serif"; Fill=Solid(1., HTML clr); StrokeColor=(0.0, RGB(0,0,0)) })
+                  yield Padding((4., 0., 4., 0.), Bar(CO 6., CA lbl)) |> style clr
+                  yield Text(COV(CO 8.), CAR(CA lbl, 0.5), VerticalAlign.Middle, HorizontalAlign.Start, 0., lbl) |> style "black"
               ] ) 
-      let lwid, lhgt = (width - 250.) / width, (float labels.Length * 20.) / height    
-      console.log(lwid, lhgt)
-      Layered
-        [ OuterScale(Some(Continuous(CO 0.0, CO lwid)), Some(Continuous(CO 0.0, CO 1.0)), chart)
-          OuterScale(Some(Continuous(CO lwid, CO 1.0)), Some(Continuous(CO 0.0, CO lhgt)), labs)  ]
-    else chart
+      let ptop, _, _, _ = ctx.Padding
+      let lwid, lhgt = (width - 250.) / width, (float labels.Length * 30.) / height    
+      let chart = 
+        Layered
+          [ OuterScale(Some(Continuous(CO 0.0, CO lwid)), Some(Continuous(CO 0.0, CO 1.0)), ctx.Chart)
+            OuterScale(Some(Continuous(CO lwid, CO 1.0)), Some(Continuous(CO 0.0, CO lhgt)), Padding((ptop, 0., 0., 20.), labs)) ]
+      { ctx with Chart = chart }
+    else ctx
 
-  let applyLabels chartOptions xdata ydata chart =     
-    let lowMidHigh axis data = 
-      if Array.forall (fun v -> isNumber v || isDate v) data then 
-        let data = Array.map dateOrNumberAsNumber data 
-        let lo, hi = Seq.min data, Seq.max data
-        let lo, hi = Scales.adjustRange (lo, hi)
-        let lo = if axis.minValue.IsSome then dateOrNumberAsNumber (axis.minValue.Value) else lo
-        let hi = if axis.maxValue.IsSome then dateOrNumberAsNumber (axis.maxValue.Value) else hi
-        COV(CO lo),
-        COV(CO ((lo + hi) / 2.)),
-        COV(CO hi)
-      else 
-        CAR(CA (string (data.[0])), 0.0),
-        ( if data.Length % 2 = 1 then CAR(CA (string (data.[data.Length/2])), 0.5)
-          else CAR(CA (string (data.[data.Length/2])), 0.0) ),
-        CAR(CA (string (data.[data.Length-1])), 1.0)
-    let lmhx = lazy lowMidHigh chartOptions.xAxis xdata
-    let lmhy = lazy lowMidHigh chartOptions.yAxis ydata
-    let plo, pmid, phi = (fun (v,_,_) -> v), (fun (_,v,_) -> v), (fun (_,_,v) -> v)
-
+  let applyLabels ctx =     
     let lblStyle font chart = 
-      // Apply padding as if the label was inside chart area
-      Padding((300., 20., 40., 100.), chart)
-      |> applyStyle (fun s -> { s with StrokeWidth = Pixels 0; Fill = Solid(1., HTML "black"); Font = font })
+      chart |> applyStyle (fun s -> 
+        { s with StrokeWidth = Pixels 0; Fill = Solid(1., HTML "black"); Font = font })
 
     // X axis label, Y axis label
+    let chart = ctx.Chart
     let chart, pbot = 
-      match chartOptions.xAxis.label with
+      match ctx.ChartOptions.xAxis.label with
       | Some xl -> 
-          let lbl = Text(pmid lmhx.Value, plo lmhy.Value, VerticalAlign.Middle, HorizontalAlign.Center, 0.0, xl)
-          Layered [ chart; lblStyle "bold 9pt sans-serif" lbl ], 40.
+          let offs = defaultArg ctx.ChartOptions.xAxis.labelOffset 40.
+          let lbl = Offset((0., offs), Text(ctx.XPoints.Middle, ctx.YPoints.Minimum, VerticalAlign.Middle, HorizontalAlign.Center, 0.0, xl))
+          Layered [ chart; lblStyle "bold 9pt Roboto,sans-serif" lbl ], offs + 10.
       | _ -> chart, 0.
     let chart, pleft = 
-      match chartOptions.yAxis.label with
+      match ctx.ChartOptions.yAxis.label with
       | Some yl -> 
-          let lbl = Text(plo lmhx.Value, pmid lmhy.Value, VerticalAlign.Middle, HorizontalAlign.Center, -90.0, yl)
-          Layered [ chart; lblStyle "bold 9pt sans-serif" lbl ], 50.
+          let offs = defaultArg ctx.ChartOptions.yAxis.labelOffset 60.
+          let lbl = Offset((-offs, 0.), Text(ctx.XPoints.Minimum, ctx.YPoints.Middle, VerticalAlign.Middle, HorizontalAlign.Center, -90.0, yl))
+          Layered [ chart; lblStyle "bold 9pt Roboto,sans-serif" lbl ], offs + 10.
       | _ -> chart, 0.
 
     // Chart title
     let chart, ptop = 
-      match chartOptions.title with 
+      match ctx.ChartOptions.title with 
       | None -> chart, 0.
       | Some title ->
-          let ttl = Text(pmid lmhx.Value, phi lmhy.Value, VerticalAlign.Hanging, HorizontalAlign.Center, 0.0, title)
-          Layered [ chart; lblStyle "13pt sans-serif" ttl ], 0.
+          let ttl = Offset((0., -30.), Text(ctx.XPoints.Middle, ctx.YPoints.Maximum, VerticalAlign.Hanging, HorizontalAlign.Center, 0.0, title))
+          Layered [ chart; lblStyle "13pt Roboto,sans-serif" ttl ], 40.
 
-    Padding((ptop, 0., pbot, pleft), chart)
+    { ctx with Chart = chart; Padding = (ptop, 0., pbot, pleft) }
 
-module Charts = 
-  open Internal
-
-  let createChart size chart =   
+  let createChart size ctx =   
     h?div ["style"=>"text-align:center;padding-top:20px"] [
-      Compost.createSvg size chart
+      Compost.createSvg size ctx.Chart
     ]
         
   let inAxis axis value =
@@ -207,19 +229,23 @@ module Charts =
     elif axis.maxValue.IsSome && dateOrNumberAsNumber value > dateOrNumberAsNumber axis.maxValue.Value then false
     else true
                 
+module Charts = 
+  open Internal
+
   // Charts
 
   let renderBubbles chartOptions size bc (data:(obj * obj * obj option)[]) =   
-    let xdata, ydata = Array.map (fun (x, _, _) -> x) data, Array.map (fun (_, y, _) -> y) data
+    let xdata, ydata = Array.map (fun (x, _, _) -> x) data, Array.map (fun (_, y, _) -> y) data    
     Layered [
       for x, y, s in data do
         if inAxis chartOptions.xAxis x && inAxis chartOptions.yAxis y then
           let size = unbox (defaultArg s (box 2.))
-          yield Bubble(COV(CO (dateOrNumberAsNumber x)), COV(CO (dateOrNumberAsNumber y)), size, size) ]
-    |> applyScales xdata ydata chartOptions 
-    |> applyAxes xdata ydata
-    |> applyLabels chartOptions xdata ydata 
-    |> applyStyle (fun s -> { s with StrokeWidth = Pixels 0; Fill = Solid(0.6, HTML bc) })            
+          let b = Bubble(COV(CO (dateOrNumberAsNumber x)), COV(CO (dateOrNumberAsNumber y)), size, size) 
+          yield b |> applyStyle (fun s -> { s with StrokeWidth = Pixels 0; Fill = Solid(0.6, HTML bc) }) ]
+    |> initChart xdata ydata chartOptions
+    |> applyScales 
+    |> applyLabels 
+    |> applyAxes true true
     // |> applyLegend chartOptions
     |> createChart size 
 
@@ -232,27 +258,46 @@ module Charts =
               if inAxis chartOptions.xAxis x && inAxis chartOptions.yAxis y then
                 yield COV(CO (dateOrNumberAsNumber x)), COV(CO (dateOrNumberAsNumber y)) ]
         if not (List.isEmpty points) then 
-          yield Line points |> applyStyle (fun s -> { s with StrokeColor = 1.0, HTML clr }) ]
-    |> applyScales xdata ydata chartOptions 
-    |> applyAxes xdata ydata
-    |> applyLabels chartOptions xdata ydata 
-    |> applyStyle (fun s -> { s with StrokeWidth = Pixels 2 })
-    |> applyLegend size chartOptions (Seq.zip (infinitely lcs) labels)
+          yield Line points |> applyStyle (fun s -> { s with StrokeColor = 1.0, HTML clr; StrokeWidth = Pixels 2  }) ]
+    |> initChart xdata ydata chartOptions
+    |> applyScales 
+    |> applyLabels
+    |> applyAxes true true    
+    |> applyLegend size (Seq.zip (infinitely lcs) labels)
     |> createChart size 
 
-  let renderColsBars isBar chartOptions size clrs labels (data:(string * float)[]) =   
+  let renderColsBars isBar inlineLabels chartOptions size clrs labels (data:(string * float)[]) =   
     let xdata, ydata = 
       if isBar then Array.map (snd >> box) data, Array.map (fst >> box) data    
       else Array.map (fst >> box) data, Array.map (snd >> box) data    
+    
+    let { XPoints = xp; YPoints = yp } =
+      Layered [ for lbl, v in data -> if isBar then Bar(CO v, CA lbl) else Column(CA lbl, CO v) ] 
+      |> initChart xdata ydata chartOptions |> applyScales 
+    
+    let chartOptions = 
+      if isBar && inlineLabels && chartOptions.yAxis.labelOffset.IsNone then { chartOptions with yAxis = { chartOptions.yAxis with labelOffset = Some 10. } }
+      elif not isBar && inlineLabels && chartOptions.yAxis.labelOffset.IsNone then { chartOptions with xAxis = { chartOptions.xAxis with labelOffset = Some 10. } }
+      else chartOptions
+
     Layered [
-      for clr, (lbl, v) in Seq.zip (infinitely clrs) data ->
-        ( if isBar then Padding((6.,0.,6.,1.), Bar(CO v, CA lbl))
-          else Padding((0.,6.,1.,6.), Column(CA lbl, CO v)) )
-        |> applyStyle (fun s -> { s with Fill = Solid(1.0, HTML clr) }) ]
-    |> applyScales xdata ydata chartOptions 
-    |> applyAxes xdata ydata
-    |> applyLabels chartOptions (unbox xdata) (unbox ydata)
-    |> applyLegend size chartOptions (Seq.zip (infinitely clrs) labels)
+      for clr, (lbl, v) in Seq.zip (infinitely clrs) data do
+        let elem = 
+          if isBar then Padding((6.,0.,6.,1.), Bar(CO v, CA lbl))
+          else Padding((0.,6.,1.,6.), Column(CA lbl, CO v)) 
+        let label = 
+          if not inlineLabels then None
+          elif isBar then Some(Offset((20., 0.), Text(xp.Minimum, CAR(CA lbl, 0.5), VerticalAlign.Middle, HorizontalAlign.Start, 0.0, lbl)))
+          else Some(Offset((0., -20.), Text(CAR(CA lbl, 0.5), yp.Minimum, VerticalAlign.Middle, HorizontalAlign.Start, -90.0, lbl)))
+        yield elem |> applyStyle (fun s -> { s with Fill = Solid(0.6, HTML clr) }) 
+        if label.IsSome then
+          let clr = clr |> mapColor (fun (r,g,b) -> r*0.8, g*0.8, b*0.8)
+          yield label.Value |> applyStyle (fun s -> { s with Font = "11pt Roboto,sans-serif"; Fill = Solid(1.0, HTML clr); StrokeWidth = Pixels 0 }) ]
+    |> initChart xdata ydata chartOptions
+    |> applyScales 
+    |> applyLabels
+    |> applyAxes (not (inlineLabels && not isBar)) (not (inlineLabels && isBar))
+    |> applyLegend size (Seq.zip (infinitely clrs) labels)
     |> createChart size 
 
 // ------------------------------------------------------------------------------------------------
@@ -260,6 +305,8 @@ module Charts =
 // ------------------------------------------------------------------------------------------------
 
 module YouDrawHelpers = 
+  open Internal
+
   type YouDrawEvent = 
     | ShowResults
     | Draw of float * float
@@ -294,8 +341,8 @@ module YouDrawHelpers =
             Guessed = indexed |> Array.map (fun (i, (x, y)) -> 
               if i = nearest then (x, Some downY) else (x, y)) }
 
-  let render chartOptions (width, height) (markers:(float*obj)[]) (topLbl, leftLbl, rightLbl) 
-    (leftClr,rightClr,guessClr,markClr) (loy, hiy) trigger state = 
+  let render chartOptions (width, height) (markers:(float*obj)[]) (leftLbl, rightLbl) 
+    (leftClr,rightClr,guessClr,markClr) trigger state = 
 
     let all = 
       [| for x, y in state.Data -> Cont x, Cont y |]
@@ -308,15 +355,17 @@ module YouDrawHelpers =
       [| yield Array.last known
          for x, y in state.Guessed do if y.IsSome then yield Cont x, Cont y.Value |]
 
+
+    let loy = match chartOptions.yAxis.minValue with Some v -> unbox v | _ -> state.Data |> Seq.map snd |> Seq.min
+    let hiy = match chartOptions.yAxis.maxValue with Some v -> unbox v | _ -> state.Data |> Seq.map snd |> Seq.max       
     let lx, ly = (fst (Seq.head state.Data) + float state.Clip) / 2., loy + (hiy - loy) / 10.
     let rx, ry = (fst (Seq.last state.Data) + float state.Clip) / 2., loy + (hiy - loy) / 10.
     let tx, ty = float state.Clip, hiy - (hiy - loy) / 10.
-    let setColor c s = { s with Font = "12pt sans-serif"; Fill=Solid(1.0, HTML c); StrokeColor=(0.0, RGB(0,0,0)) }
+    let setColor c s = { s with Font = "12pt Roboto,sans-serif"; Fill=Solid(1.0, HTML c); StrokeColor=(0.0, RGB(0,0,0)) }
     let labels = 
       Shape.Layered [
         Style(setColor leftClr, Shape.Text(COV(CO lx), COV(CO ly), VerticalAlign.Baseline, HorizontalAlign.Center, 0., leftLbl))
         Style(setColor rightClr, Shape.Text(COV(CO rx), COV(CO ry), VerticalAlign.Baseline, HorizontalAlign.Center, 0., rightLbl))
-        Style(setColor guessClr, Shape.Text(COV(CO tx), COV(CO ty), VerticalAlign.Baseline, HorizontalAlign.Center, 0., topLbl))
       ]
 
     let LineStyle shape = 
@@ -327,7 +376,7 @@ module YouDrawHelpers =
             StrokeDashArray = [Integer 5; Integer 5]
             StrokeColor=0.6, HTML markClr }), shape)
     let FontStyle shape = 
-      Style((fun s -> { s with Font = "11pt sans-serif"; Fill = Solid(1.0, HTML markClr); StrokeColor = 0.0, HTML "transparent" }), shape)
+      Style((fun s -> { s with Font = "11pt Roboto,sans-serif"; Fill = Solid(1.0, HTML markClr); StrokeColor = 0.0, HTML "transparent" }), shape)
     
     let loln, hiln = Scales.adjustRange (loy, hiy)
     let markers = [
@@ -340,58 +389,45 @@ module YouDrawHelpers =
       ]
 
     let coreChart = 
-      Interactive(
-        ( if state.Completed then []
-          else
-            [ MouseMove(fun evt (Cont x, Cont y) -> 
-                if (int evt.buttons) &&& 1 = 1 then trigger(Draw(x, y)) )
-              TouchMove(fun evt (Cont x, Cont y) -> 
-                trigger(Draw(x, y)) )
-              MouseDown(fun evt (Cont x, Cont y) -> trigger(Draw(x, y)) )
-              TouchStart(fun evt (Cont x, Cont y) -> trigger(Draw(x, y)) ) ]),
-        Shape.InnerScale
-          ( None, Some(CO loy, CO hiy), 
-            Layered [
-              yield labels
-              yield! markers
-              yield Style(Drawing.hideFill >> Drawing.hideStroke, Line all)
-              yield Style(
-                (fun s -> { s with StrokeColor = (1.0, HTML leftClr); Fill = Solid(0.2, HTML leftClr) }), 
-                Layered [ Area known; Line known ]) 
-              if state.Completed then
-                yield Style((fun s -> 
-                  { s with 
-                      StrokeColor = (1.0, HTML rightClr)
-                      StrokeDashArray = [ Percentage 0.; Percentage 100. ]
-                      Fill = Solid(0.0, HTML rightClr)
-                      Animation = Some(1000, "ease", fun s -> 
-                        { s with
-                            StrokeDashArray = [ Percentage 100.; Percentage 0. ]
-                            Fill = Solid(0.2, HTML rightClr) } 
-                      ) }), 
-                  Layered [ Area right; Line right ])                 
-              if guessed.Length > 1 then
-                yield Style(
-                  (fun s -> { s with StrokeColor = (1.0, HTML guessClr); StrokeDashArray = [ Integer 5; Integer 5 ] }), 
-                  Line guessed ) 
-            ]) )
-    
-    let chart = 
-      Style(
-        (fun s -> 
-          if state.IsKeyDate then 
-            let lo, hi = asDate(fst state.Data.[0]), asDate(fst state.Data.[state.Data.Length-1])
-            if (hi - lo).TotalDays <= 1. then
-              { s with FormatAxisXLabel = fun _ (Cont v) -> formatTime(asDate(v)) }
+      Layered [
+        yield labels
+        yield! markers
+        yield Style(Drawing.hideFill >> Drawing.hideStroke, Line all)
+        yield Style(
+          (fun s -> { s with StrokeColor = (1.0, HTML leftClr); Fill = Solid(0.2, HTML leftClr) }), 
+          Layered [ Area known; Line known ]) 
+        if state.Completed then
+          yield Style((fun s -> 
+            { s with 
+                StrokeColor = (1.0, HTML rightClr)
+                StrokeDashArray = [ Percentage 0.; Percentage 100. ]
+                Fill = Solid(0.0, HTML rightClr)
+                Animation = Some(1000, "ease", fun s -> 
+                  { s with
+                      StrokeDashArray = [ Percentage 100.; Percentage 0. ]
+                      Fill = Solid(0.2, HTML rightClr) } 
+                ) }), 
+            Layered [ Area right; Line right ])                 
+        if guessed.Length > 1 then
+          yield Style(
+            (fun s -> { s with StrokeColor = (1.0, HTML guessClr); StrokeDashArray = [ Integer 5; Integer 5 ] }), 
+            Line guessed ) ]
+      |> applyInteractive
+          ( if state.Completed then []
             else
-              { s with FormatAxisXLabel = fun _ (Cont v) -> formatDate(asDate(v)) }
-          else s),
-        Axes(true, true, 
-          AutoScale(false, true, coreChart)))
+              [ MouseMove(fun evt (Cont x, Cont y) -> 
+                  if (int evt.buttons) &&& 1 = 1 then trigger(Draw(x, y)) )
+                TouchMove(fun evt (Cont x, Cont y) -> 
+                  trigger(Draw(x, y)) )
+                MouseDown(fun evt (Cont x, Cont y) -> trigger(Draw(x, y)) )
+                TouchStart(fun evt (Cont x, Cont y) -> trigger(Draw(x, y)) ) ])
     
-    let chart = 
-      chart 
-      |> Internal.applyLabels chartOptions state.XData state.YData
+    let { Internal.ChartContext.Chart = chart } = 
+      coreChart
+      |> initChart state.XData state.YData chartOptions 
+      |> applyScales 
+      |> applyLabels 
+      |> applyAxes true true
     
     h?div ["style"=>"text-align:center;padding-top:20px"] [
       Compost.createSvg (width, height) chart
@@ -410,12 +446,15 @@ module YouDrawHelpers =
 // ------------------------------------------------------------------------------------------------
 
 module YouGuessColsHelpers = 
+  open Internal
 
   type YouGuessState = 
     { Completed : bool
       CompletionStep : float
       Default : float
       Maximum : float
+      XData : obj[]
+      YData : obj[]
       Data : (string * float)[]
       Guesses : Map<string, float> }
 
@@ -424,10 +463,12 @@ module YouGuessColsHelpers =
     | Animate 
     | Update of string * float
 
-  let initState data maxValue =     
+  let initState isBar data maxValue =     
     { Completed = false
       CompletionStep = 0.0
       Data = data 
+      XData = if isBar then arrayMap (snd >> box) data else arrayMap (fst >> box) data
+      YData = if isBar then arrayMap (fst >> box) data else arrayMap (snd >> box) data
       Default = Array.averageBy snd data
       Maximum = InteractiveHelpers.calclateMax maxValue data
       Guesses = Map.empty }
@@ -491,7 +532,7 @@ module YouGuessColsHelpers =
                         let x = CAR(CA (fst state.Data.[state.Data.Length/2]), if state.Data.Length % 2 = 0 then 0.0 else 0.5)
                         let y = COV(CO (state.Maximum * 0.9))
                         yield Style(
-                          (fun s -> { s with Font = "13pt sans-serif"; Fill=Solid(1.0, HTML "#808080"); StrokeColor=(0.0, RGB(0,0,0)) }),
+                          (fun s -> { s with Font = "13pt Roboto,sans-serif"; Fill=Solid(1.0, HTML "#808080"); StrokeColor=(0.0, RGB(0,0,0)) }),
                           Text(x, y, VerticalAlign.Baseline, HorizontalAlign.Center, 0., lbl) )
                   ]) ))))
 
@@ -508,74 +549,79 @@ module YouGuessColsHelpers =
     ]
 
 
-  let renderBars (width, height) topLabel trigger state = 
+  let renderBars inlineLabels size chartOptions trigger state = 
     if state.Completed && state.CompletionStep < 1.0 then
       window.setTimeout((fun () -> trigger Animate), 50) |> ignore
+
+    let chartOptions = 
+      if (*isBar && *)inlineLabels && chartOptions.yAxis.labelOffset.IsNone then { chartOptions with yAxis = { chartOptions.yAxis with labelOffset = Some 10. } }
+      //elif not isBar && inlineLabels then { chartOptions with xAxis = { chartOptions.xAxis with labelOffset = Some 10. } }
+      else chartOptions
+
     let chart = 
-      Axes(true, false, 
-        AutoScale(true, false, 
-          Interactive
-            ( ( if state.Completed then []
-                else
-                  [ EventHandler.MouseMove(fun evt (Cont x, Cat(y, _)) ->
-                      if (int evt.buttons) &&& 1 = 1 then trigger (Update(y, x)) )
-                    EventHandler.MouseDown(fun evt (Cont x, Cat(y, _)) ->
-                      trigger (Update(y, x)) )
-                    EventHandler.TouchStart(fun evt (Cont x, Cat(y, _)) ->
-                      trigger (Update(y, x)) )
-                    EventHandler.TouchMove(fun evt (Cont x, Cat(y, _)) ->
-                      trigger (Update(y, x)) ) ] ),
-              Style
-                ( (fun s -> if state.Completed then s else { s with Cursor = "col-resize" }),
-                  (Layered [
-                    yield InnerScale(Some(CO 0., CO state.Maximum), None, 
-                      Stack
-                        ( Vertical, 
-                          [ for clr, (lbl, value) in Seq.zip (infinitely vega10) state.Data -> 
-                              let sh = Style((fun s -> { s with Fill = Solid(0.2, HTML "#a0a0a0") }), Bar(CO state.Maximum, CA lbl)) 
-                              Shape.Padding((10., 0., 10., 0.), sh) ]))
-                    yield Stack
-                      ( Vertical, 
-                        [ for clr, (lbl, value) in Seq.zip (infinitely vega10) state.Data -> 
-                            let alpha, value = 
-                              match state.Completed, state.Guesses.TryFind lbl with
-                              | true, Some guess -> 0.6, state.CompletionStep * value + (1.0 - state.CompletionStep) * guess
-                              | _, Some v -> 0.6, v
-                              | _, None -> 0.2, state.Default
-                            let sh = Style((fun s -> { s with Fill = Solid(alpha, HTML clr) }), Bar(CO value, CA lbl)) 
-                            Shape.Padding((10., 0., 10., 0.), sh) ])
+      Layered [
+        yield 
+          Stack
+            ( Vertical, 
+              [ for clr, (lbl, value) in Seq.zip (infinitely vega10) state.Data -> 
+                  let sh = Style((fun s -> { s with Fill = Solid(0.2, HTML "#a0a0a0") }), Bar(CO state.Maximum, CA lbl)) 
+                  Shape.Padding((10., 0., 10., 0.), sh) ])
+        yield Stack
+          ( Vertical, 
+            [ for clr, (lbl, value) in Seq.zip (infinitely vega10) state.Data -> 
+                let alpha, value = 
+                  match state.Completed, state.Guesses.TryFind lbl with
+                  | true, Some guess -> 0.6, state.CompletionStep * value + (1.0 - state.CompletionStep) * guess
+                  | _, Some v -> 0.6, v
+                  | _, None -> 0.2, state.Default
+                let sh = Style((fun s -> { s with Fill = Solid(alpha, HTML clr) }), Bar(CO value, CA lbl)) 
+                Shape.Padding((10., 0., 10., 0.), sh) ])
 
-                    for clr, (lbl, _) in Seq.zip (infinitely vega10) state.Data do 
-                        let x = COV(CO (state.Maximum * 0.95))
-                        let y = CAR(CA lbl, 0.5)
-                        yield Style(
-                          (fun s -> { s with Font = "13pt sans-serif"; Fill=Solid(1.0, HTML clr); StrokeColor=(0.0, RGB(0,0,0)) }),
-                          Text(x, y, VerticalAlign.Middle, HorizontalAlign.End, 0., lbl) )
+        if inlineLabels then
+          for clr, (lbl, _) in Seq.zip (infinitely vega10) state.Data do 
+            let x = COV(CO (state.Maximum * 0.95))
+            let y = CAR(CA lbl, 0.5)
+            yield Style(
+              (fun s -> { s with Font = "13pt Roboto,sans-serif"; Fill=Solid(1.0, HTML clr); StrokeColor=(0.0, RGB(0,0,0)) }),
+              Text(x, y, VerticalAlign.Middle, HorizontalAlign.End, 0., lbl) )
 
-                    for clr, (lbl, value) in Seq.zip (infinitely vega10) state.Data do
-                      match state.Guesses.TryFind lbl with
-                      | None -> () 
-                      | Some guess ->
-                          let line = Line [ COV (CO guess), CAR(CA lbl, 0.0); COV (CO guess), CAR(CA lbl, 1.0) ]
-                          yield Style(
-                            (fun s -> 
-                              { s with
-                                  StrokeColor = (1.0, HTML clr)
-                                  StrokeWidth = Pixels 4
-                                  StrokeDashArray = [ Integer 5; Integer 5 ] }), 
-                            Shape.Padding((10., 0., 10., 0.), line))
-                    match topLabel with
-                    | None -> ()
-                    | Some lbl ->
-                        let x = COV(CO (state.Maximum * 0.9))
-                        let y = CAR(CA (fst state.Data.[state.Data.Length/2]), if state.Data.Length % 2 = 0 then 0.0 else 0.5)
-                        yield Style(
-                          (fun s -> { s with Font = "13pt sans-serif"; Fill=Solid(1.0, HTML "#808080"); StrokeColor=(0.0, RGB(0,0,0)) }),
-                          Text(x, y, VerticalAlign.Baseline, HorizontalAlign.Center, 0., lbl) )
-                  ]) ))))
+        for clr, (lbl, value) in Seq.zip (infinitely vega10) state.Data do
+          match state.Guesses.TryFind lbl with
+          | None -> () 
+          | Some guess ->
+              let line = Line [ COV (CO guess), CAR(CA lbl, 0.0); COV (CO guess), CAR(CA lbl, 1.0) ]
+              yield Style(
+                (fun s -> 
+                  { s with
+                      StrokeColor = (1.0, HTML clr)
+                      StrokeWidth = Pixels 4
+                      StrokeDashArray = [ Integer 5; Integer 5 ] }), 
+                Shape.Padding((10., 0., 10., 0.), line)) ]
+      |> applyInteractive
+            ( if state.Completed then []
+              else
+                [ EventHandler.MouseMove(fun evt (Cont x, Cat(y, _)) ->
+                    if (int evt.buttons) &&& 1 = 1 then trigger (Update(y, x)) )
+                  EventHandler.MouseDown(fun evt (Cont x, Cat(y, _)) ->
+                    trigger (Update(y, x)) )
+                  EventHandler.TouchStart(fun evt (Cont x, Cat(y, _)) ->
+                    trigger (Update(y, x)) )
+                  EventHandler.TouchMove(fun evt (Cont x, Cat(y, _)) ->
+                    trigger (Update(y, x)) ) ] )
+      |> applyStyle (fun s -> 
+          if state.Completed then s else { s with Cursor = "col-resize" })
 
+    let ctx = 
+      chart
+      |> initChart state.XData state.YData chartOptions
+      |> applyScales 
+      |> applyLabels
+      //|> applyAxes (not (inlineLabels && not isBar)) (not (inlineLabels && isBar))
+      |> applyAxes true (not inlineLabels)
+      |> applyLegend size (Seq.zip (infinitely vega10) (Seq.map fst state.Data))
+    
     h?div ["style"=>"text-align:center;padding-top:20px"] [
-      Compost.createSvg (width, height) chart
+      Compost.createSvg size ctx.Chart
       h?div ["style"=>"padding-bottom:20px"] [
         h?button [
             yield "type" => "button"
@@ -660,7 +706,7 @@ module YouGuessSortHelpers =
 
                             if i = state.Data.Length - 1 && state.Assignments.Count = 0 then
                               let txt = Text(COV(CO(state.Maximum * 0.05)), CAR(CA lbl, 0.5), Middle, Start, 0., "Assign highlighted value to one of the bars by clicking on it!")
-                              yield Style((fun s -> { s with Font = "13pt sans-serif"; Fill = Solid(1.0, HTML "#606060"); StrokeColor=(0.0, HTML "white") }), txt ) 
+                              yield Style((fun s -> { s with Font = "13pt Roboto,sans-serif"; Fill = Solid(1.0, HTML "#606060"); StrokeColor=(0.0, HTML "white") }), txt ) 
 
                             let sh = Style((fun s -> { s with Fill = Solid(alpha, HTML clr) }), Bar(CO value, CA lbl)) 
                             if clr <> "#a0a0a0" then
@@ -694,7 +740,7 @@ module YouGuessSortHelpers =
                     Style((fun s -> { s with Fill=Solid(af, HTML clr)  }), 
                       Padding((2., 0., 2., 0.), Bar(CO 4., CA lbl)))
                   yield Style(
-                    (fun s -> { s with Font = "11pt sans-serif"; Fill=Solid(al, HTML clr); StrokeColor=(0.0, RGB(0,0,0)) }),
+                    (fun s -> { s with Font = "11pt Roboto,sans-serif"; Fill=Solid(al, HTML clr); StrokeColor=(0.0, RGB(0,0,0)) }),
                     Text(x, y, VerticalAlign.Middle, HorizontalAlign.Start, 0., lbl) ) 
                   if not state.Completed then
                     yield 
@@ -731,21 +777,31 @@ type YouGuessColsBars =
   private 
     { kind : YouGuessColsBarsKind
       data : series<string, float> 
-      maxValue : float option
-      topLabel : string option
-      size : float option * float option }
-  member y.setLabel(top) = { y with topLabel = Some top }
-  member y.setMaximum(max) = { y with maxValue = Some max }
+  // [copy-paste]
+      options : ChartOptions }  
+  member y.setTitle(?title) =
+    { y with options = { y.options with title = title } }
+  member y.setLegend(position) = 
+    { y with options = { y.options with legend = { position = position } } }
   member y.setSize(?width, ?height) = 
-    { y with size = (orElse width (fst y.size), orElse height (snd y.size)) }
+    { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
+  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset) = 
+    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset }
+    { y with options = { y.options with xAxis = ax } }
+  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset) = 
+    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset }
+    { y with options = { y.options with yAxis = ax } }
+  // [/copy-paste]
+  member y.setLabel(top:string) = y.setTitle(top) // TODO: Deprecated
+  member y.setMaximum(max:float) = if y.kind = Bars then y.setAxisX(maxValue=box max) else y.setAxisY(maxValue=box max) // TODO: Deprecated
 
   member y.show(outputId) =   
-    InteractiveHelpers.showApp outputId y.size y.data
-      (fun data -> YouGuessColsHelpers.initState data y.maxValue)
+    InteractiveHelpers.showApp outputId y.options.size y.data
+      (fun data -> YouGuessColsHelpers.initState (y.kind = Bars) data (unbox (if y.kind = Bars then y.options.xAxis.maxValue else y.options.yAxis.maxValue)))
       (fun _ size -> 
           match y.kind with 
-          | Bars -> YouGuessColsHelpers.renderBars size y.topLabel 
-          | Cols -> YouGuessColsHelpers.renderCols size y.topLabel)
+          | Bars -> YouGuessColsHelpers.renderBars true size y.options 
+          | Cols -> YouGuessColsHelpers.renderCols size y.options.title)
       (fun _ -> YouGuessColsHelpers.update)
 
 type YouGuessLine = 
@@ -757,22 +813,21 @@ type YouGuessLine =
       knownColor : string option
       unknownColor : string option 
       drawColor : string option 
-      topLabel : string option
       knownLabel : string option
       guessLabel : string option 
   // [copy-paste]
       options : ChartOptions }  
-  member y.setTitle(title) =
+  member y.setTitle(?title) =
     { y with options = { y.options with title = title } }
   member y.setLegend(position) = 
     { y with options = { y.options with legend = { position = position } } }
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
-  member y.setAxisX(?minValue, ?maxValue, ?label) = 
-    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label }
+  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset) = 
+    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset }
     { y with options = { y.options with xAxis = ax } }
-  member y.setAxisY(?minValue, ?maxValue, ?label) = 
-    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label }
+  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset) = 
+    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset }
     { y with options = { y.options with yAxis = ax } }
   // [/copy-paste]
   
@@ -781,7 +836,8 @@ type YouGuessLine =
   member y.setColors(known, unknown) = { y with knownColor = Some known; unknownColor = Some unknown }
   member y.setDrawColor(draw) = { y with drawColor = Some draw }
   member y.setMarkerColor(marker) = { y with markerColor = Some marker }
-  member y.setLabels(top, known, guess) = { y with knownLabel = Some known; topLabel = Some top; guessLabel = Some guess }
+  member y.setLabels(?top, ?known, ?guess) = 
+    { y with knownLabel = orElse known y.knownLabel; guessLabel = orElse guess y.guessLabel; options = { y.options with title = orElse top y.options.title } }
   member y.setMarkers(markers) = { y with markers = Some markers }
   member y.show(outputId) = Async.StartImmediate <| async {
     let markers = defaultArg y.markers (series<string, float>.create(async.Return [||], "", "", ""))
@@ -792,16 +848,12 @@ type YouGuessLine =
           let clipx = match y.clip with Some v -> v | _ -> dateOrNumberAsNumber (fst (data.[data.Length / 2]))
           YouDrawHelpers.initState (Array.sortBy (fst >> dateOrNumberAsNumber) data) clipx)
       (fun data size ->           
-          let loy = match y.options.yAxis.minValue with Some v -> unbox v | _ -> data |> Seq.map snd |> Seq.min
-          let hiy = match y.options.yAxis.maxValue with Some v -> unbox v | _ -> data |> Seq.map snd |> Seq.max       
           let lc, dc, gc, mc = 
             defaultArg y.knownColor "#606060", defaultArg y.unknownColor "#FFC700", 
             defaultArg y.drawColor "#808080", defaultArg y.markerColor "#C65E31"    
           let data = Array.sortBy (fst >> dateOrNumberAsNumber) data
           let co = { y.options with xAxis = { y.options.xAxis with minValue = Some (box (fst data.[0])); maxValue = Some (box (fst data.[data.Length-1])) } }
-          YouDrawHelpers.render co size markers
-            (defaultArg y.topLabel "", defaultArg y.knownLabel "", defaultArg y.guessLabel "") 
-            (lc,dc,gc,mc) (loy, hiy)) 
+          YouDrawHelpers.render co size markers (defaultArg y.knownLabel "", defaultArg y.guessLabel "") (lc,dc,gc,mc)) 
       (fun _ -> YouDrawHelpers.handler) } 
 
 type YouGuessSortBars = 
@@ -820,14 +872,14 @@ type YouGuessSortBars =
 
 type youguess = 
   static member columns(data:series<string, float>) = 
-    { YouGuessColsBars.data = data; topLabel = None; kind = Cols; maxValue = None; size = None, None }
+    { YouGuessColsBars.data = data; kind = Cols; options = ChartOptions.Default }
   static member bars(data:series<string, float>) = 
-    { YouGuessColsBars.data = data; topLabel = None; kind = Bars; maxValue = None; size = None, None }
+    { YouGuessColsBars.data = data; kind = Bars; options = ChartOptions.Default }
   static member sortBars(data:series<string, float>) = 
     { YouGuessSortBars.data = data; maxValue = None; size = None, None }
   static member line(data:series<obj, float>) =
     { YouGuessLine.data = data; clip = None; 
-      markerColor = None; guessLabel = None; topLabel = None; knownLabel = None; markers = None
+      markerColor = None; guessLabel = None; knownLabel = None; markers = None
       knownColor = None; unknownColor = None; drawColor = None; 
       options = ChartOptions.Default }
 
@@ -844,17 +896,17 @@ type CompostBubblesChartSet =
       bubbleColor : string option
   // [copy-paste]
       options : ChartOptions }
-  member y.setTitle(title) =
+  member y.setTitle(?title) =
     { y with options = { y.options with title = title } }
   member y.setLegend(position) = 
     { y with options = { y.options with legend = { position = position } } }
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
-  member y.setAxisX(?minValue, ?maxValue, ?label) = 
-    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label }
+  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset) = 
+    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset }
     { y with options = { y.options with xAxis = ax } }
-  member y.setAxisY(?minValue, ?maxValue, ?label) = 
-    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label }
+  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset) = 
+    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset }
     { y with options = { y.options with yAxis = ax } }
   // [/copy-paste]
   member y.setColors(?bubbleColor) = 
@@ -880,28 +932,31 @@ type CompostColBarChart =
     { isBar : bool
       data : series<string, float>
       colors : string[] option
+      inlineLabels : bool
   // [copy-paste]
       options : ChartOptions }  
-  member y.setTitle(title) =
+  member y.setTitle(?title) =
     { y with options = { y.options with title = title } }
   member y.setLegend(position) = 
     { y with options = { y.options with legend = { position = position } } }
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
-  member y.setAxisX(?minValue, ?maxValue, ?label) = 
-    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label }
+  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset) = 
+    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset }
     { y with options = { y.options with xAxis = ax } }
-  member y.setAxisY(?minValue, ?maxValue, ?label) = 
-    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label }
+  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset) = 
+    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset }
     { y with options = { y.options with yAxis = ax } }
   // [/copy-paste]
+  member y.setStyle(?inlineLabels) = 
+    { y with inlineLabels = defaultArg inlineLabels y.inlineLabels }
   member y.setColors(?colors) = 
     { y with colors = defaultArg colors y.colors }
   member y.show(outputId) = 
     InteractiveHelpers.showStaticApp outputId y.options.size y.data
       (fun data size -> 
         let cc = defaultArg y.colors vega10
-        Charts.renderColsBars y.isBar y.options size cc (Seq.map fst data) data)
+        Charts.renderColsBars y.isBar y.inlineLabels y.options size cc (Seq.map fst data) data)
 
 
 type CompostLineChart =
@@ -910,17 +965,17 @@ type CompostLineChart =
       lineColor : string option
   // [copy-paste]
       options : ChartOptions }  
-  member y.setTitle(title) =
+  member y.setTitle(?title) =
     { y with options = { y.options with title = title } }
   member y.setLegend(position) = 
     { y with options = { y.options with legend = { position = position } } }
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
-  member y.setAxisX(?minValue, ?maxValue, ?label) = 
-    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label }
+  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset) = 
+    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset }
     { y with options = { y.options with xAxis = ax } }
-  member y.setAxisY(?minValue, ?maxValue, ?label) = 
-    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label }
+  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset) = 
+    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset }
     { y with options = { y.options with yAxis = ax } }
   // [/copy-paste]
   member y.setColors(?lineColor) = 
@@ -938,17 +993,17 @@ type CompostLinesChart =
       lineColors : string[] option
   // [copy-paste]
       options : ChartOptions }  
-  member y.setTitle(title) =
+  member y.setTitle(?title) =
     { y with options = { y.options with title = title } }
   member y.setLegend(position) = 
     { y with options = { y.options with legend = { position = position } } }
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
-  member y.setAxisX(?minValue, ?maxValue, ?label) = 
-    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label }
+  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset) = 
+    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset }
     { y with options = { y.options with xAxis = ax } }
-  member y.setAxisY(?minValue, ?maxValue, ?label) = 
-    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label }
+  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset) = 
+    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset }
     { y with options = { y.options with yAxis = ax } }
   // [/copy-paste]
   member y.setColors(?lineColors) = 
@@ -968,9 +1023,9 @@ type CompostCharts() =
   member c.lines(data:series<'k, 'v>[]) = 
     { CompostLinesChart.data = unbox data; lineColors = None; options = ChartOptions.Default }
   member c.bar(data:series<string, float>) = 
-    { CompostColBarChart.data = data; colors = None; options = ChartOptions.Default; isBar = true }
+    { CompostColBarChart.data = data; colors = None; options = ChartOptions.Default; isBar = true; inlineLabels = false }
   member c.column(data:series<string, float>) = 
-    { CompostColBarChart.data = data; colors = None; options = ChartOptions.Default; isBar = false }
+    { CompostColBarChart.data = data; colors = None; options = ChartOptions.Default; isBar = false; inlineLabels = false }
 
 type compost = 
   static member charts = CompostCharts()

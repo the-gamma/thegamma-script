@@ -240,6 +240,8 @@ module Scales =
   let adjustRangeUnits (l:float<'u>,h:float<'u>) : float<'u> * float<'u> =
     let l, h = adjustRange (unbox l, unbox h) in unbox l, unbox h
 
+  let toArray s = Array.ofSeq s // REVIEW: Hack to avoid Float64Array (which behaves oddly in Safari) see https://github.com/zloirock/core-js/issues/285
+
   /// Generate points for a grid. Count specifies how many points to generate
   /// (this is minimm - the result will be up to 5x more).
   let generateSteps count k (lo, hi) = 
@@ -248,8 +250,8 @@ module Scales =
     let magnitudes = dividers |> Seq.map (fun d -> magnitude / d)
     let step = magnitudes |> Seq.filter (fun m -> (hi - lo) / m >= count) |> Seq.tryHead
     let step = defaultArg step (magnitude / 100.)
-    [| for v in nlo .. step * k .. nhi do
-          if v >= lo && v <= hi then yield v |]
+    seq { for v in nlo .. step * k .. nhi do
+            if v >= lo && v <= hi then yield v } |> toArray
 
   let generateAxisSteps s =
     match s with 
@@ -418,7 +420,7 @@ module Scales =
 
         match shape with 
         | Scaled(_, _, ScaledLayered(shapes)) ->
-            let padding = (10., 20., (if showX then 40. else 20.), (if showY then 100. else 20.))
+            let padding = (0., 0., (if showX then 30. else 0.), (if showY then 50. else 0.))
             Scaled(origScales, origScales, 
               ScaledPadding(padding, 
                 Scaled(origScales, origScales, 

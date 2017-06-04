@@ -6,6 +6,12 @@ open Fable.Import.Browser
 open System.Collections.Generic
 module FsOption = Microsoft.FSharp.Core.Option
 
+[<Emit("parseInt($0, $1)")>]
+let parseInt (s:string) (b:int) : int = failwith "JS"
+
+[<Emit("$0.toString($1)")>]
+let formatInt (i:int) (b:int) : string = failwith "JS"
+
 [<Emit("(typeof($0)=='number')")>]
 let isNumber(n:obj) : bool = failwith "!"
 
