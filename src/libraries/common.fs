@@ -97,8 +97,8 @@ let isLocalHost() =
 
 let mutable enabledCategories = 
   if not (isLocalHost ()) then set []
-  //else set ["PROVIDERS"] 
-  else set ["*"] 
+  else set ["INTERPRETER"] 
+  //else set ["*"] 
 type Log =
   static member setEnabled(cats) = enabledCategories <- cats
 

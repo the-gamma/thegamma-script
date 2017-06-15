@@ -20,7 +20,7 @@ let rec offsetToLocation lines offs lengths =
   match lengths with
   | l::lengths when offs <= l -> { line = lines; column = offs }
   | l::lengths -> offsetToLocation (lines+1) (offs-l-1) lengths
-  | [] -> failwith "offsetToLocation: Out of range" // { line = lines; column = offs  } 
+  | [] -> failwith "offsetToLocation: Out of range"
 
 let rangeToLoc ctx rng = 
   { start = offsetToLocation 1 rng.Start ctx.LineLengths 
@@ -130,21 +130,32 @@ let rec compileExpression ctx (expr:Node<Expr>) =
       NullLiteral(rangeToLoc ctx expr.Range)
     
 
-let compileCommand ctx (cmd:Node<Command>) = 
-  match cmd.Node with
-  | Command.Let(n, e) ->
-      let e = compileExpression ctx e
-      let name = IdentifierPattern(n.Node.Name, rangeToLoc ctx n.Range)
-      let decl = VariableDeclarator(name, Some e, rangeToLoc ctx cmd.Range)
-      VariableDeclaration(Var, [decl], rangeToLoc ctx cmd.Range)
-  | Command.Expr(e) ->
-      let e = compileExpression ctx e
-      ExpressionStatement(e, rangeToLoc ctx cmd.Range)
+let compileCommand ctx idx (cmd:Node<Command>) = 
+  let loc = rangeToLoc ctx cmd.Range
+  let statements, idx, assign = 
+    match cmd.Node with
+    | Command.Let(n, e) ->
+        let e = compileExpression ctx e
+        let name = IdentifierPattern(n.Node.Name, rangeToLoc ctx n.Range)
+        let decl = VariableDeclarator(name, Some e, loc)
+        [ VariableDeclaration(Var, [decl], rangeToLoc ctx cmd.Range) ], 
+        str(n.Node.Name), ident(n.Node.Name)
 
+    | Command.Expr(e) ->
+        [], num(float idx), compileExpression ctx e
+
+  let res = MemberExpression(ident("_results"), idx, true, loc)
+  statements @ [ ExpressionStatement(AssignmentExpression(AssignEqual, res, assign, loc), loc) ] 
 
 let compileProgram ctx (prog:TheGamma.Program) = 
-  let body = List.map (compileCommand ctx) prog.Body.Node
-  { location = rangeToLoc ctx prog.Body.Range; body = body }
+  let decl = VariableDeclarator(IdentifierPattern("_results", None), Some (ArrayExpression([], None)), None)
+  let res = VariableDeclaration(Var, [decl], None)
+  let body = List.mapi (compileCommand ctx) prog.Body.Node |> List.concat
+
+  let ret = ReturnStatement(ident("_results"), None)
+  let body = BlockStatement(res :: body @ [ ret ], None)
+  let body = CallExpression(FunctionExpression(None, [], body, false, false, None), [], None)
+  { location = rangeToLoc ctx prog.Body.Range; body = [ ExpressionStatement(body, None) ] }
 
 // ------------------------------------------------------------------------------------------------
 // Cmpile program and return JS source code

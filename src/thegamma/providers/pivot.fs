@@ -28,6 +28,7 @@ type GroupAggregation =
 [<RequireQualifiedAccess>]
 type WindowAggregation = 
   | Min of string
+  | Sum of string
   | Max of string
   | Mean of string
   | FirstKey
@@ -59,6 +60,7 @@ type Transformation =
   | SortBy of (string * SortDirection) list
   | GroupBy of string list * GroupAggregation list
   | WindowBy of string * string * WindowAggregation list
+  | ExpandBy of string * WindowAggregation list
   | FilterBy of FilterOperator * FilterCondition list
   | Paging of Paging list
   | Empty
@@ -89,6 +91,7 @@ module Transform =
     | WindowAggregation.Mean(f) -> "mean " + Ast.escapeIdent f
     | WindowAggregation.Min(f) -> "min " + Ast.escapeIdent f
     | WindowAggregation.Max(f) -> "max " + Ast.escapeIdent f
+    | WindowAggregation.Sum(f) -> "sum " + Ast.escapeIdent f
 
   let formatCondition (op, f, v) =
     let op = 
@@ -107,6 +110,7 @@ module Transform =
         | SortBy(columns) -> ["sort", (List.map (fun (c, o) -> c + (if o = Ascending then " asc" else " desc")) columns)]
         | GroupBy(flds, aggs) -> ["groupby", (List.map (fun fld -> "by " + Ast.escapeIdent fld) flds) @ (List.map formatGroupAgg aggs)]
         | WindowBy(fld, size, aggs) -> ["windowby", ("by " + Ast.escapeIdent fld) :: size :: (List.map formatWinAgg aggs)]
+        | ExpandBy(fld, aggs) -> ["expandby", ("by " + Ast.escapeIdent fld) :: (List.map formatWinAgg aggs)]
         | Paging(ops) -> ops |> List.map (function Take k -> "take", [k] | Skip k -> "skip", [k]) 
         | GetSeries(k, v) -> ["series", [k; v]]
         | Empty -> [] ]
@@ -141,6 +145,7 @@ module Transform =
     | DropColumns(drop) ->
         let dropped = set drop
         fields |> List.filter (fun f -> not(dropped.Contains f.Name))
+    | ExpandBy(key, aggs) 
     | WindowBy(key, _, aggs) ->
         let oldFields = dict [ for f in fields -> f.Name, f ]
         aggs 
@@ -150,6 +155,7 @@ module Transform =
            | WindowAggregation.LastKey -> [ { Name = "last " + key; Type = oldFields.[key].Type } ]
            | WindowAggregation.Mean fld 
            | WindowAggregation.Min fld 
+           | WindowAggregation.Sum fld 
            | WindowAggregation.Max fld -> [ oldFields.[fld] ])
     | GroupBy(flds, aggs) ->
         let oldFields = dict [ for f in fields -> f.Name, f ]
@@ -334,22 +340,23 @@ and handleSortRequest ctx rest keys =
 and handleWindowRequest ctx rest wndid = 
   [ for field in ctx.Fields do 
       if isDate field.Type then
-        yield makeMethod ctx ("window by " + field.Name) (WindowBy(field.Name, wndid, [])::rest) wndid ["size", PrimitiveType.Number] ]
+        yield makeMethod ctx ("window by " + field.Name) (WindowBy(field.Name, wndid, [])::rest) wndid ["size", PrimitiveType.Number] 
+        yield makeProperty ctx ("expanding by " + field.Name) (ExpandBy(field.Name, [WindowAggregation.LastKey])::rest) ]
   |> makeObjectType  
 
-and handleWindowAggRequest ctx rest fld size aggs = 
+and handleWindowExpandAggRequest ctx rest fld make aggs = 
   let containsKey = aggs |> Seq.exists(function
     | WindowAggregation.FirstKey | WindowAggregation.LastKey | WindowAggregation.MiddleKey -> true
     | _ -> false)
   let containsField fld = aggs |> Seq.exists (function 
-    | WindowAggregation.Max f | WindowAggregation.Min f | WindowAggregation.Mean f -> f = fld 
+    | WindowAggregation.Sum f | WindowAggregation.Max f | WindowAggregation.Min f | WindowAggregation.Mean f -> f = fld 
     | WindowAggregation.FirstKey | WindowAggregation.LastKey | WindowAggregation.MiddleKey -> false)
 
   let makeAggMember name agg = 
-    makeProperty ctx name (WindowBy(fld, size, agg::aggs)::rest) 
+    makeProperty ctx name (make(agg::aggs)::rest) 
 
   [ if not (List.isEmpty aggs) then
-      yield makeProperty ctx "then" (Empty::WindowBy(fld, size, aggs)::rest) 
+      yield makeProperty ctx "then" (Empty::make(aggs)::rest) 
     if not containsKey then
       yield makeAggMember ("first " + fld) WindowAggregation.FirstKey
       yield makeAggMember ("last " + fld) WindowAggregation.LastKey
@@ -358,6 +365,7 @@ and handleWindowAggRequest ctx rest fld size aggs =
       if not (containsField fld.Name) then
         if isNumeric fld.Type then
           yield makeAggMember ("min " + fld.Name) (WindowAggregation.Min fld.Name)
+          yield makeAggMember ("sum " + fld.Name) (WindowAggregation.Sum fld.Name)
           yield makeAggMember ("max " + fld.Name) (WindowAggregation.Max fld.Name)
           yield makeAggMember ("mean " + fld.Name) (WindowAggregation.Mean fld.Name) ]
   |> makeObjectType  
@@ -468,7 +476,9 @@ and makePivotTypeImmediate ctx tfs = async {
       let wnid = rest |> Seq.sumBy (function WindowBy _ -> 1 | _ -> 0) |> sprintf "wnid-%d"
       return handleWindowRequest ctx rest wnid
   | WindowBy(fld, size, aggs) ->
-      return handleWindowAggRequest ctx rest fld size aggs
+      return handleWindowExpandAggRequest ctx rest fld (fun aggs -> WindowBy(fld, size, aggs)) aggs
+  | ExpandBy(fld, aggs) ->
+      return handleWindowExpandAggRequest ctx rest fld (fun aggs -> ExpandBy(fld, aggs)) aggs
   | GroupBy(flds, []) ->
       return handleGroupRequest ctx rest flds
   | GroupBy(flds, aggs) ->

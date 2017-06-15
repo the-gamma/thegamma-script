@@ -193,8 +193,8 @@ let knownTypes =
         "CompostBubblesChartSet", "CompostBubblesChartSet"
         "CompostBubblesChart`2", "CompostBubblesChart"
         "CompostColBarChart", "CompostColBarChart"
-        "CompostLineChart", "CompostLineChart"
-        "CompostLinesChart", "CompostLinesChart"
+        "CompostLineAreaChart", "CompostLineAreaChart"
+        "CompostLinesAreasChart", "CompostLinesAreasChart"
         "CompostCharts", "CompostCharts"
         //"value`1", "value"
         //"options", "options" 
@@ -230,8 +230,8 @@ let e =
       yield exportType ctx (asm.GetType("TheGamma.Interactive.CompostBubblesChartSet")) BindingFlags.Instance 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.CompostBubblesChart`2")) BindingFlags.Instance 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.CompostColBarChart")) BindingFlags.Instance 
-      yield exportType ctx (asm.GetType("TheGamma.Interactive.CompostLineChart")) BindingFlags.Instance 
-      yield exportType ctx (asm.GetType("TheGamma.Interactive.CompostLinesChart")) BindingFlags.Instance 
+      yield exportType ctx (asm.GetType("TheGamma.Interactive.CompostLineAreaChart")) BindingFlags.Instance 
+      yield exportType ctx (asm.GetType("TheGamma.Interactive.CompostLinesAreasChart")) BindingFlags.Instance 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.CompostCharts")) BindingFlags.Instance 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.compost")) BindingFlags.Instance 
       yield { exportType ctx (asm.GetType("TheGamma.Interactive.compost")) BindingFlags.Static 

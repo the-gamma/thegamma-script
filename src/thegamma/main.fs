@@ -109,7 +109,7 @@ let callShowMethod outputId (cmd:Node<_>) =
   | _ -> cmd
 
 [<Emit("eval($0)")>]
-let eval (s:string) : unit = ()
+let eval (s:string) : obj = failwith "eval"
 
 let evaluate ctx code outputId = async {
   // Type check & insert 'show' calls if 'outputId' is given
@@ -145,6 +145,7 @@ type editorOptions =
     height : float option
     maxHeight : float option
     autoHeight : bool option
+    enablePreview : bool option
     monacoOptions : (monaco.editor.IEditorConstructionOptions -> unit) option }
 
 type error = 
@@ -156,16 +157,26 @@ type error =
     endColumn : int }
 
 let defaultEditorOptions = 
-  { width = None; height = None; maxHeight = None; autoHeight = None; monacoOptions = None }
+  { width = None; height = None; maxHeight = None; autoHeight = None; monacoOptions = None; enablePreview = None }
 
 type thenable<'R>(work:Async<'R>) = 
-  member x.``then``(onValue, onError) = 
-    async { 
-      try 
-        let! res = work 
-        onValue res 
-      with e ->
-        onError e } |> Async.StartImmediate
+  let mutable resCell = Choice1Of3()
+  let mutable trigger = id
+  do async { 
+    try 
+      let! res = work
+      resCell <- Choice2Of3 res
+      trigger ()
+    with e ->
+      resCell <- Choice3Of3 e 
+      trigger () } |> Async.StartImmediate
+  member x.``then``(onValue, ?onError) = 
+    trigger <- fun () ->
+      match resCell with 
+      | Choice1Of3 () -> ()
+      | Choice2Of3 res -> trigger <- id; onValue res
+      | Choice3Of3 err -> trigger <- id; if onError.IsSome then onError.Value err
+    trigger ()
 
 let rec serializeType typ = 
   match typ with
@@ -245,10 +256,10 @@ type gamma(ctx:TheGammaContext) =
 
   member x.evaluate(code, ?outputId) = 
     async {
-      try do! evaluate ctx code outputId
+      try return! evaluate ctx code outputId
       with e ->
-        Log.exn("api", "Evaluating code '%O' failed with error '%O'.", code, e) }
-    |> Async.StartImmediate
+        Log.exn("api", "Evaluating code '%O' failed with error '%O'.", code, e)
+        return! raise e } |> thenable
 
   member x.errorsReported(f) = 
     ctx.checkingService.ErrorsReported.Add(fun (source, errors) ->
@@ -281,13 +292,17 @@ type gamma(ctx:TheGammaContext) =
     dim.height <- height
     ed.layout(dim)
 
-    let previewService = PreviewService(ctx.checkingService, ctx.providers.globals, ed, previews)
+    let previewService = 
+      if defaultArg options.enablePreview true then
+        Some(PreviewService(ctx.checkingService, ctx.providers.globals, ed, previews))
+      else None
 
     let mutable lastHeight = -1.0
     let autosizeEditor () =
       let text = ed.getModel().getValue(monaco.editor.EndOfLinePreference.LF, false)
       let lines = 1.0 + float (text.Split('\n').Length)
-      let height = min maxHeight (max 200.0 (lines * 20.0 + previewService.ZoneHeight))
+      let zoneHeight = match previewService with Some ps -> ps.ZoneHeight | _ -> 0.0
+      let height = min maxHeight (max 200.0 (lines * 20.0 + zoneHeight))
       if height <> lastHeight then
         lastHeight <- height
         let dim = JsInterop.createEmpty<monaco.editor.IDimension>
@@ -299,7 +314,9 @@ type gamma(ctx:TheGammaContext) =
 
     if options.autoHeight = Some true then
       ed.getModel().onDidChangeContent(fun _ -> autosizeEditor ()) |> ignore     
-      previewService.ZoneSizeChanged.Add(fun _ -> autosizeEditor ())
+      match previewService with
+      | Some ps -> ps.ZoneSizeChanged.Add(fun _ -> autosizeEditor ())
+      | _ -> ()
       autosizeEditor ()
 
     editor(ed)

@@ -78,6 +78,7 @@ let transformName = function
   | Pivot.GetTheData _ -> "get the data"
   | Pivot.GroupBy _ -> "group by"
   | Pivot.WindowBy _ -> "window by"
+  | Pivot.ExpandBy _ -> "expand by"
   | Pivot.Paging _ -> "paging"
   | Pivot.SortBy _ -> "sort by"
   | Pivot.GetRange _ | Pivot.Metadata _ -> failwith "Unexpected get range or metadata"
@@ -378,6 +379,7 @@ let rec updatePivotState trigger state event =
           | Pivot.SortBy _ -> "sort data", [marker; "then"]
           | Pivot.FilterBy _ -> "filter data", [marker; "then"] // TODO
           | Pivot.WindowBy _ -> "windowing", [marker; "then"] // TODO
+          | Pivot.ExpandBy _ -> "expanding", [marker; "then"] // TODO
           | Pivot.Paging _ -> "paging", [marker; "then"]
           | Pivot.GetSeries _ -> "get series", [marker]
           | Pivot.GetTheData -> "get the data", [marker]
