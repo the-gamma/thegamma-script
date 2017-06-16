@@ -72,9 +72,7 @@ type Shape<[<Measure>] 'vx, [<Measure>] 'vy> =
   | OuterScale of option<Scale<'vx>> * option<Scale<'vy>> * Shape<'vx, 'vy>
   | Line of seq<Value<'vx> * Value<'vy>>
   | Bubble of Value<'vx> * Value<'vy> * float * float
-  | Area of seq<Value<'vx> * Value<'vy>>
-  | Bar of continuous<'vx> * categorical<'vy>
-  | Column of categorical<'vx> * continuous<'vy>
+  | Shape of seq<Value<'vx> * Value<'vy>>
   | Stack of Orientation * seq<Shape<'vx, 'vy>>
   | Layered of seq<Shape<'vx, 'vy>>
   | Axes of bool * bool * Shape<'vx, 'vy>
@@ -207,10 +205,8 @@ module Scales =
     | ScaledText of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * float * string    
     | ScaledLine of (Value<'vx> * Value<'vy>)[]
     | ScaledBubble of Value<'vx> * Value<'vy> * float * float
-    | ScaledArea of (Value<'vx> * Value<'vy>)[]
+    | ScaledShape of (Value<'vx> * Value<'vy>)[]
     | ScaledLayered of ScaledShape<'vx, 'vy>[]
-    | ScaledColumn of categorical<'vx> * continuous<'vy>
-    | ScaledBar of continuous<'vx> * categorical<'vy>
     | ScaledStack of Orientation * ScaledShape<'vx, 'vy>[]
     | ScaledInteractive of seq<EventHandler<'vx, 'vy>> * ScaledShape<'vx, 'vy>
     | ScaledPadding of (float * float * float * float) * ScaledShape<'vx, 'vy>
@@ -283,10 +279,8 @@ module Scales =
     // Replace at the leafs
     | ScaledLine _ 
     | ScaledText _
-    | ScaledColumn _
-    | ScaledBar _    
     | ScaledBubble _
-    | ScaledArea _ -> Scaled(outer, inner, shape)
+    | ScaledShape _ -> Scaled(outer, inner, shape)
     // Replace just top level scales
     | ScaledOuterScale _ -> Scaled(outer, inner, shape)
     // Propagate recursively
@@ -300,7 +294,7 @@ module Scales =
   // From the leafs to the root, calculate the scales of
   // everything (composing sales of leafs to get scale of root)
 
-  let calculateLineOrAreaScale vals = 
+  let calculateShapeScale vals = 
     let scales =
       vals |> Array.fold (fun state value ->
         match state, value with 
@@ -314,18 +308,11 @@ module Scales =
     | Choice2Of3(vs) -> Continuous (CO (List.min vs), CO (List.max vs))
     | Choice3Of3(xs) -> Categorical (Array.distinct [| for x in List.rev xs -> CA x |])
 
-  let calculateLineOrAreaScales line = 
-    let xs = line |> Array.map fst 
-    let ys = line |> Array.map snd
-    calculateLineOrAreaScale xs, calculateLineOrAreaScale ys
-(*
-  let calculateAreaScales line = 
-    let xs = line |> Array.map fst 
-    let ys = line |> Array.map snd
-    let x0, x1 = Array.min xs, Array.max xs
-    let y0, y1 = Array.min ys, Array.max ys
-    Continuous(x0, x1), Continuous(y0, y1)
-*)
+  let calculateShapeScales points = 
+    let xs = points |> Array.map fst 
+    let ys = points |> Array.map snd
+    calculateShapeScale xs, calculateShapeScale ys
+
   // Always returns objects with the same inner and outer scales
   // but outer scales can be replaced later by replaceScales
   let rec calculateScales<[<Measure>] 'ux, [<Measure>] 'uy> style (shape:Shape<'ux, 'uy>) = 
@@ -371,6 +358,17 @@ module Scales =
         let scales = makeSingletonScale x, makeSingletonScale y
         Scaled(scales, scales, ScaledBubble(x, y, rx, ry))
 
+    | Shape.Text(x, y, va, ha, r, t) ->
+        let makeSingletonScale = function COV(v) -> Continuous(v, v) | CAR(v, _) -> Categorical [| v |]
+        let scales = makeSingletonScale x, makeSingletonScale y
+        Scaled(scales, scales, ScaledText(x, y, va, ha, r, t))    
+
+    | Line line -> 
+        let line = Seq.toArray line 
+        let scales = calculateShapeScales line
+        Scaled(scales, scales, ScaledLine(line))
+
+(*
     | Column(x, y) ->
         let scales = Categorical [| x |], Continuous(CO 0.0<_>, y)
         Scaled(scales, scales, ScaledColumn(x, y))
@@ -379,20 +377,15 @@ module Scales =
         let scales = Continuous(CO 0.0<_>, x), Categorical [| y |]
         Scaled(scales, scales, ScaledBar(x, y))
 
-    | Shape.Text(x, y, va, ha, r, t) ->
-        let makeSingletonScale = function COV(v) -> Continuous(v, v) | CAR(v, _) -> Categorical [| v |]
-        let scales = makeSingletonScale x, makeSingletonScale y
-        Scaled(scales, scales, ScaledText(x, y, va, ha, r, t))    
-
-    | Line line -> 
-        let line = Seq.toArray line 
-        let scales = calculateLineOrAreaScales line
-        Scaled(scales, scales, ScaledLine(line))
-
     | Area area -> 
         let area = Seq.toArray area
         let scales = calculateLineOrAreaScales area
         Scaled(scales, scales, ScaledArea(area))
+*)
+    | Shape points -> 
+        let points = Seq.toArray points
+        let scales = calculateShapeScales points
+        Scaled(scales, scales, ScaledShape(points))
     
     | Axes(showX, showY, shape) ->
         let (Scaled(origScales & (sx, sy), _, _)) = calculateScales shape 
@@ -479,10 +472,8 @@ module Projections =
     | ProjectedBubble of Value<'vx> * Value<'vy> * float * float
     | ProjectedText of Value<'vx> * Value<'vy> * VerticalAlign * HorizontalAlign * float * string    
     | ProjectedLine of (Value<'vx> * Value<'vy>)[]
-    | ProjectedArea of (Value<'vx> * Value<'vy>)[]
+    | ProjectedShape of (Value<'vx> * Value<'vy>)[]
     | ProjectedLayered of ProjectedShape<'vx, 'vy>[]
-    | ProjectedColumn of categorical<'vx> * continuous<'vy>
-    | ProjectedBar of continuous<'vx> * categorical<'vy>
     | ProjectedStack of Orientation * ProjectedShape<'vx, 'vy>[]
     | ProjectedOffset of (float * float) * ProjectedShape<'vx, 'vy>
     | ProjectedInteractive of seq<EventHandler<'vx, 'vy>> * ProjectedShape<'vx, 'vy>
@@ -623,20 +614,14 @@ module Projections =
     | Scaled(scales, _, ScaledLine line) -> 
         Projected(projection, scales, ProjectedLine line)
 
-    | Scaled(scales, _, ScaledBar(x,y)) -> 
-        Projected(projection, scales, ProjectedBar(x, y))
-
-    | Scaled(scales, _, ScaledColumn(x,y)) -> 
-        Projected(projection, scales, ProjectedColumn(x, y))
-
     | Scaled(scales, _, ScaledText(x, y, va, ha, r, t)) -> 
         Projected(projection, scales, ProjectedText(x, y, va, ha, r, t))
 
     | Scaled(scales, _, ScaledBubble(x, y, rx, ry)) -> 
         Projected(projection, scales, ProjectedBubble(x, y, rx, ry))
 
-    | Scaled(scales, _, ScaledArea area) -> 
-        Projected(projection, scales, ProjectedArea area)
+    | Scaled(scales, _, ScaledShape points) -> 
+        Projected(projection, scales, ProjectedShape points)
 
     | Scaled(_, _, ScaledPadding((t,r,b,l), shape)) ->
         let (lx, hx), (ly, hy) = 
@@ -708,41 +693,11 @@ module Drawing =
           |> Array.ofList
         Path(path, formatStyle ctx.Definitions (hideFill ctx.Style))
 
-    | ProjectedColumn(x, y), (Continuous _, _)
-    | ProjectedColumn(x, y), (_, Categorical _) -> 
-        failwith "Column can be drawn only on matching scales"
-    | ProjectedColumn(x, y), (Categorical sx, Continuous (ly, hy)) ->
+    | ProjectedShape(points), _ -> 
         let path = 
-           [| MoveTo(projectCont (CAR(x, 0.0), COV y))
-              LineTo(projectCont (CAR(x, 1.0), COV y))
-              LineTo(projectCont (CAR(x, 1.0), COV ly))
-              LineTo(projectCont (CAR(x, 0.0), COV ly))
-              LineTo(projectCont (CAR(x, 0.0), COV y)) |]           
-        Path(path, formatStyle ctx.Definitions (hideStroke ctx.Style)) 
-
-    | ProjectedBar(x, y), (_, Continuous _)
-    | ProjectedBar(x, y), (Categorical _, _) -> 
-        failwith "Bar can be drawn only on matching scales"
-    | ProjectedBar(x, y), (Continuous (lx, hx), Categorical sy) ->
-        let path = 
-           [| MoveTo(projectCont (COV x, CAR(y, 0.0)))
-              LineTo(projectCont (COV x, CAR(y, 1.0)))
-              LineTo(projectCont (COV lx, CAR(y, 1.0)))
-              LineTo(projectCont (COV lx, CAR(y, 0.0)))
-              LineTo(projectCont (COV x, CAR(y, 0.0))) |]           
-        Path(path, formatStyle ctx.Definitions (hideStroke ctx.Style)) 
-
-    | ProjectedArea line, (Categorical _, _)
-    | ProjectedArea line, (_, Categorical _) -> 
-        failwith "Area can be drawn only on continuous scale"
-    | ProjectedArea line, (Continuous(lx, hx), Continuous(ly, hy)) -> 
-        let firstX, lastX = fst (Seq.head line), fst (Seq.last line)
-        let path = 
-          [ yield MoveTo(projectCont (firstX, COV ly))
-            for pt in line do yield LineTo (projectCont pt) 
-            yield LineTo(projectCont (lastX, COV ly))
-            yield LineTo(projectCont (firstX, COV ly)) ]
-          |> Array.ofList        
+          [| yield MoveTo(projectCont (points.[0]))
+             for pt in Seq.skip 1 points do yield LineTo(projectCont pt) 
+             yield LineTo(projectCont (points.[0])) |]
         Path(path, formatStyle ctx.Definitions (hideStroke ctx.Style)) 
 
     | ProjectedLayered shapes, _ ->
@@ -797,9 +752,7 @@ module Events =
     | ProjectedLine _
     | ProjectedText _
     | ProjectedBubble _
-    | ProjectedColumn _
-    | ProjectedBar _
-    | ProjectedArea _ -> ()
+    | ProjectedShape _ -> ()
     | ProjectedStyle(_, shape)
     | ProjectedOffset(_, shape) -> triggerEvent shape jse event
     | ProjectedStack(_, shapes)
@@ -830,6 +783,27 @@ module Events =
 // ------------------------------------------------------------------------------------------------
 // Integration
 // ------------------------------------------------------------------------------------------------
+
+module Derived = 
+  let Area(line) = Shape <| seq {
+    let line = Array.ofSeq line
+    let firstX, lastX = fst line.[0], fst line.[line.Length - 1]
+    yield firstX, COV (CO 0.0)
+    yield! line
+    yield lastX, COV (CO 0.0)
+    yield firstX, COV (CO 0.0) }
+
+  let Bar(x, y) = Shape <| seq {
+    yield COV x, CAR(y, 0.0)
+    yield COV x, CAR(y, 1.0)
+    yield COV (CO 0.0), CAR(y, 1.0)
+    yield COV (CO 0.0), CAR(y, 0.0) }
+    
+  let Column(x, y) = Shape <| seq {
+    yield CAR(x, 0.0), COV y
+    yield CAR(x, 1.0), COV y
+    yield CAR(x, 1.0), COV (CO 0.0)
+    yield CAR(x, 0.0), COV (CO 0.0) }
 
 module Compost = 
   open Scales

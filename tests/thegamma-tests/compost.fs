@@ -9,6 +9,7 @@ module TheGamma.Tests.Compost
 open TheGamma
 open TheGamma.Html
 open TheGamma.Interactive.Compost
+open TheGamma.Interactive.Compost.Derived
 open NUnit.Framework
 
 // --------------------------------------------------------------------------------------

@@ -8,6 +8,8 @@ open TheGamma.Common
 open TheGamma.Series
 open TheGamma.Html
 open TheGamma.Interactive.Compost
+open TheGamma.Interactive.Compost.Derived
+
 module FsOption = Microsoft.FSharp.Core.Option
 
 module InteractiveHelpers =
@@ -81,8 +83,9 @@ type AxisOptions =
   { minValue : obj option
     maxValue : obj option 
     label : string option
-    labelOffset : float option }
-  static member Default = { minValue = None; maxValue = None; label = None; labelOffset = None }
+    labelOffset : float option 
+    labelMinimalSize : float option }
+  static member Default = { minValue = None; maxValue = None; label = None; labelOffset = None; labelMinimalSize = None }
 
 type LegendOptions = 
   { position : string }
@@ -118,6 +121,8 @@ module Internal =
 
   type ChartContext = 
     { Chart : Shape<1, 1> 
+      Width : float
+      Height : float
       XPoints : ScalePoints 
       YPoints : ScalePoints
       XData : obj[]
@@ -135,10 +140,11 @@ module Internal =
                    else CAR(vals.[vals.Length/2], 0.0) }
     getPoints sx, getPoints sy
 
-  let initChart xdata ydata options chart =
+  let initChart size xdata ydata options chart =
     let px, py = calculateScales chart 
     { Chart = chart; XPoints = px; YPoints = py; Padding = (20., 20., 20., 20.)
-      XData = xdata; YData = ydata; ChartOptions = options }
+      XData = xdata; YData = ydata; ChartOptions = options 
+      Width = fst size; Height = snd size }
 
   let applyStyle f chart = 
     Style(f, chart)
@@ -179,24 +185,44 @@ module Internal =
 
 
   let applyLegend (width, height) labels ctx =     
-    if ctx.ChartOptions.legend.position = "right" then
-      let labels = Array.ofSeq labels
-      let labs = 
-        InnerScale(Some(CO 0., CO 100.), None, 
-            Layered
-              [ for clr, lbl in labels do
-                  let style clr = applyStyle (fun s -> { s with Font = "9pt Roboto,sans-serif"; Fill=Solid(1., HTML clr); StrokeColor=(0.0, RGB(0,0,0)) })
-                  yield Padding((4., 0., 4., 0.), Bar(CO 6., CA lbl)) |> style clr
-                  yield Text(COV(CO 8.), CAR(CA lbl, 0.5), VerticalAlign.Middle, HorizontalAlign.Start, 0., lbl) |> style "black"
-              ] ) 
-      let ptop, _, _, _ = ctx.Padding
-      let lwid, lhgt = (width - 250.) / width, (ptop + float labels.Length * 30.) / height    
-      let chart = 
-        Layered
-          [ OuterScale(Some(Continuous(CO 0.0, CO lwid)), Some(Continuous(CO 0.0, CO 1.0)), ctx.Chart)
-            OuterScale(Some(Continuous(CO lwid, CO 1.0)), Some(Continuous(CO 0.0, CO lhgt)), Padding((ptop, 0., 0., 20.), labs)) ]
-      { ctx with Chart = chart }
-    else ctx
+    let labels = Array.ofSeq labels
+
+    match ctx.ChartOptions.legend.position, width > 600. with
+    | "right", _ | "auto", true -> 
+        let ptop, _, _, _ = ctx.Padding
+        let labs = 
+          InnerScale(Some(CO 0., CO 100.), None, 
+              Layered
+                [ for clr, lbl in labels do
+                    let style clr = applyStyle (fun s -> { s with Font = "9pt Roboto,sans-serif"; Fill=Solid(1., HTML clr); StrokeColor=(0.0, RGB(0,0,0)) })
+                    yield Padding((4., 0., 4., 0.), Bar(CO 6., CA lbl)) |> style clr
+                    yield Text(COV(CO 8.), CAR(CA lbl, 0.5), VerticalAlign.Middle, HorizontalAlign.Start, 0., lbl) |> style "black"
+                ] ) 
+        let lwid, lhgt = (width - 250.) / width, (ptop + float labels.Length * 30.) / height    
+        let chart = 
+          Layered
+            [ OuterScale(Some(Continuous(CO 0.0, CO lwid)), Some(Continuous(CO 0.0, CO 1.0)), ctx.Chart)
+              OuterScale(Some(Continuous(CO lwid, CO 1.0)), Some(Continuous(CO 0.0, CO lhgt)), Padding((ptop, 0., 0., 20.), labs)) ]
+        { ctx with Chart = chart }
+
+    | "bottom", _ | "auto", false -> 
+        let _, pright, _, pleft = ctx.Padding
+        let labs = 
+          InnerScale(Some(CO 0., CO 100.), None, 
+              Layered
+                [ for clr, lbl in labels do
+                    let style clr = applyStyle (fun s -> { s with Font = "9pt Roboto,sans-serif"; Fill=Solid(1., HTML clr); StrokeColor=(0.0, RGB(0,0,0)) })
+                    yield Padding((4., 0., 4., 0.), Shape[ COV(CO 94.), CAR(CA lbl, 0.); COV(CO 94.), CAR(CA lbl, 1.); COV(CO 100.), CAR(CA lbl, 1.); COV(CO 100.), CAR(CA lbl, 0.) ]) |> style clr
+                    yield Text(COV(CO 92.), CAR(CA lbl, 0.5), VerticalAlign.Middle, HorizontalAlign.End, 0., lbl) |> style "black"
+                ] ) 
+        let lhgt = (height - float labels.Length * 30.) / height
+        let chart = 
+          Layered
+            [ OuterScale(Some(Continuous(CO 0.0, CO 1.0)), Some(Continuous(CO 0.0, CO lhgt)), ctx.Chart)
+              OuterScale(Some(Continuous(CO 0.0, CO 1.0)), Some(Continuous(CO lhgt, CO 1.0)), Padding((20., pright, 0., pleft), labs)) ]
+        { ctx with Chart = chart }
+    | _ -> ctx
+
 
   let applyLabels ctx =     
     let ptop, pright, pbot, pleft = ctx.Padding
@@ -207,18 +233,20 @@ module Internal =
     // X axis label, Y axis label
     let chart = ctx.Chart
     let chart, pbot = 
-      match ctx.ChartOptions.xAxis.label with
-      | Some xl -> 
+      match ctx.ChartOptions.xAxis.label, ctx.ChartOptions.xAxis.labelMinimalSize with
+      | _, Some min when ctx.Height < min -> chart, pbot
+      | Some xl, _ -> 
           let offs = defaultArg ctx.ChartOptions.xAxis.labelOffset 40.
           let lbl = Offset((0., offs), Text(ctx.XPoints.Middle, ctx.YPoints.Minimum, VerticalAlign.Middle, HorizontalAlign.Center, 0.0, xl))
-          Layered [ chart; lblStyle "bold 9pt Roboto,sans-serif" lbl ], offs + 10.
+          Layered [ chart; lblStyle "bold 9pt Roboto,sans-serif" lbl ], (offs + 10.) - 30. // +10 space for label, -30 because offset 30 is added by Axes
       | _ -> chart, pbot
     let chart, pleft = 
-      match ctx.ChartOptions.yAxis.label with
-      | Some yl -> 
+      match ctx.ChartOptions.yAxis.label, ctx.ChartOptions.yAxis.labelMinimalSize with
+      | _, Some min when ctx.Width < min -> chart, pbot
+      | Some yl, _ -> 
           let offs = defaultArg ctx.ChartOptions.yAxis.labelOffset 60.
           let lbl = Offset((-offs, 0.), Text(ctx.XPoints.Minimum, ctx.YPoints.Middle, VerticalAlign.Middle, HorizontalAlign.Center, -90.0, yl))
-          Layered [ chart; lblStyle "bold 9pt Roboto,sans-serif" lbl ], offs + 10.
+          Layered [ chart; lblStyle "bold 9pt Roboto,sans-serif" lbl ], (offs + 10.) - 50. // +10 space for label, -50 because offset 50 is added by Axes
       | _ -> chart, pleft
 
     // Chart title
@@ -254,7 +282,7 @@ module Charts =
           let size = unbox (defaultArg s (box 2.))
           let b = Bubble(COV(CO (dateOrNumberAsNumber x)), COV(CO (dateOrNumberAsNumber y)), size, size) 
           yield b |> applyStyle (fun s -> { s with StrokeWidth = Pixels 0; Fill = Solid(0.6, HTML bc) }) ]
-    |> initChart xdata ydata chartOptions
+    |> initChart size xdata ydata chartOptions
     |> applyScales 
     |> applyLabels 
     |> applyAxes true true
@@ -272,7 +300,7 @@ module Charts =
         if not (List.isEmpty points) then 
           if isArea then yield Area points |> applyStyle (fun s -> { s with Fill = Solid(0.4, HTML clr); StrokeWidth = Pixels 0  })
           yield Line points |> applyStyle (fun s -> { s with StrokeColor = 1.0, HTML clr; StrokeWidth = Pixels 2  }) ]
-    |> initChart xdata ydata chartOptions
+    |> initChart size xdata ydata chartOptions
     |> applyScales 
     |> applyLabels
     |> applyAxes true true    
@@ -286,11 +314,11 @@ module Charts =
     
     let { XPoints = xp; YPoints = yp } =
       Layered [ for lbl, v in data -> if isBar then Bar(CO v, CA lbl) else Column(CA lbl, CO v) ] 
-      |> initChart xdata ydata chartOptions |> applyScales 
+      |> initChart size xdata ydata chartOptions |> applyScales 
     
     let chartOptions = 
-      if isBar && inlineLabels && chartOptions.yAxis.labelOffset.IsNone then { chartOptions with yAxis = { chartOptions.yAxis with labelOffset = Some 10. } }
-      elif not isBar && inlineLabels && chartOptions.yAxis.labelOffset.IsNone then { chartOptions with xAxis = { chartOptions.xAxis with labelOffset = Some 10. } }
+      if isBar && inlineLabels && chartOptions.yAxis.labelOffset.IsNone then { chartOptions with yAxis = { chartOptions.yAxis with labelOffset = None } }
+      elif not isBar && inlineLabels && chartOptions.yAxis.labelOffset.IsNone then { chartOptions with xAxis = { chartOptions.xAxis with labelOffset = None } }
       else chartOptions
 
     Layered [
@@ -306,7 +334,7 @@ module Charts =
         if label.IsSome then
           let clr = clr |> mapColor (fun (r,g,b) -> r*0.8, g*0.8, b*0.8)
           yield label.Value |> applyStyle (fun s -> { s with Font = "11pt Roboto,sans-serif"; Fill = Solid(1.0, HTML clr); StrokeWidth = Pixels 0 }) ]
-    |> initChart xdata ydata chartOptions
+    |> initChart size xdata ydata chartOptions
     |> applyScales 
     |> applyLabels
     |> applyAxes (not (inlineLabels && not isBar)) (not (inlineLabels && isBar))
@@ -432,7 +460,7 @@ module YouDrawHelpers =
     
     let { Internal.ChartContext.Chart = chart } = 
       coreChart
-      |> initChart state.XData state.YData chartOptions 
+      |> initChart (width, height) state.XData state.YData chartOptions 
       |> applyScales 
       |> applyLabels 
       |> applyAxes true true
@@ -636,7 +664,7 @@ module YouGuessColsHelpers =
 
     let ctx = 
       chart
-      |> initChart state.XData state.YData chartOptions
+      |> initChart size state.XData state.YData chartOptions
       |> applyScales 
       |> applyLabels
       //|> applyAxes (not (inlineLabels && not isBar)) (not (inlineLabels && isBar))
@@ -818,11 +846,11 @@ type YouGuessColsBars =
     { y with options = { y.options with legend = { position = position } } }
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
-  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset) = 
-    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset }
+  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset, ?labelMinimalSize) = 
+    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset; labelMinimalSize = orElse labelMinimalSize y.options.xAxis.labelMinimalSize }
     { y with options = { y.options with xAxis = ax } }
-  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset) = 
-    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset }
+  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset, ?labelMinimalSize) = 
+    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset; labelMinimalSize = orElse labelMinimalSize y.options.yAxis.labelMinimalSize  }
     { y with options = { y.options with yAxis = ax } }
   // [/copy-paste]
   member y.setLogger(logger) = { y with logger = Some logger }
@@ -858,11 +886,11 @@ type YouGuessLine =
     { y with options = { y.options with legend = { position = position } } }
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
-  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset) = 
-    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset }
+  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset, ?labelMinimalSize) = 
+    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset; labelMinimalSize = orElse labelMinimalSize y.options.xAxis.labelMinimalSize }
     { y with options = { y.options with xAxis = ax } }
-  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset) = 
-    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset }
+  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset, ?labelMinimalSize) = 
+    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset; labelMinimalSize = orElse labelMinimalSize y.options.yAxis.labelMinimalSize  }
     { y with options = { y.options with yAxis = ax } }
   // [/copy-paste]
   member y.setLogger(logger) = { y with logger = Some logger }
@@ -939,11 +967,11 @@ type CompostBubblesChartSet =
     { y with options = { y.options with legend = { position = position } } }
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
-  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset) = 
-    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset }
+  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset, ?labelMinimalSize) = 
+    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset; labelMinimalSize = orElse labelMinimalSize y.options.xAxis.labelMinimalSize }
     { y with options = { y.options with xAxis = ax } }
-  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset) = 
-    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset }
+  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset, ?labelMinimalSize) = 
+    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset; labelMinimalSize = orElse labelMinimalSize y.options.yAxis.labelMinimalSize  }
     { y with options = { y.options with yAxis = ax } }
   // [/copy-paste]
   member y.setColors(?bubbleColor) = 
@@ -978,11 +1006,11 @@ type CompostColBarChart =
     { y with options = { y.options with legend = { position = position } } }
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
-  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset) = 
-    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset }
+  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset, ?labelMinimalSize) = 
+    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset; labelMinimalSize = orElse labelMinimalSize y.options.xAxis.labelMinimalSize }
     { y with options = { y.options with xAxis = ax } }
-  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset) = 
-    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset }
+  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset, ?labelMinimalSize) = 
+    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset; labelMinimalSize = orElse labelMinimalSize y.options.yAxis.labelMinimalSize  }
     { y with options = { y.options with yAxis = ax } }
   // [/copy-paste]
   member y.setStyle(?inlineLabels) = 
@@ -1009,11 +1037,11 @@ type CompostLineAreaChart =
     { y with options = { y.options with legend = { position = position } } }
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
-  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset) = 
-    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset }
+  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset, ?labelMinimalSize) = 
+    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset; labelMinimalSize = orElse labelMinimalSize y.options.xAxis.labelMinimalSize }
     { y with options = { y.options with xAxis = ax } }
-  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset) = 
-    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset }
+  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset, ?labelMinimalSize) = 
+    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset; labelMinimalSize = orElse labelMinimalSize y.options.yAxis.labelMinimalSize  }
     { y with options = { y.options with yAxis = ax } }
   // [/copy-paste]
   member y.setColors(?lineColor) = 
@@ -1038,11 +1066,11 @@ type CompostLinesAreasChart =
     { y with options = { y.options with legend = { position = position } } }
   member y.setSize(?width, ?height) = 
     { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
-  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset) = 
-    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset }
+  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset, ?labelMinimalSize) = 
+    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset; labelMinimalSize = orElse labelMinimalSize y.options.xAxis.labelMinimalSize }
     { y with options = { y.options with xAxis = ax } }
-  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset) = 
-    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset }
+  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset, ?labelMinimalSize) = 
+    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset; labelMinimalSize = orElse labelMinimalSize y.options.yAxis.labelMinimalSize  }
     { y with options = { y.options with yAxis = ax } }
   // [/copy-paste]
   member y.setColors(?lineColors) = 
