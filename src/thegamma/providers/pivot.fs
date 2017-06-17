@@ -52,6 +52,7 @@ type RelationalOperator =
   | LessThan
   | GreaterThan 
   | InRange
+  | Like
 
 type FilterCondition = RelationalOperator * string * string
 
@@ -95,8 +96,7 @@ module Transform =
 
   let formatCondition (op, f, v) =
     let op = 
-      match op with 
-      | Equals -> "eq" | NotEquals -> "neq" | LessThan -> "lte" | GreaterThan -> "gte" | InRange -> "in"
+      match op with Equals -> "eq" | NotEquals -> "neq" | LessThan -> "lte" | GreaterThan -> "gte" | InRange -> "in" | Like -> "like"
     Ast.escapeIdent f + " " + op + " " + Ast.escapeIdent v
 
   let toUrl transforms = 
@@ -339,7 +339,7 @@ and handleSortRequest ctx rest keys =
 
 and handleWindowRequest ctx rest wndid = 
   [ for field in ctx.Fields do 
-      if isDate field.Type then
+      if isDate field.Type || isNumeric field.Type then
         yield makeMethod ctx ("window by " + field.Name) (WindowBy(field.Name, wndid, [])::rest) wndid ["size", PrimitiveType.Number] 
         yield makeProperty ctx ("expanding by " + field.Name) (ExpandBy(field.Name, [WindowAggregation.LastKey])::rest) ]
   |> makeObjectType  
@@ -432,6 +432,7 @@ and handleFilterRequest ctx rest flid op conds =
         if field.Type = PrimitiveType.String then
           yield makeProperty ctx (prefix + field.Name + " is") (FilterBy(op, (Equals, field.Name, "!")::conds)::rest) 
           yield makeProperty ctx (prefix + field.Name + " is not") (FilterBy(op, (NotEquals, field.Name, "!")::conds)::rest) 
+          yield makeMethod ctx (prefix + field.Name + " contains") (FilterBy(op, (Like, field.Name, flid)::conds)::rest) flid ["text", PrimitiveType.String]
         if field.Type = PrimitiveType.Number then
           yield makeMethod ctx (prefix + field.Name + " is less than") (FilterBy(op, (LessThan, field.Name, flid)::conds)::rest) flid ["value", PrimitiveType.Number]
           yield makeMethod ctx (prefix + field.Name + " is greater than") (FilterBy(op, (GreaterThan, field.Name, flid)::conds)::rest) flid ["value", PrimitiveType.Number]
@@ -454,7 +455,7 @@ and makePivotTypeImmediate ctx tfs = async {
         yield makeProperty ctx "paging" (Paging([])::rest) 
         yield makeProperty ctx "get series" (GetSeries("!","!")::rest) 
         yield makeDataMember ctx "get the data" false rest 
-        if ctx.Fields |> List.exists (fun fld -> fld.Type = PrimitiveType.Date) then
+        if ctx.Fields |> List.exists (fun fld -> fld.Type = PrimitiveType.Date || fld.Type = PrimitiveType.Number) then
           yield makeProperty ctx "windowing" (WindowBy("!", "!", [])::rest) ]
       |> makeObjectType    
   // 
