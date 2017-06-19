@@ -40,6 +40,7 @@ type PivotContext(root, calls) =
     let url = calls |> Array.fold (fun (tfs:string) (id, vals) -> 
       let vals = String.concat "," (Seq.map string vals)
       tfs.Replace(id, string vals)) tfs
+    let url = Fable.Import.JS.encodeURIComponent url
     let url = root + "?" + url + if isPreview then "&preview" else ""
     Log.trace("runtime", "Pivot: %s", url)
     let! res = Http.Request("GET", url)

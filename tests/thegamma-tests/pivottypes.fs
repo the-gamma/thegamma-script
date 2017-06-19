@@ -49,7 +49,7 @@ let check (code:string) cond vars =
   let prog, entities = Binder.bindProgram ctx prog
   let globals = [ for n, t in vars -> Interpreter.globalEntity n [] t None ] 
   let mutable completed = false
-  async { do! TypeChecker.typeCheckProgram globals entities prog
+  async { do! TypeChecker.typeCheckProgram globals entities (Interpreter.evaluate globals) prog
           completed <- true } |> Async.StartImmediate
   if not completed then failwith "Asynchronosu operation did not complete"
   let _, ent = entities.Entities |> Seq.find (snd >> cond)

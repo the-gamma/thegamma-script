@@ -22,8 +22,8 @@ let rec typesEqual t1 t2 =
   | Type.Any, _ | _, Type.Any -> true
   | Type.List t1, Type.List t2 -> typesEqual t1 t2
   | Type.Method(a1, r1), Type.Method(a2, r2) -> 
-      optionsEqual (r1 [for _, _, t in a1 -> t]) (r2 [for _, _, t in a2 -> t]) typesEqual &&
-      listsEqual a1 a2 (fun (s1,b1,t1) (s2,b2,t2) -> s1 = s2 && b1 = b2 && typesEqual t1 t2)
+      optionsEqual (r1 [for ma in a1 -> ma.Type, None]) (r2 [for ma in a2 -> ma.Type, None]) typesEqual &&
+      listsEqual a1 a2 (fun m1 m2 -> m1.Name = m2.Name && m1.Optional = m2.Optional && m1.Static = m2.Static && typesEqual m1.Type m2.Type)
   | Type.Object(o1), Type.Object(o2) -> o1.TypeEquals(o2)
   | Type.Primitive n1, Type.Primitive n2 -> n1 = n2  
   | _ -> false

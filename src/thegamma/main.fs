@@ -53,6 +53,15 @@ let buildGlobalsTable provideTypes = Async.StartAsNamedFuture "buildGlobalsTable
     | TypeProviders.GlobalValue(n, m, e, t) -> 
         Some(Interpreter.globalEntity n m t (Some e))
     | _ -> None)
+    (*
+  let test = Interpreter.globalEntity "magic" [] (Type.Method(fun vs ->
+    { new ObjectType with
+        member x.Members = 
+          [| for i in 1 .. unbox (List.item 1 vs) -> 
+               { Name = unbox (List.head vs) + " " + string i; Type = Type.Primitive(PrimitiveType.String);
+                 Metadata = []; Emitter = { Emit = fun _ -> Babel.StringLiteral(unbox (List.head vs), None) } } |]
+        member x.TypeEquals _ = false } |> Type.Object |> Some )) (Some(Babel.StringLiteral("test", None)))
+        *)
   return globalEntities } 
 
 let rec resolveProvider lookup ignoreFilter kind endpoint = 
@@ -90,7 +99,7 @@ let callShowMethod outputId (cmd:Node<_>) =
       match typ with
       | Type.Object obj ->
           let showTyp = obj.Members |> Array.tryPick (function 
-            | { Name = "show"; Type = typ & Type.Method([_, _, Type.Primitive PrimitiveType.String], _) } -> Some typ
+            | { Name = "show"; Type = typ & Type.Method([{ Type = Type.Primitive PrimitiveType.String }], _) } -> Some typ
             | _ -> None)
           match showTyp with 
           | Some showTyp ->
@@ -189,8 +198,8 @@ let rec serializeType typ =
   | Type.Primitive(PrimitiveType.String) -> box "string"
   | Type.Method(args, res) -> 
       [ "kind", box "function"
-        "arguments", args |> List.map (fun (_, _, t) -> serializeType t) |> Array.ofList |> box
-        "result", serializeType (res [for _, _, t in args  -> t]).Value ] |> JsInterop.createObj 
+        "arguments", args |> List.map (fun ma -> [| box ma.Name; box ma.Optional; box ma.Static; serializeType ma.Type |]) |> Array.ofList |> box
+        "result", serializeType (res [for ma in args  -> ma.Type, None]).Value ] |> JsInterop.createObj 
   | Type.List(t) -> 
       [ "kind", box "array"
         "type", serializeType t ] |> JsInterop.createObj

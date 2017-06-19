@@ -112,9 +112,9 @@ let rec evaluateEntity (e:Entity) =
         | _ -> []
 
       // Evalate arguments and instance and run the call 
-      let pars = expectedArgs |> List.mapi (fun i (name, _, _) ->
+      let pars = expectedArgs |> List.mapi (fun i ma ->
         if i < positionBased.Length then positionBased.[i]
-        elif nameBased.ContainsKey(name) then nameBased.[name]
+        elif nameBased.ContainsKey(ma.Name) then nameBased.[ma.Name]
         else (unbox null) )
 
       match inst with 

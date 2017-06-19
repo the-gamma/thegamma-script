@@ -22,13 +22,17 @@ type TypePrimitive = { kind:string (* = primitive *); ``type``:obj; endpoint:str
 [<Fable.Core.Emit("typeof($0)")>]
 let jstypeof (o:obj) : string = failwith "!"
 
-type Parameter = 
-  { name : string 
-    ``type`` : string }
-
 type Documentation = 
   { title : string option
     details : string option }
+
+type Parameter =
+  { name : string
+    optional : bool
+    kind : string
+    cookie : string option
+    trace : string option
+    ``type`` : obj }
 
 type Member =
   { name : string
@@ -90,10 +94,10 @@ let addTraceCall inst trace =
 let propAccess trace = 
   { Emit = fun inst -> addTraceCall inst trace }
 
-let methCall argNames trace =
-  { Emit = fun inst -> funcN (Seq.length argNames) (fun args ->
+let methCall traceNames trace =
+  { Emit = fun inst -> funcN (Seq.length traceNames) (fun args ->
       let withTrace = addTraceCall inst trace
-      Seq.zip argNames args |> Seq.fold (fun inst (name, value) ->
+      Seq.zip traceNames args |> Seq.fold (fun inst (name, value) ->
         let trace = BinaryExpression(BinaryPlus, str(name + "="), value, None)
         inst?addTrace /@/ [trace] ) withTrace) }
 
@@ -153,53 +157,72 @@ let rec getTypeAndEmitter (lookupNamed:string -> Type) ty =
 [<Fable.Core.Emit("$0[$1]")>]
 let getProperty<'T> (obj:obj) (name:string) : 'T = failwith "never"
 
-let mapParamType = function
-  | "int" | "float" -> PrimitiveType.Number
-  | _ -> failwith "mapParamType: Unsupported parameter type"
-
 let restTypeCache = System.Collections.Generic.Dictionary<_, _>()
 
 let rec createRestType lookupNamed resolveProvider root cookies url = 
+
+  let provideMember m = 
+    let schema = 
+      match m.schema with
+      | Some s -> [{ Type = getProperty s "@type"; Context = "http://schema.org"; Data = s }]
+      | _ -> []
+
+    match m.returns.kind with
+    | "provider" ->
+        let returns = unbox<TypeProvider> m.returns 
+        let typ, emitter = resolveProvider returns.provider returns.endpoint
+        { Member.Name = m.name; Type = typ; Metadata = (docMeta (parseDoc m.documentation))::schema; Emitter = emitter }
+    | "nested" ->
+        let returns = unbox<TypeNested> m.returns 
+        let createReturnType cookies = 
+          try Some(createRestType lookupNamed resolveProvider root cookies returns.endpoint)
+          with _ -> None
+
+        match m.parameters with 
+        | Some parameters ->
+            let args = 
+              [ for p in parameters -> 
+                  let ty = fromRawType p.``type``
+                  let ty, _ = getTypeAndEmitter lookupNamed ty
+                  { MethodArgument.Name = p.name; Optional = p.optional; Type = ty; Static = p.kind = "static" } ] 
+            
+            let retFunc tys = 
+              if not (Types.listsEqual (List.map fst tys) [ for ma in args -> ma.Type ] Types.typesEqual) then None else
+              let matched = Seq.zip parameters tys
+              let newCookies = 
+                matched |> Seq.choose (function
+                  | pa, (_, Some value) when pa.kind = "static" -> Some(pa.cookie.Value + "=" + string value)
+                  | _ -> None) 
+              let cookies = Seq.append [cookies] newCookies |> String.concat "&"
+              createReturnType cookies
+
+            let traceNames = parameters |> Seq.choose (fun p -> p.trace)
+            { Member.Name = m.name; Metadata = [docMeta (parseDoc m.documentation)]
+              Type = Type.Method(args, retFunc); Emitter = methCall traceNames m.trace }
+        | None -> 
+            let retTyp = defaultArg (createReturnType cookies) Type.Any
+            { Member.Name = m.name; Type = retTyp; Metadata = (docMeta (parseDoc m.documentation))::schema; Emitter = propAccess m.trace }
+    | "primitive" ->  
+        let returns = unbox<TypePrimitive> m.returns                      
+        let ty = fromRawType returns.``type``
+        let typ, parser = getTypeAndEmitter lookupNamed ty
+        { Member.Name = m.name; Type = typ; Metadata = (docMeta (parseDoc m.documentation))::schema; 
+          Emitter = dataCall parser m.trace returns.endpoint }
+    | _ -> failwith "?" 
+
   let guid = (concatUrl root url) + cookies
   match restTypeCache.TryGetValue guid with
   | true, res -> res
   | _ ->
     let future = async {
-      let! members = load (concatUrl root url) cookies 
-      let members = members |> Array.map (fun m ->
-        let schema = 
-          match m.schema with
-          | Some s -> [{ Type = getProperty s "@type"; Context = "http://schema.org"; Data = s }]
-          | _ -> []
-        match m.returns.kind with
-        | "provider" ->
-            let returns = unbox<TypeProvider> m.returns 
-            let typ, emitter = resolveProvider returns.provider returns.endpoint
-            { Member.Name = m.name; Type = typ; Metadata = (docMeta (parseDoc m.documentation))::schema; Emitter = emitter }
-        | "nested" ->
-            let returns = unbox<TypeNested> m.returns 
-            let retTyp = createRestType lookupNamed resolveProvider root cookies returns.endpoint
-            match m.parameters with 
-            | Some parameters ->
-                let args = [ for p in parameters -> p.name, false, Type.Primitive (mapParamType p.``type``)] // TODO: Check this is OK type
-                let argNames = [ for p in parameters -> p.name ]
-                let retFunc tys = 
-                  if Types.listsEqual tys [ for _, _, t in args -> t ] Types.typesEqual then Some retTyp
-                  else None
-                { Member.Name = m.name; Metadata = [docMeta (parseDoc m.documentation)]
-                  Type = Type.Method(args, retFunc); Emitter = methCall argNames m.trace }
-            | None -> 
-                { Member.Name = m.name; Type = retTyp; Metadata = (docMeta (parseDoc m.documentation))::schema; Emitter = propAccess m.trace }
-        | "primitive" ->  
-            let returns = unbox<TypePrimitive> m.returns                      
-            let ty = fromRawType returns.``type``
-            let typ, parser = getTypeAndEmitter lookupNamed ty
-            { Member.Name = m.name; Type = typ; Metadata = (docMeta (parseDoc m.documentation))::schema; Emitter = dataCall parser m.trace returns.endpoint }
-        | _ -> failwith "?" )
-      return 
-        { new ObjectType with 
-            member x.Members = members
-            member x.TypeEquals _ = false } |> Type.Object }
+      try
+        let! members = load (concatUrl root url) cookies 
+        let members = members |> Array.map provideMember
+        return 
+          { new ObjectType with 
+              member x.Members = members
+              member x.TypeEquals _ = false } |> Type.Object 
+      with e -> return Type.Any }
     let ty = Type.Delayed(Async.CreateNamedFuture guid future)
     restTypeCache.[guid] <- ty
     ty

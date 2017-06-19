@@ -97,8 +97,8 @@ let isLocalHost() =
 
 let mutable enabledCategories = 
   if not (isLocalHost ()) then set []
-  else set ["INTERPRETER"] 
-  //else set ["*"] 
+  //else set ["INTERPRETER"] 
+  else set ["*"] 
 type Log =
   static member setEnabled(cats) = enabledCategories <- cats
 
@@ -135,9 +135,8 @@ type Log =
 
 type Http =
   /// Send HTTP request asynchronously
-  /// (does not handle errors properly)
   static member Request(meth, url, ?data, ?cookies) =
-    Async.FromContinuations(fun (cont, _, _) ->
+    Async.FromContinuations(fun (cont, econt, _) ->
       let xhr = XMLHttpRequest.Create()
       xhr.``open``(meth, url, true)
       match cookies with 
@@ -146,6 +145,8 @@ type Http =
       xhr.onreadystatechange <- fun _ ->
         if xhr.readyState > 3. && xhr.status = 200. then
           cont(xhr.responseText)
+        if xhr.readyState > 3. && xhr.status = 0. then
+          econt(System.Exception(meth + " " + url + " failed: " + xhr.statusText))
         obj()
       xhr.send(defaultArg data "") )
 

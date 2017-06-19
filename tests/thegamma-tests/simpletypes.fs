@@ -34,7 +34,7 @@ let bool = Type.Primitive PrimitiveType.Bool
 
 // Helper for generating other types
 let list t = Type.List(t)
-let func t1 t2 = Type.Method(["", false, t1], t2)
+let func t1 t2 = Type.Method([{ MethodArgument.Name = ""; Optional = false; Static = false; Type = t1 }], t2)
 
 // Find variable entity
 let isVariable name = function { Kind = EntityKind.Variable(n, _) } when n.Name = name -> true | _ -> false
@@ -48,7 +48,7 @@ let check (code:string) cond vars =
   let prog, entities = Binder.bindProgram ctx prog
   let globals = [ for n, t in vars -> Interpreter.globalEntity n [] t None ] 
   let mutable completed = false
-  async { do! TypeChecker.typeCheckProgram globals entities prog
+  async { do! TypeChecker.typeCheckProgram globals entities (Interpreter.evaluate globals) prog 
           completed <- true } |> Async.StartImmediate
   if not completed then failwith "Asynchronosu operation did not complete"
   let _, ent = entities.Entities |> Seq.find (snd >> cond)
@@ -74,6 +74,7 @@ let assertErrors expectErrors (_, errs) =
 // Fake types for tests
 // ------------------------------------------------------------------------------------------------
 
+// Simple types
 let rec fieldsObj t = delay "fieldsObj" (fun () ->
   obj [
     prop "one" (fieldsObj t)
@@ -89,10 +90,37 @@ let rec testObj () = delay "testObj" (fun () ->
     prop "get the data" num
   ])
 
-let vars = [ "test", testObj () ]
+
+// Type-level computations
+let typeLevelObj s = delay "typeLevelObj" (fun () ->
+  obj [
+    prop (s + " (str)") str
+    prop (s + " (num)") num
+  ])
+
+let typeLevelVar = 
+  Type.Method
+    ( [ { MethodArgument.Name = ""; Type = Type.Primitive PrimitiveType.String; Static = true; Optional = false } ], 
+      function [_, Some s] -> Some(typeLevelObj (unbox s)) | _ -> None)
+
+// Available variables
+let vars = [ "test", testObj (); "typelevel", typeLevelVar ]
 
 // ------------------------------------------------------------------------------------------------
-// Testing the type checker
+// Type-level tests
+// ------------------------------------------------------------------------------------------------
+
+[<Test>]
+let foo () = 
+  let code = """
+    let res = typelevel("hello").'hello (num)'
+    res"""
+  let actual = check code (isVariable "res") vars
+  actual |> assertType (Type.Primitive PrimitiveType.Number)
+  actual |> assertErrors []
+
+// ------------------------------------------------------------------------------------------------
+// Simple type tests
 // ------------------------------------------------------------------------------------------------
 
 [<Test>]

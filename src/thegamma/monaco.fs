@@ -105,7 +105,7 @@ let createCompletionProvider (getService:string -> CheckingService) =
                       match m.Type with
                       | Type.Method(arguments=args) -> 
                           let acc, l = 
-                            [ for n, opt, t in args -> (if opt then "?" else "") + n ] 
+                            [ for ma in args -> (if ma.Optional then "?" else "") + ma.Name ] 
                             |> Seq.fold (fun (acc, l:string) s ->
                                 if l.Length > 100 then (l::acc, s)
                                 else (acc, if l = "" then s else l+","+s)) ([], "")

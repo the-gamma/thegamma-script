@@ -100,12 +100,18 @@ and [<RequireQualifiedAccess>] PrimitiveType =
   | Bool
   | Unit
 
+and MethodArgument =
+  { Name : string
+    Optional : bool
+    Static : bool
+    Type : Type }
+
 and [<RequireQualifiedAccess>] Type =
   | Delayed of Future<Type>
   | Object of ObjectType
   | Primitive of PrimitiveType
   | List of elementType:Type
-  | Method of arguments:(string * bool * Type) list * typ:(Type list -> Type option) 
+  | Method of arguments:MethodArgument list * typ:((Type * RuntimeValue option) list -> Type option) 
   | Any
 
 // ------------------------------------------------------------------------------------------------
@@ -113,13 +119,13 @@ and [<RequireQualifiedAccess>] Type =
 // ------------------------------------------------------------------------------------------------
 
 /// Name. In expressions, it usually appears as Node<Name> 
-type Name = 
+and Name = 
   { Name : string }
 
 /// Represents constants that can appear in the code
 /// (We create separate entity for each, so that we can calculate
 /// values of entities and not just types)
-type [<RequireQualifiedAccess>] Constant = 
+and [<RequireQualifiedAccess>] Constant = 
   | Number of float
   | String of string
   | Boolean of bool
@@ -127,7 +133,7 @@ type [<RequireQualifiedAccess>] Constant =
 
 /// Represents different kinds of entities that we create. Roughhly
 /// corresponds to all places in code where something has a name.
-type [<RequireQualifiedAccess>] EntityKind = 
+and [<RequireQualifiedAccess>] EntityKind = 
 
   // Entities that represent root node, program and commands
   | Root
@@ -178,7 +184,7 @@ and Entity =
     mutable Type : Type option 
     mutable Errors : Error<Range> list }
 
-and RuntimeValue = interface end
+and RuntimeValue = obj
 
 and EntityValue =
   { Value : RuntimeValue

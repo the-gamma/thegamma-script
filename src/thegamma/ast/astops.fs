@@ -284,8 +284,12 @@ let rec formatType = function
         "{ " + if mem.Length > 5 then mems + ", ..." else mems + " }"
       with _ -> "{ members }"
   | Type.Method(tin, tout) -> 
-      let tout = match tout [for _, _, t in tin -> t] with Some t -> formatType t | _ -> "?"
-      let tin = String.concat ", " [for n, o, t in tin -> sprintf "%s%s:%s" (if o then "?" else "") n (formatType t) ]
+      let tout = match tout [for ma in tin -> ma.Type, None ] with Some t -> formatType t | _ -> "?"
+      let tin = 
+        [ for ma in tin -> 
+            sprintf "%s%s%s:%s" (if ma.Optional then "?" else "") 
+              (if ma.Static then "!" else "") ma.Name (formatType ma.Type) ]
+        |> String.concat ", " 
       "(" + tin + ") -> " + tout
   | Type.List t -> "list<" + formatType t + ">"
   | Type.Any -> "any"

@@ -16,7 +16,8 @@ open System.Collections.Generic
 type CheckingContext = 
   { Errors : ResizeArray<Error<Range>> 
     Globals : IDictionary<string, Entity> 
-    Ranges : IDictionary<Symbol, Range> }
+    Ranges : IDictionary<Symbol, Range>
+    Evaluate : Entity -> EntityValue option }
 
 let addError ctx ent err = 
   ctx.Errors.Add(err ctx.Ranges.[ent.Symbol])
@@ -38,17 +39,18 @@ let resolveParameterType instTy parSpec =
   | Type.Method(args, _) -> 
       let par = 
         match parSpec with
-        | Choice1Of2 name -> args |> Seq.tryFind (fun (n, _, _) -> n = name)
+        | Choice1Of2 name -> args |> Seq.tryFind (fun ma -> ma.Name = name)
         | Choice2Of2 idx -> args |> Seq.tryItem idx  
       match par with
-      | Some(_, _, t) -> t
+      | Some ma -> ma.Type
       | _ -> failwith "resolveParameterType: Parameter specification was incorrect"
   | _ -> failwith "resolveParameterType: Instance is not an object"
 
 /// Check method call - methodName is for logging only; parameterTypes and resultTypeFunc
 /// are the type information from `Type.Method` of the parent; `argList` and `args` are the
 /// actual type-checked arguments (argList is for storing errors only)
-let rec checkMethodCall (methodName:string) ctx parameterTypes resultTypeFunc argList args = 
+let rec checkMethodCallAsync (methodName:string) ctx (parameterTypes:MethodArgument list) 
+    (resultTypeFunc:((Type * RuntimeValue option) list -> Type option)) argList args = async {
 
   // Split arguments into position & name based and report 
   // error if there is non-named argument after named argument
@@ -66,25 +68,30 @@ let rec checkMethodCall (methodName:string) ctx parameterTypes resultTypeFunc ar
   // Match actual arguments with the parameters and report
   // error if non-optional parameter is missing an assignment
   let matchedArguments = 
-    parameterTypes |> List.mapi (fun index (name, optional, typ) ->
+    parameterTypes |> List.mapi (fun index ma ->
       let arg = 
         if index < positionBased.Length then Some(positionBased.[index]) 
-        else Map.tryFind name nameBased 
+        else Map.tryFind ma.Name nameBased 
       match arg with
-      | Some arg -> name, getType ctx arg, Some arg
-      | None when optional -> name, typ, None
+      | Some arg -> getType ctx arg, if ma.Static then Some arg else None
+      | None when ma.Optional -> ma.Type, None
       | None ->
-          Errors.TypeChecker.parameterMissingValue name |> addError ctx argList
-          name, Type.Any, None)
+          Errors.TypeChecker.parameterMissingValue ma.Name |> addError ctx argList
+          Type.Any, None)
 
-  // Infer assignments for type parameters from actual arguments
-  match resultTypeFunc [ for _, typ, _ in matchedArguments -> typ ] with
-  | Some typ -> typ
+  // Evalaute arguments of static parameters
+  Log.trace("typechecker", "Evaluating arguments of type-level method '%s'", methodName)
+  for e in matchedArguments |> Seq.choose snd do e.Value <- ctx.Evaluate e
+  Log.trace("typechecker", "Evaluated arguments of '%s': %O", methodName, [| for e in Seq.choose snd matchedArguments -> e.Value |])
+  
+  let tcargs = matchedArguments |> List.map (function (t, Some e) -> t, Some(e.Value.Value.Value) | (t, _) -> t, None)
+  match resultTypeFunc tcargs with
+  | Some typ -> return typ
   | None ->   
       Log.trace("typechecker", "Invalid argument type when calling '%s'. Argument types: %O", 
-        methodName, [| for _, typ, _ in matchedArguments -> typ |])
+        methodName, (Array.ofList (List.map (fst >> Ast.formatType) matchedArguments)))
       Errors.TypeChecker.parameterConflict |> addError ctx argList
-      Type.Any
+      return Type.Any }
   
 
 /// Get type of an entity and record errors generated when type checking this entity
@@ -125,19 +132,13 @@ and typeCheckEntity ctx (e:Entity) =
           Errors.TypeChecker.notAnObject name.Name typ |> addError ctx inst
           Type.Any
 
-  | EntityKind.Call(inst, { Kind = EntityKind.ArgumentList(ents) } & arglist) ->
-      let lastName = lastChainElement inst
-      match getType ctx inst with 
-      | Type.Any -> Type.Any
-      | Type.Method(parameterTypes, resultTypeFunc) ->  
-          checkMethodCall inst.Name ctx parameterTypes resultTypeFunc arglist ents
-      | typ ->
-          Errors.TypeChecker.notAnMethod lastName.Name typ |> addError ctx inst
-          Type.Any
-
   | EntityKind.Member(inst, _) ->
       Log.error("typechecker", "typeCheckEntity: Member access is missing member name!")
       failwith "typeCheckEntity: Member access is missing member name!"
+
+  | EntityKind.Call(inst, { Kind = EntityKind.ArgumentList(ents) }) ->
+      Log.error("typechecker", "typeCheckEntity: Call to %s has not been type-checked in typeCheckEntityAsync!", (lastChainElement inst).Name)
+      failwithf "typeCheckEntity: Call to %s has not been type-checked in typeCheckEntityAsync!" (lastChainElement inst).Name
 
   | EntityKind.Call(inst, _) ->
       Log.error("typechecker", "typeCheckEntity: Call to %s is missing argument list!", (lastChainElement inst).Name)
@@ -172,7 +173,7 @@ and typeCheckEntity ctx (e:Entity) =
       // Its antecedent is `EntityKind.CallSite` containing reference to the method around it - 
       // assuming lambda appears in something like: `foo(10, fun x -> ...)`
       match resolveParameterType (getType ctx inst) parSpec with
-      | Type.Method([_, _, tin], _) -> tin
+      | Type.Method([ma], _) -> ma.Type
       | _ -> failwith "typeCheckEntity: Expected parameter of function type"
 
   | EntityKind.Binding(name, _) ->
@@ -180,7 +181,7 @@ and typeCheckEntity ctx (e:Entity) =
 
   | EntityKind.Function(var, body) ->
       let resTyp = getType ctx body
-      Type.Method(["", false, getType ctx var], fun _ -> Some resTyp)
+      Type.Method([ { MethodArgument.Name = ""; Optional = false; Static = false; Type = getType ctx var }], fun _ -> Some resTyp)
 
   // Entities with primitive types
   | EntityKind.Constant(Constant.Number _) -> Type.Primitive(PrimitiveType.Number)
@@ -219,10 +220,26 @@ let typeCheckEntityAsync ctx (e:Entity) = async {
     if not (visited.ContainsKey(e.Symbol)) && (isGlobal || e.Type.IsNone) then
       visited.[e.Symbol] <- true
       for a in e.Antecedents do
-        do! loop a 
-      Log.trace("typechecker", "Type of entity '%s' (%s) is: %s", e.Name, formatEntityKind e.Kind, formatType (getType ctx e))
+        do! loop a  
+
+      match e.Kind with
+      | EntityKind.Call(inst, { Kind = EntityKind.ArgumentList(ents) } & arglist) ->
+          let errorCount = ctx.Errors.Count
+          let! typ = 
+            match getType ctx inst with 
+            | Type.Any -> async.Return Type.Any
+            | Type.Method(parameterTypes, resultTypeFunc) ->  
+                checkMethodCallAsync inst.Name ctx parameterTypes resultTypeFunc arglist ents
+            | typ ->
+                let lastName = lastChainElement inst
+                Errors.TypeChecker.notAnMethod lastName.Name typ |> addError ctx inst
+                async.Return Type.Any
+          e.Type <- Some typ
+          e.Errors <- [ for i in errorCount .. ctx.Errors.Count - 1 -> ctx.Errors.[i] ]
+      | _ -> ()
+
       let! t = evaluateDelayedType true (getType ctx e)
-      Log.trace("typechecker", "Type of entity '%s' (%s) reduced to: %s", e.Name, formatEntityKind e.Kind, formatType t)
+      Log.trace("typechecker", "Type of entity '%s' (%s) is: %s", e.Name, formatEntityKind e.Kind, formatType (getType ctx e))
       e.Type <- Some t }
 
   do! loop e
@@ -244,12 +261,12 @@ let collectTypeErrors (entity:Entity) =
   loop entity
   errors.ToArray()
 
-let typeCheckProgram (globals:Entity list) (bound:Binder.BindingResult) prog = async {
+let typeCheckProgram (globals:Entity list) (bound:Binder.BindingResult) evaluate prog = async {
   Log.trace("typechecker", "Type checking program")
   try
     let rangeLookup = dict [ for r, e in bound.Entities -> e.Symbol, r ]
     let vars = dict [ for e in globals -> e.Name, e ]
-    let ctx = { Globals = vars; Errors = ResizeArray<_>(); Ranges = rangeLookup }
+    let ctx = { Globals = vars; Errors = ResizeArray<_>(); Ranges = rangeLookup; Evaluate = evaluate }
     let! _ = typeCheckEntityAsync ctx prog 
     Log.trace("typechecker", "Completed type checking")
   with e ->

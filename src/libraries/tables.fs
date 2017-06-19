@@ -44,9 +44,12 @@ type table<'k,'v> =
 
   member t.render() =
     let row showKey (el:string) k (things:seq<DomNode>) =
+      let withTitle = function
+        | DomNode.Text s -> h?div ["title" => s] [text s]
+        | nd -> nd
       h?tr [] [ 
-        if showKey then yield h?(el) [] [text k]
-        for t in things -> h?(el) [] [t] 
+        if showKey then yield h?(el) [] [ withTitle (text k) ]
+        for t in things -> h?(el) [] [ withTitle t ] 
       ]
 
     let makeTable showKey k header body = 

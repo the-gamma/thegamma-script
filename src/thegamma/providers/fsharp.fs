@@ -133,9 +133,9 @@ let rec unifyTypes ctx schemas tys =
   | TypeSchema.Parameter(n)::ss, t::ts -> unifyTypes ((n,t)::ctx) ss ts
   | TypeSchema.List(s)::ss, Type.List(t)::ts -> unifyTypes ctx (s::ss) (t::ts)
   | TypeSchema.Function(sa, sr)::ss, Type.Method(ta, tr)::ts when List.length sa = List.length ta -> 
-      let ta = [ for _, _, t in ta -> t]
+      let ta = [ for ma in ta -> ma.Type, None ]
       let tr = defaultArg (tr ta) Type.Any // TODO: This should probably never be None
-      unifyTypes ctx (sr::(sa @ ss)) (tr::(ta @ ts)) 
+      unifyTypes ctx (sr::(sa @ ss)) (tr::((List.map fst ta) @ ts)) 
   | TypeSchema.GenericType(_)::_, _ 
   | TypeSchema.Primitive(_)::_, _ 
   | TypeSchema.List(_)::_, _ 
@@ -154,7 +154,7 @@ let rec substituteTypeParams assigns schema =
   | TypeSchema.List s -> Type.List (substituteTypeParams assigns s)
   | TypeSchema.Parameter n -> match assigns n with Some t -> t | _ -> failwith "substituteTypeParams: unresolved type parameter"
   | TypeSchema.Function(is, rs) -> 
-      let args = is |> List.map (fun it -> "", false, substituteTypeParams assigns it)
+      let args = is |> List.map (fun it -> { MethodArgument.Name = ""; Optional = false; Static = false; Type = substituteTypeParams assigns it })
       Type.Method(args, fun _ -> Some(substituteTypeParams assigns rs)) // TODO: This should check input arguments
 
 let rec partiallySubstituteTypeParams (assigns:string -> Type option) schema = 
@@ -241,6 +241,7 @@ let importProvidedType url lookupNamed exp =
             
         let retTyp = partiallySubstituteTypeParams assigns (mapType m.returns)
         let retFunc tys =
+          let tys = List.map fst tys
           Log.trace("providers", "F# provider unifying: %O, %O", [| for _, _, t in args -> t |], Array.ofList tys)
           match unifyTypes [] [ for _, _, t in args -> t ] tys with 
           | None -> None
@@ -265,7 +266,7 @@ let importProvidedType url lookupNamed exp =
               | _ -> None
 
         // How to show type parameters before they are eliminated?
-        let args = [ for n, o, t in args -> n, o, substituteTypeParams (fun _ -> Some Type.Any) t ] 
+        let args = [ for n, o, t in args -> { MethodArgument.Name = n; Optional = o; Static = false; Type = substituteTypeParams (fun _ -> Some Type.Any) t } ] 
         Some { Member.Name = m.name; Type = Type.Method(args, retFunc); Metadata = []; Emitter = emitter }
       else None)
 

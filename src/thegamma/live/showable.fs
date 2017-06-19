@@ -42,7 +42,7 @@ let updateBody trigger state =
       match ent.Type.Value with 
       | Type.Object obj ->
           let hasShow = obj.Members |> Array.exists (function 
-            | { Name="show"; Type=Type.Method([_, _, Type.Primitive PrimitiveType.String], _) } -> true
+            | { Name="show"; Type=Type.Method([{ Type = Type.Primitive PrimitiveType.String }], _) } -> true
             | _ -> false)
           if hasShow then
             let res = Interpreter.evaluate state.Globals ent        

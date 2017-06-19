@@ -3,6 +3,7 @@
 open Fable.Import
 open TheGamma.Html
 open TheGamma.Common
+open TheGamma.Ast
 
 module FsOption = Microsoft.FSharp.Core.Option
 
@@ -42,11 +43,13 @@ type CheckingService(article, globals:Future<Entity list>) =
 
   let typeCheck code = async {
     let! globals = Async.AwaitFuture globals
+    Log.trace("service", "Evaluated globals")
+    for g in globals do Log.trace("service", "Global value '%s' : %O = %O", g.Name, Option.map formatType g.Type, g.Value)
     try
       let progSyntax, parseErrors = Parser.parseProgram code
       let! bindingContext = bindingContext |> Async.AwaitFuture
       let progEntity, boundEntities = Binder.bindProgram bindingContext progSyntax
-      do! TypeChecker.typeCheckProgram globals boundEntities progEntity
+      do! TypeChecker.typeCheckProgram globals boundEntities (Interpreter.evaluate globals) progEntity
       let typeErrors = TypeChecker.collectTypeErrors progEntity
       Log.trace("service", "Type checking completed")
       let errors = errorsToLineCol code (Array.append parseErrors typeErrors)

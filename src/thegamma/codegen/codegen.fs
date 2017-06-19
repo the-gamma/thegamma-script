@@ -91,9 +91,9 @@ let rec compileExpression ctx (expr:Node<Expr>) =
 
       // Compile the instance, the arguments and call the emitter
       let inst = compileExpression ctx inst
-      let pars = expectedArgs |> List.mapi (fun i (name, _, _) ->
+      let pars = expectedArgs |> List.mapi (fun i ma ->
         if i < positionArgs.Length then positionArgs.[i]
-        elif namedArgs.ContainsKey name then namedArgs.[name]
+        elif namedArgs.ContainsKey ma.Name then namedArgs.[ma.Name]
         else NullLiteral(rangeToLoc ctx args.Range))
       CallExpression(inst, pars, rangeToLoc ctx expr.Range)
 

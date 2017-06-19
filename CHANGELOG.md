@@ -1,3 +1,4 @@
+ * 0.1.9 - Type-level arguments on methods; nicer table formatting
  * 0.1.8 - Pivot - add like operator and allow windowing on numbers
  * 0.1.7 - Mobile friendlier charts, replace bar, column and area with shape
  * 0.1.6 - ExpandBy in pivot, area charts, event logging, evaluate returns results, enablePreview

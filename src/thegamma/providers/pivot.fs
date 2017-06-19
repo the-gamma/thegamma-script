@@ -247,8 +247,9 @@ and makeMethod ctx name tfs callid args =
   { Member.Name = name; Metadata = [meta1; meta2]
     Type = 
       Type.Method
-        ( [ for n, t in args -> n, false, Type.Primitive t ],       
+        ( [ for n, t in args -> { MethodArgument.Name = n; Optional = false; Static = false; Type = Type.Primitive t } ],
           (fun ts -> 
+              let ts = List.map fst ts
               if Types.listsEqual ts args (fun t1 (_, t2) -> Types.typesEqual t1 (Type.Primitive t2)) 
                 then Some(makePivotType ctx tfs) else None) )
     Emitter = makeMethodEmitter callid args }
@@ -412,7 +413,7 @@ and handleFilterEqNeqRequest ctx rest (fld, eq) op conds = async {
   let tfs = 
     if ctx.IgnoreFiltersInRange then tfs |> List.filter (function FilterBy _ -> false | _ -> true)
     else tfs
-  let url = ctx.Root + "?" + (GetRange(fld)::tfs |> List.rev |> Transform.toUrl)
+  let url = ctx.Root + "?" + (GetRange(fld)::tfs |> List.rev |> Transform.toUrl |> Fable.Import.JS.encodeURIComponent)
   let! options = Http.Request("GET", url)
   let options = jsonParse<string[]> options
   return
