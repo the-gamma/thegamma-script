@@ -30,8 +30,9 @@ let assertNamesMatch (code:string, cmds, _) =
     | Command.Expr(e) -> collectIdents e
     | Command.Let(n, e) -> names.Add(n); collectIdents e
   for n in names do
-    equal (Ast.escapeIdent n.Node.Name) 
-      (code.Substring(n.Range.Start, n.Range.End - n.Range.Start + 1))
+    let source = code.Substring(n.Range.Start, n.Range.End - n.Range.Start + 1)
+    let source = if source = "" then "''" else source
+    equal (Ast.escapeIdent n.Node.Name) source
 
 /// Assert that result contains given errors
 let assertErrors expectErrors ((code:string), cmds, errs) = 
