@@ -24,11 +24,6 @@ let setCustomValidity (el:obj) (msg:string) : unit = failwith "JS"
 // Pivot editor: Helpers for working with entities
 // ------------------------------------------------------------------------------------------------
 
-let pickMetaByType ctx typ metas = 
-  metas |> List.tryPick (fun m -> 
-    if m.Context = ctx && m.Type = typ then Some(m.Data)
-    else None)
-
 let pickPivotFields expr =
   match expr.Entity with
   | Some { Kind = EntityKind.Member _; Meta = m } 
@@ -40,15 +35,20 @@ let pickPivotFields expr =
   | _ -> None
 
 let pickPivotTransformations expr =
-  match expr with
-  | { Node = Expr.Call({ Entity = Some { Kind = EntityKind.Member _; Meta = m } }, _) }
-  | { Entity = Some { Kind = EntityKind.Member _; Meta = m } } -> 
-      match pickMetaByType "http://schema.thegamma.net/pivot" "Transformations" m with
-      | Some m -> Some(unbox<TypeProviders.Pivot.Transformation list> m)
-      | _ -> None
-  | { Entity = Some { Kind = EntityKind.GlobalValue _; Meta = m } } -> 
-      Some([])
-  | _ -> None
+  let tryPivotType = 
+    match expr with
+    | { Entity = Some { Type = Some (Type.Object (:? TypeProviders.Pivot.PivotObject)) } } -> 
+        Some [TypeProviders.Pivot.Transformation.Empty]
+    | _ -> None     
+  let tryTransform =
+    match expr with
+    | { Node = Expr.Call({ Entity = Some { Kind = EntityKind.Member _; Meta = m } }, _) }
+    | { Entity = Some { Kind = EntityKind.Member _; Meta = m } } -> 
+        match pickMetaByType "http://schema.thegamma.net/pivot" "Transformations" m with
+        | Some m -> Some(unbox<TypeProviders.Pivot.Transformation list> m)
+        | _ -> None
+    | _ -> None
+  match tryTransform, tryPivotType with Some r, _ | _, Some r -> Some r | _ -> None
 
 let commandAtLocation loc (program:Program) =
   program.Body.Node |> List.tryFind (fun cmd ->
@@ -58,16 +58,9 @@ let commandAtLocation loc (program:Program) =
 // Pivot editor: Splitting pivot transformations into sections
 // ------------------------------------------------------------------------------------------------
 
-/// Represents a chain such as `foo.bar(1).goo`, potentially 
-/// inside a command (that may contain things like `let` etc.)
-type NestedChain = 
-  { // List containing Expr.Member, Expr.Call and Expr.Variable nodes 
-    // from a call chain with their starting offset
-    Chain : (int * Node<Expr>) list }
-
 /// Represents a tab of the pivot editor (with all nodes that represent the transform)
 type PivotSection = 
-  { Transformation : Pivot.Transformation   
+  { Transformation : Pivot.Transformation
     Nodes : Node<Expr> list }
 
 let transformName = function
@@ -88,7 +81,7 @@ let createPivotSections (ch:NestedChain) =
     | (e, tfs)::tfss when 
           transformName (List.head tfs) = transformName currentTfs && 
           List.length tfs = currentLength ->
-        loop acc (List.head tfs, e::currentEnts, currentLength) tfss
+        loop acc (currentTfs, e::currentEnts, currentLength) tfss
     | (e, tfs)::tfss ->
           let current = { Transformation = currentTfs; Nodes = List.rev currentEnts }
           loop (current::acc) (List.head tfs, [e], List.length tfs) tfss
@@ -99,28 +92,15 @@ let createPivotSections (ch:NestedChain) =
   let tfss = ch.Chain |> List.choose (fun (_, node) ->
     match pickPivotTransformations node with
     | Some(tfs) ->
-        let tfs = tfs |> List.filter (function Pivot.Empty -> false | _ -> true)
+        let tfs = 
+          if List.length tfs = 1 then tfs // Do not filter if Empty would be the only transform
+          else tfs |> List.filter (function Pivot.Empty -> false | _ -> true)
         if List.isEmpty tfs then None else Some(node, tfs)
     | None -> None )
   match tfss with
   | (e, tfs)::tfss -> loop [] (List.head tfs, [e], List.length tfs) tfss
   | [] -> []
 
-
-let rec collectChain acc node =
-  match node.Node with
-  | Expr.Call(e, a) -> collectChain ((a.Range.Start, node)::acc) e
-  | Expr.Member(e, n) -> collectChain ((n.Range.Start, node)::acc) e
-  | Expr.Variable(n) -> Some((n.Range.Start, node)::acc)
-  | _ -> None
-
-let rec collectFirstChain expr = 
-  match collectChain [] expr with
-  | Some((_::_) as chain) -> Some { Chain = chain }
-  | _ ->
-  match expr with
-  | { Node = ExprNode(es, ns) } -> es |> Seq.tryPick collectFirstChain
-  | _ -> None
 
 // ------------------------------------------------------------------------------------------------
 // Pivot editor: State of the editor
@@ -160,28 +140,41 @@ type PivotEditorState =
 let withPivotState (pivotState:PivotEditorState) state =
   { state with State = pivotState }
 
-let findPreview trigger globals (ent:Entity) = 
+let findPreview (ch:NestedChain) trigger globals (ent:Entity) = 
   let nm = { Name.Name="preview" }
-  match ent.Type with 
-  | Some(Type.Object(FindMember nm _)) ->
-      let res = Interpreter.evaluate globals ent  
-      let res = res |> FsOption.bind (fun p -> p.Preview.Value)
-      match res with
-      | Some p ->
-          Log.trace("live", "Found preview value: %O", p)
-          let mutable node = h?div ["class" => "placeholder"] [text "Loading preview..."]
-          let mutable returned = false
-          async { let! nd = table<int, int>.create(unbox<Series.series<string, obj>> p).render()
-                  if returned then trigger (CustomEvent(UpdatePreview nd))
-                  else node <- nd
-                  Log.trace("live", "Evaluated to a node") } |> Async.StartImmediate
-          returned <- true
-          Log.trace("live", "After evaluation started: %O", node)
-          node
-      | _ -> 
-          h?div [ "class" => "placeholder" ] [ text "Preview could not be evaluated" ]
-  | _ ->
-      h?div [ "class" => "placeholder" ] [ text "This block does not have a preview" ]
+  let prevDom = 
+    ch.Chain 
+    |> Seq.skipWhile (fun (_, nd) -> nd.Entity.Value.Symbol <> ent.Symbol)
+    |> Seq.sortBy fst 
+    |> Seq.tryPick (fun (loc, node) ->
+      match node.Entity.Value.Type with 
+      | Some(Type.Object(FindMember nm m)) ->
+          match pickMetaByType "http://schema.org" "WebPage" m.Metadata with
+          | Some meta ->  
+              let url = getProperty meta "url"
+              Log.trace("live", "Found preview webpage at %s: %O", loc, url)
+              h?iframe [ "src" => url ] [] |> Some
+          | _ ->
+              let res = Interpreter.evaluate globals ent  
+              let res = res |> FsOption.bind (fun p -> p.Preview.Value)
+              match res with
+              | Some p ->
+                  Log.trace("live", "Found preview value at %s: %O", loc, p)
+                  let mutable node = h?div ["class" => "placeholder"] [text "Loading preview..."]
+                  let mutable returned = false
+                  async { let! nd = table<int, int>.create(unbox<Series.series<string, obj>> p).render()
+                          if returned then trigger (CustomEvent(UpdatePreview nd))
+                          else node <- nd
+                          Log.trace("live", "Evaluated to a node") } |> Async.StartImmediate
+                  returned <- true
+                  Log.trace("live", "After evaluation started: %O", node)
+                  node |> Some
+              | _ -> 
+                h?div [ "class" => "placeholder" ] [ text "Preview could not be evaluated" ] |> Some
+      | _ -> None)
+  match prevDom with 
+  | Some dom -> dom
+  | _ -> h?div [ "class" => "placeholder" ] [ text "This block does not have a preview" ]
 
 
 /// Recreate editor state based on the current source code and cursor location
@@ -197,7 +190,7 @@ let updateBody trigger state =
           let _, first = ch.Chain |> List.head
           match ch.Chain |> List.filter (fun (start, node) -> state.Location >= start) |> List.tryLast with
           | Some(_, selNode) when not (List.isEmpty sections) ->
-              let preview = findPreview trigger state.Globals selNode.Entity.Value
+              let preview = findPreview ch trigger state.Globals selNode.Entity.Value
               let ps = 
                 { Menus = Hidden; Focus = None; FirstNode = first; SelectedEntity = selNode.Entity.Value
                   Sections = sections; Body = expr; Preview = preview }
@@ -402,6 +395,7 @@ let rec updatePivotState trigger state event =
                     when n.Node.Name = "take" -> section 
                 | _, { Node = Expr.Member(_, { Node = Expr.Variable n }) } 
                     when n.Node.Name = "then" -> section 
+                | Pivot.Empty, _ -> section
                 | _ -> { section with Nodes = section.Nodes @ (createChainNodes None "then") }
               (insertWhiteAroundSection None (Some whiteAfter) section) :: sections
           | [] -> []
@@ -536,7 +530,6 @@ let renderSection triggerEvent section =
     | Some { Nodes = nodes; Transformation = Pivot.Paging _ } ->                    
         let methods = nodes |> List.map (function { Node = Expr.Member(_, { Node = Expr.Variable n }) } -> n.Node.Name | _ -> "") |> set
         for nd in nodes do
-          Log.error("live", "Paging node: %O", nd)
           match nd.Node with
           | Expr.Call({ Node = Expr.Member(_, { Node = Expr.Variable n }) }, { Node = [arg] }) ->
               let removeOp =
@@ -597,13 +590,6 @@ let renderPivot triggerEvent (state:LiveState<_>) =
         if state.State.Menus <> Hidden then yield "click" =!> trigger (SwitchMenu Hidden)
       ] [
       h?ul ["class" => "tabs"] [
-        yield h?li ["class" => if state.State.SelectedEntity.Symbol = firstNode.Entity.Value.Symbol then "selected" else ""] [ 
-          h?a ["click" =!> trigger (SelectRange(firstNode.Range)) ] [
-            match firstNode.Node with
-            | Expr.Variable n -> yield text n.Node.Name
-            | _ -> yield text "data"
-          ]
-        ]
         for sec in state.State.Sections ->
           let selected = sec.Nodes |> List.exists (fun secEnt -> state.State.SelectedEntity.Symbol = secEnt.Entity.Value.Symbol)
           let secSymbol = (sec.Nodes |> List.head).Entity.Value.Symbol
@@ -612,13 +598,23 @@ let renderPivot triggerEvent (state:LiveState<_>) =
             | { Node = Expr.Variable n | Expr.Member(_, { Node = Expr.Variable n }) }::_ -> n.Range
             | _ -> failwith "Unexpected node in pivot call chain" 
 
-          h?li ["class" => if selected then "selected" else ""] [ 
-            h?a ["click" =!> trigger (SelectRange(identRange)) ] [
-              text (transformName sec.Transformation) 
-            ]
-            h?a ["click" =!> trigger (RemoveSection(secSymbol))] [
-              h?i ["class" => "gfa gfa-times"] [] 
-            ]
+          h?li ["class" => if selected then "selected" else ""] [
+            match sec.Transformation with
+            | Pivot.Transformation.Empty ->
+                // Empty transform means the data source
+                yield h?a ["click" =!> trigger (SelectRange(identRange)) ] [
+                  match firstNode.Node with
+                  | Expr.Variable n -> yield text n.Node.Name
+                  | _ -> yield text "data"
+                ]
+            | _ ->
+                // All other normal transformations
+                yield h?a ["click" =!> trigger (SelectRange(identRange)) ] [
+                  text (transformName sec.Transformation) 
+                ]
+                yield h?a ["click" =!> trigger (RemoveSection(secSymbol))] [
+                  h?i ["class" => "gfa gfa-times"] [] 
+                ]
           ]
         yield h?li ["class" => if state.State.Menus = AddDropdownOpen then "add selected" else "add"] [ 
           h?a ["click" =!> trigger (SwitchMenu AddDropdownOpen) ] [
@@ -693,7 +689,8 @@ let renderPivot triggerEvent (state:LiveState<_>) =
 // ------------------------------------------------------------------------------------------------
 
 let preview = 
-  { Update = updatePivotState
+  { ID = "Pivot"
+    Update = updatePivotState
     Render = renderPivot 
     InitialState = 
       { Body = Ast.node { Start = 0; End = 0 } Expr.Empty 

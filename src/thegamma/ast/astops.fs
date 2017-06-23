@@ -15,7 +15,7 @@ let needsEscaping (s:string) =
 
 /// Escape identifier if it needs escaping
 let escapeIdent s = 
-  if s = "" then ""
+  if s = "" then "''"
   elif needsEscaping s then "'" + s + "'" else s
 
 /// Union ranges, assuming Start <= End for each of them
@@ -356,3 +356,10 @@ let (|ExprLeaf|ExprNode|) e =
 /// Find object member with the specified name 
 let (|FindMember|_|) (name:Name) (obj:ObjectType) = 
   obj.Members |> Seq.tryPick (fun m -> if m.Name = name.Name then Some(m) else None) 
+
+/// Return the first metadata item with the specified context & type (or None)
+let pickMetaByType ctx typ metas = 
+  metas |> List.tryPick (fun m -> 
+    if m.Context = ctx && m.Type = typ then Some(m.Data)
+    else None)
+

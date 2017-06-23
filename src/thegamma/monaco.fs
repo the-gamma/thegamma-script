@@ -7,6 +7,7 @@ open Fable.Import.Browser
 open TheGamma.Common
 open TheGamma.Services
 open TheGamma.TypeChecker
+open Fable.Core.JsInterop
 
 [<Emit("var i = 1; eval('monaco$' + i + ' = monaco'); monaco = monaco;")>]
 let hack : unit = ()
@@ -88,6 +89,12 @@ let createCompletionProvider (getService:string -> CheckingService) =
             | Some (currentName, nameRange, members) -> 
                 let nameRange = convertRange nameRange
                 Log.trace("completions", "providing %s members at %O", members.Length, nameRange)
+
+                let members = members |> Array.filter (fun m ->
+                  match Ast.pickMetaByType "http://schema.thegamma.net" "CompletionItem" m.Metadata with
+                  | Some item -> not (getProperty item "hidden")
+                  | _ -> true)
+
                 let completion =
                   [ for m in members ->
                       let ci = JsInterop.createEmpty<languages.CompletionItem>

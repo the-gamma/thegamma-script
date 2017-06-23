@@ -6,6 +6,9 @@ open Fable.Import.Browser
 open System.Collections.Generic
 module FsOption = Microsoft.FSharp.Core.Option
 
+[<Emit("$0[$1]")>]
+let getProperty<'T> (obj:obj) (name:string) : 'T = failwith "never"
+
 [<Emit("parseInt($0, $1)")>]
 let parseInt (s:string) (b:int) : int = failwith "JS"
 

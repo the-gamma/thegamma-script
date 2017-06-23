@@ -195,6 +195,7 @@ type PivotObject(members:seq<Member>) =
 let makeObjectType members = Type.Object(PivotObject(members))
 
 let isNumeric fld = fld = PrimitiveType.Number
+let isBool fld = fld = PrimitiveType.Bool
 let isDate fld = fld = PrimitiveType.Date
 let isConcatenable fld = fld = PrimitiveType.String
 
@@ -289,9 +290,12 @@ and makeDataMember ctx name isPreview tfs =
           ObjectExpression(mems, None) )
 
   let tfs = if isSeries then tfs else GetTheData::tfs
-  let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box tfs }
-  let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box ctx.Fields  }
-  { Member.Name = name; Type = dataTyp; Metadata = [meta1; meta2]; Emitter = makeDataEmitter isPreview isSeries convValues tfs }
+  let meta = 
+    [ yield { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box tfs }
+      yield { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box ctx.Fields  }
+      if isPreview then
+        yield { Context = "http://schema.thegamma.net"; Type = "CompletionItem"; Data = JsInterop.createObj ["hidden", box true] }]
+  { Member.Name = name; Type = dataTyp; Metadata = meta; Emitter = makeDataEmitter isPreview isSeries convValues tfs }
 
 and handleGetSeriesRequest ctx rest k v = 
   match k, v with
@@ -354,7 +358,7 @@ and handleWindowExpandAggRequest ctx rest fld make aggs =
     | WindowAggregation.FirstKey | WindowAggregation.LastKey | WindowAggregation.MiddleKey -> false)
 
   let makeAggMember name agg = 
-    makeProperty ctx name (make(agg::aggs)::rest) 
+    makeProperty ctx name (make(aggs @ [agg])::rest) 
 
   [ if not (List.isEmpty aggs) then
       yield makeProperty ctx "then" (Empty::make(aggs)::rest) 
@@ -364,7 +368,7 @@ and handleWindowExpandAggRequest ctx rest fld make aggs =
       yield makeAggMember ("middle " + fld) WindowAggregation.MiddleKey
     for fld in ctx.Fields do
       if not (containsField fld.Name) then
-        if isNumeric fld.Type then
+        if isNumeric fld.Type || isBool fld.Type then
           yield makeAggMember ("min " + fld.Name) (WindowAggregation.Min fld.Name)
           yield makeAggMember ("sum " + fld.Name) (WindowAggregation.Sum fld.Name)
           yield makeAggMember ("max " + fld.Name) (WindowAggregation.Max fld.Name)
@@ -379,7 +383,7 @@ and aggregationMembers ctx rest keys aggs =
     | GroupAggregation.CountAll | GroupAggregation.GroupKey -> false)
 
   let makeAggMember name agg = 
-    makeProperty ctx name (GroupBy(keys,agg::aggs)::rest) 
+    makeProperty ctx name (GroupBy(keys,aggs @ [agg])::rest) 
 
   [ yield makeProperty ctx "then" (Empty::GroupBy(keys, aggs)::rest) 
     if not containsCountAll then 
@@ -389,7 +393,7 @@ and aggregationMembers ctx rest keys aggs =
         yield makeAggMember ("count distinct " + fld.Name) (GroupAggregation.CountDistinct fld.Name) 
         if isConcatenable fld.Type then
           yield makeAggMember ("concatenate values of " + fld.Name) (GroupAggregation.ConcatValues fld.Name)
-        if isNumeric fld.Type then
+        if isNumeric fld.Type || isBool fld.Type then
           yield makeAggMember ("average " + fld.Name) (GroupAggregation.Mean fld.Name)
           yield makeAggMember ("sum " + fld.Name) (GroupAggregation.Sum fld.Name) ]
 

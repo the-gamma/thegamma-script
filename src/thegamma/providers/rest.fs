@@ -39,7 +39,7 @@ type Member =
     returns : AnyType
     parameters : Parameter[] option
     documentation : obj option
-    schema : obj option
+    schema : obj[]
     trace : string[] }
 
 type ResultType = 
@@ -113,6 +113,7 @@ let dataCall parser trace endp =
 let rec getTypeAndEmitter (lookupNamed:string -> Type) ty = 
   match ty with
   | Primitive("string") -> Type.Primitive(PrimitiveType.String), id
+  | Primitive("obj") -> Type.Primitive(PrimitiveType.String), id
   | Primitive("int") 
   | Primitive("float") -> Type.Primitive(PrimitiveType.Number), fun e -> ident("Number") /@/ [e]
   | Primitive("date") -> Type.Primitive(PrimitiveType.Date), fun e -> NewExpression(ident("Date"), [ident("Date")?parse /@/ [e]], None)
@@ -154,18 +155,15 @@ let rec getTypeAndEmitter (lookupNamed:string -> Type) ty =
 // Type provider
 // ------------------------------------------------------------------------------------------------
 
-[<Fable.Core.Emit("$0[$1]")>]
-let getProperty<'T> (obj:obj) (name:string) : 'T = failwith "never"
-
 let restTypeCache = System.Collections.Generic.Dictionary<_, _>()
 
 let rec createRestType lookupNamed resolveProvider root cookies url = 
 
   let provideMember m = 
     let schema = 
-      match m.schema with
-      | Some s -> [{ Type = getProperty s "@type"; Context = "http://schema.org"; Data = s }]
-      | _ -> []
+      if m.schema = null then []
+      else m.schema |> Array.map (fun s ->
+        { Type = getProperty s "@type"; Context = getProperty s "@context"; Data = s }) |> List.ofSeq
 
     match m.returns.kind with
     | "provider" ->

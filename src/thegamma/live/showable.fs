@@ -35,30 +35,49 @@ type ShowableEditorState =
 [<Emit("$0.show($1)")>]
 let callShow (inst:obj) (id:string) : unit = failwith "JS"
 
+let (|HasShow|_|) = function
+  | Type.Object obj ->
+      let hasShow = obj.Members |> Array.exists (function 
+        | { Name="show"; Type=Type.Method([{ Type = Type.Primitive PrimitiveType.String }], _) } -> true
+        | _ -> false)
+      if hasShow then Some() else None
+  | _ -> None
+
 let updateBody trigger state = 
   Log.trace("live", "Showable - updating body")
   match commandAtLocation state.Location state.Program with
+  | Some({ Node = Command.Let(_, e); Entity = Some { Kind = EntityKind.LetCommand(_, ent) } } as cmd) 
   | Some({ Node = Command.Expr e; Entity = Some { Kind = EntityKind.RunCommand ent } } as cmd) ->
-      match ent.Type.Value with 
-      | Type.Object obj ->
-          let hasShow = obj.Members |> Array.exists (function 
-            | { Name="show"; Type=Type.Method([{ Type = Type.Primitive PrimitiveType.String }], _) } -> true
-            | _ -> false)
-          if hasShow then
-            let res = Interpreter.evaluate state.Globals ent        
-            match res with 
-            | Some res ->
-                let id = 
-                  if ent.Symbol <> state.State.PreviewSymbol then state.State.PreviewID + 1
-                  else state.State.PreviewID
-                let placeholder = h?div ["class"=>"placeholder"] [text "Loading preview..."]
-                let dom = h?div [] [h.delayed (string id) placeholder (fun id ->            
-                  Log.trace("live", "Show: %O", res.Value)
-                  callShow res.Value id
-                )]
-                Some { state with State = { PreviewSymbol = ent.Symbol; PreviewID = id; EndLocation = cmd.Range.End; Preview = dom } }
-              | _ -> None
-            else None
+      let chain = collectFirstChain e
+      match ent.Type.Value, chain with 
+      | HasShow, _ ->
+          match Interpreter.evaluate state.Globals ent with 
+          | Some res ->
+              let id = 
+                if ent.Symbol <> state.State.PreviewSymbol then state.State.PreviewID + 1
+                else state.State.PreviewID
+              let placeholder = h?div ["class"=>"placeholder"] [text "Loading preview..."]
+              let dom = h?div [] [h.delayed (string id) placeholder (fun id ->            
+                Log.trace("live", "Show: %O", res.Value)
+                callShow res.Value id
+              )]
+              Some { state with State = { PreviewSymbol = ent.Symbol; PreviewID = id; EndLocation = cmd.Range.End; Preview = dom } }
+          | _ -> None
+            
+      | _, Some chain -> 
+          chain.Chain |> Seq.sortByDescending fst |> Seq.tryPick (fun (_, node) ->
+            let nm = { Name.Name="preview" }
+            match node.Entity.Value.Type with
+            | Some(Type.Object(FindMember nm m)) ->
+                match pickMetaByType "http://schema.org" "WebPage" m.Metadata with
+                | Some meta ->  
+                    let url = getProperty meta "url"
+                    let dom = h?iframe [ "src" => url ] [] 
+                    let id = state.State.PreviewID + 1
+                    Some { state with State = { PreviewSymbol = ent.Symbol; PreviewID = id; EndLocation = cmd.Range.End; Preview = dom } }
+                | _ -> None
+            | _ -> None)
+
       | _ -> None
   | _ -> None
 
@@ -89,6 +108,7 @@ let renderShowable trigger (state:LiveState<_>) =
 // ------------------------------------------------------------------------------------------------
 
 let preview = 
-  { Update = updateShowableState
+  { ID = "Showable"
+    Update = updateShowableState
     Render = renderShowable
     InitialState = { PreviewID = 0; PreviewSymbol = createSymbol(); EndLocation = 0; Preview = text "not created" } }

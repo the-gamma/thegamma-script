@@ -204,14 +204,22 @@ type PreviewService(checker:CheckingService, globals:Future<list<Entity>>, ed:mo
         match liveState.CurrentPreview with 
         | Some(prev) -> prev.Update liveEvent.Trigger liveState evt
         | None -> None
-      match newState, evt with
-      | Some newState, _ -> newState
-      | _, (UpdateSource _ | UpdateLocation _) ->
-        Log.trace("live", "Searching for available previews")
-        let state = livePreviews |> Seq.tryPick (fun lp ->
-          let state = { liveState with CurrentPreview = Some lp; State = lp.InitialState }
-          lp.Update liveEvent.Trigger state evt)
-        defaultArg state { liveState with CurrentPreview = None; State = noState }
+
+      let newPreview = 
+        match evt with
+        | UpdateSource _ | UpdateLocation _ ->
+            Log.trace("live", "Searching for available previews")
+            let state = livePreviews |> Seq.tryPick (fun lp ->
+              let state = { liveState with CurrentPreview = Some lp; State = lp.InitialState }
+              lp.Update liveEvent.Trigger state evt)
+            state
+        | _ -> None
+      
+      match newState, newPreview with
+      | Some (st & { CurrentPreview = Some p1 }), Some (pr & { CurrentPreview = Some p2 }) 
+          when p1.ID <> p2.ID -> pr
+      | Some st, _ -> st
+      | _, Some pr -> pr
       | _ -> { liveState with CurrentPreview = None; State = noState }
 
     liveEvent.Publish.Add(fun evt ->
