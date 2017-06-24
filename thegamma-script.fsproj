@@ -1,13 +1,11 @@
-﻿<Project Sdk="FSharp.NET.Sdk;Microsoft.NET.Sdk">
+<Project Sdk="FSharp.NET.Sdk;Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>netstandard1.6</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="monaco.fs" />
-    <Compile Include="virtualdom.fs" />
-    <Compile Include="babel.fs" />
-  </ItemGroup>
-  <ItemGroup>
+    <ProjectReference Include="./src/bindings/bindings.fsproj" />
+    <ProjectReference Include="./src/libraries/libraries.fsproj" />
+    <ProjectReference Include="./src/thegamma/thegamma.fsproj" />
     <PackageReference Include="FSharp.NET.Sdk" Version="1.0.*" PrivateAssets="All" />
     <!-- Keep dotnet-fable version synced with Fable.Core version in paket.dependencies -->
     <DotNetCliToolReference Include="dotnet-fable" Version="1.1.1" />
