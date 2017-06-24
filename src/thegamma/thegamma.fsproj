@@ -1,9 +1,9 @@
-﻿<Project Sdk="FSharp.NET.Sdk;Microsoft.NET.Sdk">
+<Project Sdk="FSharp.NET.Sdk;Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>netstandard1.6</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
-<Compile Include="common/locations.fs" />
+    <Compile Include="common/locations.fs" />
     <Compile Include="common/babel.fs" />
     <Compile Include="ast/ast.fs" />
     <Compile Include="ast/astops.fs" />
@@ -35,5 +35,5 @@
     <!-- Keep dotnet-fable version synced with Fable.Core version in paket.dependencies -->
     <DotNetCliToolReference Include="dotnet-fable" Version="1.1.1" />
   </ItemGroup>
-  <Import Project=".paket\Paket.Restore.targets" />
+  <Import Project="..\..\.paket\Paket.Restore.targets" />
 </Project>
