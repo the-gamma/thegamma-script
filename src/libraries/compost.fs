@@ -866,7 +866,8 @@ module Compost =
         else getOffset (unbox parent.offsetParent) (x-parent.offsetLeft, y-parent.offsetTop)
       let rec getParent (parent:HTMLElement) = 
         if parent.offsetParent <> null then parent 
-        else getParent parent.parentElement
+        elif parent.parentElement <> null then getParent parent.parentElement
+        else getParent (unbox parent.parentNode)
       getOffset (getParent el) (x, y)
     
     let mouseHandler kind el (evt:Event) =
