@@ -865,7 +865,12 @@ module Compost =
         if parent = null then (x, y)
         else getOffset (unbox parent.offsetParent) (x-parent.offsetLeft, y-parent.offsetTop)
       let rec getParent (parent:HTMLElement) = 
-        if parent.offsetParent <> null then parent 
+        // Safari: Skip over all the elements nested inside <svg> as they are weird
+        // IE: Use parentNode when parentElement is not available (inside <svg>?)
+        if parent.namespaceURI = "http://www.w3.org/2000/svg" && parent.tagName <> "svg" then
+          if parent.parentElement <> null then getParent parent.parentElement
+          else getParent (unbox parent.parentNode)
+        elif parent.offsetParent <> null then parent 
         elif parent.parentElement <> null then getParent parent.parentElement
         else getParent (unbox parent.parentNode)
       getOffset (getParent el) (x, y)
