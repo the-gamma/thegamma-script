@@ -229,6 +229,7 @@ let rec serializeEntity (rng:Range option) (ent:Entity) =
     | EntityKind.ArgumentList _ -> "args", []
     | EntityKind.CallSite _ -> "callsite", []
     | EntityKind.Member _ -> "member", []
+    | EntityKind.MemberAccess _ -> "access", []
     | EntityKind.MemberName(n) -> "name", ["name", box n.Name]
     | EntityKind.NamedParam(n, _) -> "param", ["name", box n.Name]
     | EntityKind.Placeholder(n, _) -> "placeholder", ["name", box n.Name]

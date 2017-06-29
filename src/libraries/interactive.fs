@@ -12,8 +12,42 @@ open TheGamma.Interactive.Compost.Derived
 
 module FsOption = Microsoft.FSharp.Core.Option
 
+// ------------------------------------------------------------------------------------------------
+// Chart options
+// ------------------------------------------------------------------------------------------------
+
+type AxisOptions = 
+  { minValue : obj option
+    maxValue : obj option 
+    label : string option
+    labelOffset : float option 
+    labelMinimalSize : float option }
+  static member Default = { minValue = None; maxValue = None; label = None; labelOffset = None; labelMinimalSize = None }
+
+type LegendOptions = 
+  { position : string }
+  static member Default = { position = "none" }
+
+type ChartOptions =
+  { size : float option * float option 
+    xAxis : AxisOptions
+    yAxis : AxisOptions 
+    title : string option
+    legend : LegendOptions
+    emptyMessage : string option } 
+  static member Default = 
+    { size = None, None; title = None
+      legend = LegendOptions.Default
+      xAxis = AxisOptions.Default
+      yAxis = AxisOptions.Default
+      emptyMessage = None }
+
+// ------------------------------------------------------------------------------------------------
+// Rendering helpers
+// ------------------------------------------------------------------------------------------------
+
 module InteractiveHelpers =
-  let showAppAsync outputId size (data:series<_, _>) initial render update = async { 
+  let showAppAsync outputId opts (data:series<_, _>) initial render update = async { 
     let id = "container" + System.Guid.NewGuid().ToString().Replace("-", "")
     h?div ["id" => id] [ ] |> renderTo (document.getElementById(outputId))        
 
@@ -24,26 +58,29 @@ module InteractiveHelpers =
       do! Async.Sleep(10)
       i <- i - 1
     let element = document.getElementById(id)
-    let size = 
-      ( match size with Some w, _ -> w | _ -> element.clientWidth ),
-      ( match size with _, Some h -> h | _ -> max 400. (element.clientWidth / 2.) ) 
-    do
-      try
-        Compost.app outputId (initial data) (render data size) (update data)
-      with e ->
-        Log.exn("GUI", "Interactive rendering failed: %O", e) } 
+    if data.Length = 0 && opts.emptyMessage.IsSome then
+      h?p ["class"=>"placeholder"] [ text opts.emptyMessage.Value ] |> renderTo element
+    else
+      let size = 
+        ( match opts.size with Some w, _ -> w | _ -> element.clientWidth ),
+        ( match opts.size with _, Some h -> h | _ -> max 400. (element.clientWidth / 2.) ) 
+      do
+        try
+          Compost.app outputId (initial data) (render data size) (update data)
+        with e ->
+          Log.exn("GUI", "Interactive rendering failed: %O", e) } 
 
-  let showApp outputId size data initial render update = 
-    showAppAsync outputId size data initial render update |> Async.StartImmediate 
+  let showApp outputId opts data initial render update = 
+    showAppAsync outputId opts data initial render update |> Async.StartImmediate 
 
-  let showStaticAppAsync outputId size render = 
-    showAppAsync outputId size (series<int, int>.create(async.Return [||], "", "", ""))
+  let showStaticAppAsync outputId opts data render = 
+    showAppAsync outputId opts data
       (fun _ -> ())
       (fun _ size _ _ -> render size)
       (fun _ _ _ -> ())
 
-  let showStaticApp outputId size data render = 
-    showApp outputId size data
+  let showStaticApp outputId opts data render = 
+    showApp outputId opts data
       (fun _ -> ())
       (fun data size _ _ -> render data size)
       (fun _ _ _ -> ())
@@ -78,30 +115,6 @@ open CompostHelpers
 // ------------------------------------------------------------------------------------------------
 // Ordinary charts
 // ------------------------------------------------------------------------------------------------
-
-type AxisOptions = 
-  { minValue : obj option
-    maxValue : obj option 
-    label : string option
-    labelOffset : float option 
-    labelMinimalSize : float option }
-  static member Default = { minValue = None; maxValue = None; label = None; labelOffset = None; labelMinimalSize = None }
-
-type LegendOptions = 
-  { position : string }
-  static member Default = { position = "none" }
-
-type ChartOptions =
-  { size : float option * float option 
-    xAxis : AxisOptions
-    yAxis : AxisOptions 
-    title : string option
-    legend : LegendOptions } 
-  static member Default = 
-    { size = None, None; title = None
-      legend = LegendOptions.Default
-      xAxis = AxisOptions.Default
-      yAxis = AxisOptions.Default }
 
 module Internal = 
   
@@ -840,6 +853,8 @@ type YouGuessColsBars =
       logger : (obj -> unit) option
   // [copy-paste]
       options : ChartOptions }  
+  member y.setEmptyMessage(message) =
+    { y with options = { y.options with emptyMessage = Some message } }
   member y.setTitle(?title) =
     { y with options = { y.options with title = title } }
   member y.setLegend(position) = 
@@ -858,7 +873,7 @@ type YouGuessColsBars =
   member y.setMaximum(max:float) = if y.kind = Bars then y.setAxisX(maxValue=box max) else y.setAxisY(maxValue=box max) // TODO: Deprecated
 
   member y.show(outputId) =   
-    InteractiveHelpers.showApp outputId y.options.size y.data
+    InteractiveHelpers.showApp outputId y.options y.data
       (fun data -> YouGuessColsHelpers.initState (y.kind = Bars) data (unbox (if y.kind = Bars then y.options.xAxis.maxValue else y.options.yAxis.maxValue)))
       (fun _ size -> 
           match y.kind with 
@@ -880,6 +895,8 @@ type YouGuessLine =
       logger : (obj -> unit) option
   // [copy-paste]
       options : ChartOptions }  
+  member y.setEmptyMessage(message) =
+    { y with options = { y.options with emptyMessage = Some message } }
   member y.setTitle(?title) =
     { y with options = { y.options with title = title } }
   member y.setLegend(position) = 
@@ -906,7 +923,7 @@ type YouGuessLine =
     let markers = defaultArg y.markers (series<string, float>.create(async.Return [||], "", "", ""))
     let! markers = markers.data |> Async.AwaitFuture
     let markers = markers |> Array.sortBy fst
-    return! InteractiveHelpers.showAppAsync outputId y.options.size y.data
+    return! InteractiveHelpers.showAppAsync outputId y.options y.data
       (fun data ->
           let clipx = match y.clip with Some v -> v | _ -> dateOrNumberAsNumber (fst (data.[data.Length / 2]))
           YouDrawHelpers.initState (Array.sortBy (fst >> dateOrNumberAsNumber) data) clipx)
@@ -930,7 +947,7 @@ type YouGuessSortBars =
   member y.setSize(?width, ?height) = 
     { y with size = (orElse width (fst y.size), orElse height (snd y.size)) }
   member y.show(outputId) = 
-    InteractiveHelpers.showApp outputId y.size y.data
+    InteractiveHelpers.showApp outputId { ChartOptions.Default with size = y.size } y.data
       (YouGuessSortHelpers.initState y.maxValue)
       (fun _ size -> YouGuessSortHelpers.renderBars size)
       (fun _ -> YouGuessSortHelpers.update (InteractiveHelpers.createLogger outputId y.logger))
@@ -961,6 +978,8 @@ type CompostBubblesChartSet =
       bubbleColor : string option
   // [copy-paste]
       options : ChartOptions }
+  member y.setEmptyMessage(message) =
+    { y with options = { y.options with emptyMessage = Some message } }
   member y.setTitle(?title) =
     { y with options = { y.options with title = title } }
   member y.setLegend(position) = 
@@ -977,7 +996,7 @@ type CompostBubblesChartSet =
   member y.setColors(?bubbleColor) = 
     { y with bubbleColor = defaultArg bubbleColor y.bubbleColor }
   member y.show(outputId) = 
-    InteractiveHelpers.showStaticApp outputId y.options.size y.data
+    InteractiveHelpers.showStaticApp outputId y.options y.data
       (fun data size -> 
         let ss = match y.selectSize with Some f -> (fun x -> Some(f x)) | _ -> (fun _ -> None)
         let data = data |> Array.map (fun (_, v) -> y.selectX v, y.selectY v, ss v)
@@ -1000,6 +1019,8 @@ type CompostColBarChart =
       inlineLabels : bool
   // [copy-paste]
       options : ChartOptions }  
+  member y.setEmptyMessage(message) =
+    { y with options = { y.options with emptyMessage = Some message } }
   member y.setTitle(?title) =
     { y with options = { y.options with title = title } }
   member y.setLegend(position) = 
@@ -1018,7 +1039,7 @@ type CompostColBarChart =
   member y.setColors(?colors) = 
     { y with colors = defaultArg colors y.colors }
   member y.show(outputId) = 
-    InteractiveHelpers.showStaticApp outputId y.options.size y.data
+    InteractiveHelpers.showStaticApp outputId y.options y.data
       (fun data size -> 
         let cc = defaultArg y.colors vega10
         Charts.renderColsBars y.isBar y.inlineLabels y.options size cc (Seq.map fst data) data)
@@ -1031,6 +1052,8 @@ type CompostLineAreaChart =
       lineColor : string option
   // [copy-paste]
       options : ChartOptions }  
+  member y.setEmptyMessage(message) =
+    { y with options = { y.options with emptyMessage = Some message } }
   member y.setTitle(?title) =
     { y with options = { y.options with title = title } }
   member y.setLegend(position) = 
@@ -1047,7 +1070,7 @@ type CompostLineAreaChart =
   member y.setColors(?lineColor) = 
     { y with lineColor = defaultArg lineColor y.lineColor }
   member y.show(outputId) = 
-    InteractiveHelpers.showStaticApp outputId y.options.size y.data
+    InteractiveHelpers.showStaticApp outputId y.options y.data
       (fun data size -> 
         let lc = defaultArg y.lineColor "#1f77b4"
         Charts.renderLines y.isArea y.options size [| lc |] ["Data"] [| data |])
@@ -1060,6 +1083,8 @@ type CompostLinesAreasChart =
       lineColors : string[] option
   // [copy-paste]
       options : ChartOptions }  
+  member y.setEmptyMessage(message) =
+    { y with options = { y.options with emptyMessage = Some message } }
   member y.setTitle(?title) =
     { y with options = { y.options with title = title } }
   member y.setLegend(position) = 
@@ -1077,7 +1102,8 @@ type CompostLinesAreasChart =
     { y with lineColors = defaultArg lineColors y.lineColors }
   member y.show(outputId) = Async.StartImmediate <| async {
     let! data = Async.Parallel [ for d in y.data -> Async.AwaitFuture d.data ]
-    return! InteractiveHelpers.showStaticAppAsync outputId y.options.size
+    let allData = y.data |> Seq.fold (fun (s1:series<_,_>) s2 -> s1.append(s2)) (series<int,int>.create(async.Return [||], "", "", ""))
+    return! InteractiveHelpers.showStaticAppAsync outputId y.options allData
       (fun size -> 
         let lcs = defaultArg y.lineColors vega10
         Charts.renderLines y.isArea y.options size lcs (y.data |> Seq.map (fun s -> s.seriesName)) data) }

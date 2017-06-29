@@ -169,7 +169,8 @@ and [<RequireQualifiedAccess>] EntityKind =
   /// Member access and call with arguments (call has member access 
   /// as the instance; second argument of Member is MemberName)
   | Call of instance:Entity * arguments:Entity
-  | Member of instance:Entity * name:Entity
+  | Member of instance:Entity * name:Entity 
+  | MemberAccess of membr:Entity
   | MemberName of name:Name
 
 

@@ -132,6 +132,9 @@ and typeCheckEntity ctx (e:Entity) =
           Errors.TypeChecker.notAnObject name.Name typ |> addError ctx inst
           Type.Any
 
+  | EntityKind.MemberAccess(mem) ->
+      getType ctx mem     
+
   | EntityKind.Member(inst, _) ->
       Log.error("typechecker", "typeCheckEntity: Member access is missing member name!")
       failwith "typeCheckEntity: Member access is missing member name!"

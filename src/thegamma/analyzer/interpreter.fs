@@ -93,6 +93,9 @@ let rec evaluateEntity (e:Entity) =
           Some(evaluateExpr [getValue inst] (fun inst -> mem.Emitter.Emit(List.head inst)))
       | _ -> None
 
+  | EntityKind.MemberAccess(mem) ->
+      Some(getValue mem)
+  
   | EntityKind.Call(inst, { Kind = EntityKind.ArgumentList(args) }) ->
       // Split arguments between index-based and position-based
       let pb = args |> List.takeWhile (function { Kind = EntityKind.NamedParam _ } -> false | _ -> true)  
@@ -118,7 +121,7 @@ let rec evaluateEntity (e:Entity) =
         else (unbox null) )
 
       match inst with 
-      | { Kind = EntityKind.Member(inst, { Kind = EntityKind.MemberName(n) }) } ->
+      | { Kind = EntityKind.MemberAccess { Kind = EntityKind.Member(inst, { Kind = EntityKind.MemberName(n) }) } } ->
           let instValue = getValue inst
           match inst.Type with 
           | Some(Type.Object(FindMember n mem)) ->

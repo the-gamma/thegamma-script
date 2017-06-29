@@ -26,7 +26,7 @@ let setCustomValidity (el:obj) (msg:string) : unit = failwith "JS"
 
 let pickPivotFields expr =
   match expr.Entity with
-  | Some { Kind = EntityKind.Member _; Meta = m } 
+  | Some { Kind = EntityKind.MemberAccess { Kind = EntityKind.Member _; Meta = m } }
   | Some { Kind = EntityKind.GlobalValue _; Meta = m } 
   | Some { Kind = EntityKind.Variable(_, { Meta = m }) } -> 
       match pickMetaByType "http://schema.thegamma.net/pivot" "Fields" m with
@@ -43,7 +43,7 @@ let pickPivotTransformations expr =
   let tryTransform =
     match expr with
     | { Node = Expr.Call({ Entity = Some { Kind = EntityKind.Member _; Meta = m } }, _) }
-    | { Entity = Some { Kind = EntityKind.Member _; Meta = m } } -> 
+    | { Entity = Some { Kind = EntityKind.MemberAccess { Kind = EntityKind.Member _; Meta = m } } } -> 
         match pickMetaByType "http://schema.thegamma.net/pivot" "Transformations" m with
         | Some m -> Some(unbox<TypeProviders.Pivot.Transformation list> m)
         | _ -> None

@@ -116,8 +116,8 @@ let rec bindExpression ctx node =
 
   | Expr.Member(instExpr, memExpr) ->
       let instEnt = bindExpression ctx instExpr
-      let memEnt = bindMemberExpression instEnt ctx memExpr
-      setEntity ctx node memEnt
+      let memEnt = bindMemberExpression instEnt ctx memExpr 
+      bindEntity ctx (EntityKind.MemberAccess(memEnt)) |> setEntity ctx node
 
   | Expr.Binary(lExpr, op, rExpr) ->
       let lEnt = bindExpression ctx lExpr

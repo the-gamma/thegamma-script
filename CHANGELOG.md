@@ -1,3 +1,4 @@
+ * 0.1.11 - Placeholder for empty charts, auto-trigger completion, Safari and IE fixes
  * 0.1.10 - Support preview via preview member, hide hidden members
  * 0.1.9 - Type-level arguments on methods; nicer table formatting
  * 0.1.8 - Pivot - add like operator and allow windowing on numbers

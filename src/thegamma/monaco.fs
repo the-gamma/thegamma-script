@@ -45,7 +45,7 @@ let tokensProvider =
 
 let createCompletionProvider (getService:string -> CheckingService) = 
   { new languages.CompletionItemProvider with 
-      member this.triggerCharacters = Some(ResizeArray [ "." ])
+      member this.triggerCharacters = Some(ResizeArray [| for i in 0 .. 255 -> string (char i) |])
       member this.provideCompletionItems(model, position, token) =           
         async {      
           try    

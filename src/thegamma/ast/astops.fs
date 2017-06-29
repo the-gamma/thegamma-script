@@ -228,7 +228,8 @@ let formatEntityKind = function
   | EntityKind.NamedParam _ -> "named param"
   | EntityKind.Call _ -> "call"
   | EntityKind.ArgumentList _ -> "argument list"
-  | EntityKind.Member _ -> "member access"
+  | EntityKind.Member _ -> "member"
+  | EntityKind.MemberAccess _ -> "member access"
   | EntityKind.MemberName _ -> "member name"
   | EntityKind.Placeholder _ -> "placeholder"
 
@@ -251,17 +252,19 @@ let rec entityCodeNameAndAntecedents = function
   | EntityKind.ArgumentList(ans) -> 14, ans, "<args>"
   | EntityKind.Call(an1, an2) -> 15, [an1; an2], "<call>"
   | EntityKind.Member(an1, an2) -> 16, [an1; an2], "<member>"
-  | EntityKind.NamedParam(n, an) -> 17, [an], n.Name
-  | EntityKind.Placeholder(n, an) -> 18, [an], n.Name
-  | EntityKind.CallSite(an, Choice1Of2 s) -> 19, [an], s
-  | EntityKind.CallSite(an, Choice2Of2 m) -> 20, [an], string m
-  | EntityKind.MemberName(n) -> 21, [], n.Name
+  | EntityKind.MemberAccess(an) -> 17, [an], "<member access>"
+  | EntityKind.NamedParam(n, an) -> 18, [an], n.Name
+  | EntityKind.Placeholder(n, an) -> 19, [an], n.Name
+  | EntityKind.CallSite(an, Choice1Of2 s) -> 20, [an], s
+  | EntityKind.CallSite(an, Choice2Of2 m) -> 21, [an], string m
+  | EntityKind.MemberName(n) -> 22, [], n.Name
 
 /// Return the entity representing the name just before call in call chain
 let rec lastChainElement ent = 
   match ent.Kind with
   | EntityKind.Variable _ -> ent
   | EntityKind.Member(_, mem) -> mem
+  | EntityKind.MemberAccess(mem) -> lastChainElement mem
   | _ -> ent
 
 // Provide easy access to entity's antecedents
