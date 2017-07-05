@@ -1,3 +1,4 @@
+ * 0.1.12 - Support inline numbers, add labels to bubbles
  * 0.1.11 - Placeholder for empty charts, auto-trigger completion, Safari and IE fixes
  * 0.1.10 - Support preview via preview member, hide hidden members
  * 0.1.9 - Type-level arguments on methods; nicer table formatting
