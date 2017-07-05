@@ -182,7 +182,7 @@ let knownTypes =
         "placeholder", "placeholder"
         "inline", "inline"
         "series`2", "series"
-        "value`1", "value"
+        "val`1", "value"
 
         //"youguess", "youguess"
         "YouGuessLine", "YouGuessLine"
@@ -253,7 +253,7 @@ let e =
       yield { exportType ctx (asm.GetType("TheGamma.Series.series`2")) BindingFlags.Static 
                 with instance = [| "series" |] }
 
-      yield exportType ctx (asm.GetType("TheGamma.Series.value`1")) BindingFlags.Instance 
+      yield exportType ctx (asm.GetType("TheGamma.Series.val`1")) BindingFlags.Instance 
 
       yield { exportType ctx (asm.GetType("TheGamma.html")) BindingFlags.Static 
                 with instance = [| "html" |] } |]

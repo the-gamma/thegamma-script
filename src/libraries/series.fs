@@ -85,7 +85,7 @@ module SeriesInternals =
 
 open SeriesInternals
 
-type value<'k> = 
+type ``val``<'k> = 
   { value : Async<'k> }
   member s.map(f) =
     { value = async { 
@@ -110,7 +110,7 @@ type internal helpers =
       valueName = s.valueName
       seriesName = s.seriesName }
 
-  static member inline liftAggregation f (s:series<_, _>) : value<_> =
+  static member inline liftAggregation f (s:series<_, _>) : ``val``<_> =
     { value = async {
         let! vs = s.data |> Async.AwaitFuture
         return f vs } }
@@ -268,8 +268,8 @@ and series<'k, 'v> =
   member s.preview() = s.take(10)
       
 type ``inline`` =
-  { value : value<obj> }
-  static member create(value:value<'v>) =
+  { value : ``val``<obj> }
+  static member create(value:``val``<'v>) =
     { value = unbox value }
   member i.show(outputId) = Async.StartImmediate <| async {
     let! v = i.value.value
