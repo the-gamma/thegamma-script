@@ -40,6 +40,9 @@ let formatDateTime(d:obj) : string = failwith "!"
 [<Emit("(typeof($0)=='object')")>]
 let isObject(n:obj) : bool = failwith "!"
 
+[<Emit("Array.isArray($0)")>]
+let isArray(n:obj) : bool = failwith "!"
+
 [<Emit("isNaN($0)")>]
 let isNaN(n:float) : bool = failwith "!"
 
@@ -100,8 +103,8 @@ let isLocalHost() =
 
 let mutable enabledCategories = 
   if not (isLocalHost ()) then set []
-  else set [] 
-  //else set ["*"] 
+  //else set [] 
+  else set ["*"] 
 type Log =
   static member setEnabled(cats) = enabledCategories <- cats
 

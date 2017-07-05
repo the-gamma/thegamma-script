@@ -242,7 +242,7 @@ let typeCheckEntityAsync ctx (e:Entity) = async {
       | _ -> ()
 
       let! t = evaluateDelayedType true (getType ctx e)
-      Log.trace("typechecker", "Type of entity '%s' (%s) is: %s", e.Name, formatEntityKind e.Kind, formatType (getType ctx e))
+      Log.trace("typechecker", "Type of entity '%s' (%s) is: %s", e.Name, formatEntityKind e.Kind, formatType t)
       e.Type <- Some t }
 
   do! loop e

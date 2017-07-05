@@ -162,8 +162,10 @@ let rec createRestType lookupNamed resolveProvider root cookies url =
   let provideMember m = 
     let schema = 
       if m.schema = null then []
-      else m.schema |> Array.map (fun s ->
+      elif isArray m.schema then m.schema |> Array.map (fun s ->
         { Type = getProperty s "@type"; Context = getProperty s "@context"; Data = s }) |> List.ofSeq
+      else 
+        [ { Type = getProperty m.schema "@type"; Context = getProperty m.schema "@context"; Data = m.schema } ]
 
     match m.returns.kind with
     | "provider" ->
@@ -220,7 +222,9 @@ let rec createRestType lookupNamed resolveProvider root cookies url =
           { new ObjectType with 
               member x.Members = members
               member x.TypeEquals _ = false } |> Type.Object 
-      with e -> return Type.Any }
+      with e -> 
+        Log.error("providers", "Cannot provide object type: %O", e)
+        return Type.Any }
     let ty = Type.Delayed(Async.CreateNamedFuture guid future)
     restTypeCache.[guid] <- ty
     ty
