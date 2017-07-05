@@ -85,7 +85,12 @@ module SeriesInternals =
 
 open SeriesInternals
 
-//type value<'k> = { value : Async<'k> }
+type value<'k> = 
+  { value : Async<'k> }
+  member s.map(f) =
+    { value = async { 
+        let! r = s.value 
+        return f r } }
 
 type internal helpers = 
   static member inline lift (f:('a*'b)[] -> ('c*'d)[]) (s:series<_, _>) =
@@ -104,12 +109,11 @@ type internal helpers =
       keyName = s.keyName
       valueName = s.valueName
       seriesName = s.seriesName }
-(*    
-  static member inline liftAggregation f (s:series<_, _>) =
+
+  static member inline liftAggregation f (s:series<_, _>) : value<_> =
     { value = async {
-        let! vs = s.data
+        let! vs = s.data |> Async.AwaitFuture
         return f vs } }
-*)
 
 and series<'k, 'v> = 
   internal 
@@ -232,19 +236,25 @@ and series<'k, 'v> =
       let! arr1 = s.data |> Async.AwaitFuture
       let! arr2 = s2.data |> Async.AwaitFuture
       return Array.append arr1 arr2 } |> Async.StartAsFuture)
-(*
+
+  member s.count() =
+    s |> helpers.liftAggregation (fun arr -> arr.Length)
+
   member s.last() =
     s |> helpers.liftAggregation (fun arr -> snd arr.[arr.Length - 1])
 
   member s.first() =
     s |> helpers.liftAggregation (fun arr -> snd arr.[0])
 
+  member s.sumBy(f:'v -> float) =
+    s |> helpers.liftAggregation (Array.sumBy (fun (k, v) -> f v))
+
   member s.minBy(f) =
     s |> helpers.liftAggregation (Array.minBy (fun (k, v) -> f v))
 
   member s.maxBy(f) =
     s |> helpers.liftAggregation (Array.maxBy (fun (k, v) -> f v))
-*)
+
   member s.realign(newKeys:series<'k, 'v>, defaultValue) = 
     s |> helpers.asyncLift (fun arr -> async {
       let! newKeys = newKeys.data |> Async.AwaitFuture
@@ -257,6 +267,15 @@ and series<'k, 'v> =
 
   member s.preview() = s.take(10)
       
+type ``inline`` =
+  { value : value<obj> }
+  static member create(value:value<'v>) =
+    { value = unbox value }
+  member i.show(outputId) = Async.StartImmediate <| async {
+    let! v = i.value.value
+    Fable.Import.Browser.document.getElementById(outputId).innerText <- string v }
+
+
 (*
 open System.Runtime.CompilerServices
 

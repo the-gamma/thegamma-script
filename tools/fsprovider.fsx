@@ -180,7 +180,9 @@ let knownTypes =
   [ yield! 
       [ "table`2", "table"
         "placeholder", "placeholder"
+        "inline", "inline"
         "series`2", "series"
+        "value`1", "value"
 
         //"youguess", "youguess"
         "YouGuessLine", "YouGuessLine"
@@ -210,6 +212,9 @@ let e =
         yield exportType ctx ct BindingFlags.Instance
       yield { exportType ctx (asm.GetType("TheGamma.GoogleCharts.chart")) BindingFlags.Static 
                 with instance = [| "chart" |] }
+      yield { exportType ctx (asm.GetType("TheGamma.Series.inline")) BindingFlags.Static 
+                with instance = [| "inline" |] }
+      yield exportType ctx (asm.GetType("TheGamma.Series.inline")) BindingFlags.Instance
       yield { exportType ctx (asm.GetType("TheGamma.placeholder")) BindingFlags.Static 
                 with instance = [| "placeholder" |] }
       yield exportType ctx (asm.GetType("TheGamma.placeholder")) BindingFlags.Instance
@@ -241,10 +246,14 @@ let e =
                 with instance = [| "date$1" |] }
       yield { exportType ctx (asm.GetType("TheGamma.General.math")) BindingFlags.Static 
                 with instance = [| "math" |] }
+      yield { exportType ctx (asm.GetType("TheGamma.General.number")) BindingFlags.Static 
+                with instance = [| "number" |] }
 
       yield exportType ctx (asm.GetType("TheGamma.Series.series`2")) BindingFlags.Instance 
       yield { exportType ctx (asm.GetType("TheGamma.Series.series`2")) BindingFlags.Static 
                 with instance = [| "series" |] }
+
+      yield exportType ctx (asm.GetType("TheGamma.Series.value`1")) BindingFlags.Instance 
 
       yield { exportType ctx (asm.GetType("TheGamma.html")) BindingFlags.Static 
                 with instance = [| "html" |] } |]

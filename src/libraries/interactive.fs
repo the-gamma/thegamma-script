@@ -130,7 +130,7 @@ module Internal =
     "#" + fi r + fi g + fi b
 
   type ScalePoints = 
-    { Minimum : Value<1>; Maximum : Value<1>; Middle : Value<1> }
+    { Minimum : Value<1>; Maximum : Value<1>; Middle : Value<1>; PixelSize : float }
 
   type ChartContext = 
     { Chart : Shape<1, 1> 
@@ -143,18 +143,25 @@ module Internal =
       Padding : float * float * float * float
       ChartOptions : ChartOptions }
 
-  let calculateScales chart = 
-    let (Scales.Scaled((sx, sy), _, _)) = Scales.calculateScales Compost.defstyle chart
+  let calculateScales (width, height) chart = 
+    let (Scales.Scaled((sx, sy), _, _)) as scaled = Scales.calculateScales Compost.defstyle chart
     let getPoints = function
-      | Continuous(CO lo, CO hi) -> { Minimum = COV(CO lo); Maximum = COV(CO hi); Middle = COV(CO ((hi + lo) / 2.)) }
+      | Continuous(CO lo, CO hi) as scale -> 
+        // Calculate projection and calculate pixel size
+        let master = Projections.Scale((0.0, width), (height, 0.0))
+        let (Projections.Projected(projection, _, _)) = Projections.calculateProjections scaled master
+        let (Cont z, _) = Projections.projectInv (scale, scale) (CO 100.0, CO 0.0) projection
+        let (Cont o, _) = Projections.projectInv (scale, scale) (CO 101.0, CO 0.0) projection
+        { Minimum = COV(CO lo); Maximum = COV(CO hi); Middle = COV(CO ((hi + lo) / 2.)); PixelSize = abs (z - o) }
       | Categorical(vals) -> 
         { Minimum = CAR(vals.[0], 0.0); Maximum = CAR(vals.[vals.Length-1], 1.0)
           Middle = if vals.Length % 2 = 1 then CAR(vals.[vals.Length/2], 0.5)
-                   else CAR(vals.[vals.Length/2], 0.0) }
+                   else CAR(vals.[vals.Length/2], 0.0)
+          PixelSize = 0.0 } // TODO: This should probably not be allowed
     getPoints sx, getPoints sy
 
   let initChart size xdata ydata options chart =
-    let px, py = calculateScales chart 
+    let px, py = calculateScales size chart 
     { Chart = chart; XPoints = px; YPoints = py; Padding = (20., 20., 20., 20.)
       XData = xdata; YData = ydata; ChartOptions = options 
       Width = fst size; Height = snd size }
@@ -165,6 +172,9 @@ module Internal =
   let applyInteractive e chart = 
     Interactive(e, chart)
 
+  let applyInteractiveCtx e ctx = 
+    { ctx with Chart = Interactive(e ctx, ctx.Chart) }
+
   /// Add InnerScale (when scales are set explicitly) and AutoScale for the rest
   /// Recalculate points after changing the scales to make sure they're up to date
   let applyScales ctx = 
@@ -172,13 +182,15 @@ module Internal =
       match sp with
       | _ when axis.minValue = None && axis.maxValue = None -> None 
       | { Minimum = COV(CO lo); Maximum = COV(CO hi) } ->
-          let lo, hi = defaultArg axis.minValue (box lo), defaultArg axis.maxValue (box hi)
+          let amin = FSharp.Core.Option.map dateOrNumberAsNumber axis.minValue
+          let amax = FSharp.Core.Option.map dateOrNumberAsNumber axis.maxValue
+          let lo, hi = defaultArg amin lo, defaultArg amax hi
           Some(CO(unbox lo), CO(unbox hi))
       | _ -> None
     let sx = getInnerScale ctx.ChartOptions.xAxis ctx.XPoints
     let sy = getInnerScale ctx.ChartOptions.yAxis ctx.YPoints
     let chart = AutoScale(sx.IsNone, sy.IsNone, InnerScale(sx, sy, ctx.Chart))
-    let xp, yp = calculateScales chart 
+    let xp, yp = calculateScales (ctx.Width, ctx.Height) chart 
     { ctx with Chart = chart; XPoints = xp; YPoints = yp }
 
   /// 
@@ -286,20 +298,40 @@ module Charts =
   open Internal
 
   // Charts
-
-  let renderBubbles chartOptions size bc (data:(obj * obj * obj option)[]) =   
-    let xdata, ydata = Array.map (fun (x, _, _) -> x) data, Array.map (fun (_, y, _) -> y) data    
+  
+  let renderBubbles trigger selectedBubble chartOptions size bc (data:(obj * obj * obj option * obj option)[]) =   
+    let xdata, ydata = Array.map (fun (x, _, _, _) -> x) data, Array.map (fun (_, y, _, _) -> y) data    
+    let tryFindBubble rx ry px py = 
+      data 
+      |> Seq.tryFindIndex (fun (x, y, s, _) ->
+        let size = unbox (defaultArg s (box 2.))
+        let rx, ry = rx * size * 2., ry * size * 2.
+        let x, y = dateOrNumberAsNumber x, dateOrNumberAsNumber y
+        ((px - x)*(px - x))/(rx*rx) + ((py - y)*(py - y))/(ry*ry) < 1.0 )
     Layered [
-      for x, y, s in data do
+      for i, (x, y, s, l) in Seq.mapi (fun i v -> i, v) data do
         if inAxis chartOptions.xAxis x && inAxis chartOptions.yAxis y then
           let size = unbox (defaultArg s (box 2.))
           let b = Bubble(COV(CO (dateOrNumberAsNumber x)), COV(CO (dateOrNumberAsNumber y)), size, size) 
-          yield b |> applyStyle (fun s -> { s with StrokeWidth = Pixels 0; Fill = Solid(0.6, HTML bc) }) ]
+          let alpha = if i = selectedBubble then 1.0 else 0.6
+          yield b |> applyStyle (fun s -> { s with StrokeWidth = Pixels 0; Fill = Solid(alpha, HTML bc) }) 
+      for i, (x, y, s, l) in Seq.mapi (fun i v -> i, v) data do
+        if i = selectedBubble && l.IsSome then
+          let t = Text(COV(CO (dateOrNumberAsNumber x)), COV(CO (dateOrNumberAsNumber y)), VerticalAlign.Baseline, HorizontalAlign.Center, 0., unbox l.Value)
+          yield t |> applyStyle (fun s -> { s with Font = "10pt roboto,sans-serif"; StrokeWidth = Pixels 0; Fill = Solid(1., HTML "black") }) ]
     |> initChart size xdata ydata chartOptions
+    |> applyInteractiveCtx (fun ctx -> 
+        [ TouchStart(fun evt (Cont x, Cont y) -> 
+            let bub = defaultArg (tryFindBubble ctx.XPoints.PixelSize ctx.YPoints.PixelSize x y) -1
+            if bub <> selectedBubble then trigger bub )
+          MouseMove(fun evt (Cont x, Cont y) -> 
+            let bub = defaultArg (tryFindBubble ctx.XPoints.PixelSize ctx.YPoints.PixelSize x y) -1
+            if bub <> selectedBubble then trigger bub)
+          MouseLeave(fun _ -> trigger -1) ])
     |> applyScales 
     |> applyLabels 
     |> applyAxes true true
-    // |> applyLegend chartOptions
+    //|> applyLegend chartOptions
     |> createChart size 
 
   let renderLines isArea chartOptions size lcs labels (data:(obj * obj)[][]) =   
@@ -374,16 +406,20 @@ module YouDrawHelpers =
       Guessed : (float * option<float>)[] 
       IsKeyDate : bool }
 
-  let initState data clipx = 
+  let initState completed data clipx = 
     let isDate = data |> Seq.exists (fst >> isDate)
     let numData = data |> Array.map (fun (k, v) -> dateOrNumberAsNumber k, v)
-    { Completed = false
+    { Completed = completed
       Data = numData
       XData = Array.map (fst >> box) data
       YData = Array.map (snd >> box) data
       Clip = clipx
       IsKeyDate = isDate
-      Guessed = [| for x, y in numData do if x > clipx then yield x, None |] }
+      Guessed = 
+        [| for x, y in numData do 
+            if x > clipx then 
+              if completed then yield x, Some y 
+              else yield x, None |] }
 
   let handler log state evt = 
     let collectData () = state.Data |> Array.map (fun (k, v) -> [| box k; box v |]) |> box
@@ -399,7 +435,7 @@ module YouDrawHelpers =
             Guessed = indexed |> Array.map (fun (i, (x, y)) -> 
               if i = nearest then (x, Some downY) else (x, y)) }
 
-  let render chartOptions (width, height) (markers:(float*obj)[]) (leftLbl, rightLbl) 
+  let render interactive chartOptions (width, height) (markers:(float*obj)[]) (leftLbl, rightLbl) 
     (leftClr,rightClr,guessClr,markClr) trigger state = 
 
     let all = 
@@ -490,15 +526,16 @@ module YouDrawHelpers =
                 TouchStart(fun evt (Cont x, Cont y) -> trigger(Draw(x, y)) ) ])
     
     h?div ["style"=>"text-align:center;padding-top:20px"] [
-      Compost.createSvg (width, height) chart
-      h?div ["style"=>"padding-bottom:20px"] [
-        h?button [
-            yield "type" => "button"
-            yield "click" =!> fun _ _ -> trigger ShowResults
-            if state.Guessed |> Seq.last |> snd = None then
-              yield "disabled" => "disabled"
-          ] [ text "Show me how I did" ]
-        ]
+      yield Compost.createSvg (width, height) chart
+      if interactive then
+        yield h?div ["style"=>"padding-bottom:20px"] [
+          h?button [
+              yield "type" => "button"
+              yield "click" =!> fun _ _ -> trigger ShowResults
+              if state.Guessed |> Seq.last |> snd = None then
+                yield "disabled" => "disabled"
+            ] [ text "Show me how I did" ]
+          ]
     ]
       
 // ------------------------------------------------------------------------------------------------
@@ -523,15 +560,15 @@ module YouGuessColsHelpers =
     | Animate 
     | Update of string * float
 
-  let initState isBar data maxValue =     
-    { Completed = false
+  let initState completed isBar data maxValue =     
+    { Completed = completed
       CompletionStep = 0.0
       Data = data 
       XData = if isBar then arrayMap (snd >> box) data else arrayMap (fst >> box) data
       YData = if isBar then arrayMap (fst >> box) data else arrayMap (snd >> box) data
       Default = Array.averageBy snd data
       Maximum = InteractiveHelpers.calclateMax maxValue data
-      Guesses = Map.empty }
+      Guesses = if completed then Map.ofSeq data else Map.empty }
 
   let update log state evt = 
     let collectData () = state.Data |> Array.map (fun (k, v) -> [| box k; box v |]) |> box
@@ -543,7 +580,7 @@ module YouGuessColsHelpers =
     | Animate -> { state with CompletionStep = min 1.0 (state.CompletionStep + 0.05) }
     | Update(k, v) -> { state with Guesses = Map.add k v state.Guesses }
 
-  let renderCols (width, height) topLabel trigger state = 
+  let renderCols interactive (width, height) topLabel trigger state = 
     if state.Completed && state.CompletionStep < 1.0 then
       window.setTimeout((fun () -> trigger Animate), 50) |> ignore
     let chart = 
@@ -601,19 +638,20 @@ module YouGuessColsHelpers =
                   ]) ))))
 
     h?div ["style"=>"text-align:center;padding-top:20px"] [
-      Compost.createSvg (width, height) chart
-      h?div ["style"=>"padding-bottom:20px"] [
-        h?button [
-            yield "type" => "button"
-            yield "click" =!> fun _ _ -> trigger ShowResults
-            if state.Guesses.Count <> state.Data.Length then
-              yield "disabled" => "disabled"
-          ] [ text "Show me how I did" ]
-        ]
+      yield Compost.createSvg (width, height) chart
+      if interactive then 
+        yield h?div ["style"=>"padding-bottom:20px"] [
+          h?button [
+              yield "type" => "button"
+              yield "click" =!> fun _ _ -> trigger ShowResults
+              if state.Guesses.Count <> state.Data.Length then
+                yield "disabled" => "disabled"
+            ] [ text "Show me how I did" ]
+          ]
     ]
 
 
-  let renderBars inlineLabels size chartOptions trigger state = 
+  let renderBars interactive inlineLabels size chartOptions trigger state = 
     if state.Completed && state.CompletionStep < 1.0 then
       window.setTimeout((fun () -> trigger Animate), 50) |> ignore
 
@@ -685,15 +723,16 @@ module YouGuessColsHelpers =
       |> applyLegend size (Seq.zip (infinitely vega10) (Seq.map fst state.Data))
     
     h?div ["style"=>"text-align:center;padding-top:20px"] [
-      Compost.createSvg size ctx.Chart
-      h?div ["style"=>"padding-bottom:20px"] [
-        h?button [
-            yield "type" => "button"
-            yield "click" =!> fun _ _ -> trigger ShowResults
-            if state.Guesses.Count <> state.Data.Length then
-              yield "disabled" => "disabled"
-          ] [ text "Show me how I did" ]
-        ]
+      yield Compost.createSvg size ctx.Chart
+      if interactive then 
+        yield h?div ["style"=>"padding-bottom:20px"] [
+          h?button [
+              yield "type" => "button"
+              yield "click" =!> fun _ _ -> trigger ShowResults
+              if state.Guesses.Count <> state.Data.Length then
+                yield "disabled" => "disabled"
+            ] [ text "Show me how I did" ]
+          ]
     ]
 
 // ------------------------------------------------------------------------------------------------
@@ -716,14 +755,16 @@ module YouGuessSortHelpers =
     | ShowResults 
     | Animate 
 
-  let initState maxValue data =     
+  let initState completed maxValue data =     
     { Data = data 
       CompletionStep = 0.0
-      Completed = false
+      Completed = completed
       Colors = Seq.map2 (fun (lbl, _) clr -> lbl, clr) data vega10 |> dict 
-      Assignments = Map.empty
       Selected = fst (Seq.head data)
-      Maximum = InteractiveHelpers.calclateMax maxValue data }
+      Maximum = InteractiveHelpers.calclateMax maxValue data 
+      Assignments = 
+        if completed then Map.ofSeq [for k, _ in data -> k, k]
+        else Map.empty }
 
   let update log state evt = 
     let collectData () = state.Data |> Array.map (fun (k, v) -> [| box k; box v |]) |> box
@@ -752,7 +793,7 @@ module YouGuessSortHelpers =
           |> Seq.tryHead
         { state with Assignments = newAssigns; Selected = defaultArg newSelected state.Selected }
   
-  let renderBars (width, height) trigger (state:YouGuessState) = 
+  let renderBars interactive (width, height) trigger (state:YouGuessState) = 
     if state.Completed && state.CompletionStep < 1.0 then
       window.setTimeout((fun () -> trigger Animate), 50) |> ignore
     let chart = 
@@ -826,15 +867,16 @@ module YouGuessSortHelpers =
           OuterScale(None, Some(Continuous(CO 3.0, CO 10.0)), Padding((0.,20.,0.,20.), chart)) ]
 
     h?div ["style"=>"text-align:center;padding-top:20px"] [
-      Compost.createSvg (width, height) all
-      h?div ["style"=>"padding-bottom:20px"] [
-        h?button [
-            yield "type" => "button"
-            yield "click" =!> fun _ _ -> trigger ShowResults
-            if state.Assignments.Count <> state.Data.Length then
-              yield "disabled" => "disabled"
-          ] [ text "Show me how I did" ]
-        ]
+      yield Compost.createSvg (width, height) all
+      if interactive then
+        yield h?div ["style"=>"padding-bottom:20px"] [
+          h?button [
+              yield "type" => "button"
+              yield "click" =!> fun _ _ -> trigger ShowResults
+              if state.Assignments.Count <> state.Data.Length then
+                yield "disabled" => "disabled"
+            ] [ text "Show me how I did" ]
+          ]
     ]
     
 // ------------------------------------------------------------------------------------------------
@@ -851,6 +893,7 @@ type YouGuessColsBars =
     { kind : YouGuessColsBarsKind
       data : series<string, float> 
       logger : (obj -> unit) option
+      interactive : bool
   // [copy-paste]
       options : ChartOptions }  
   member y.setEmptyMessage(message) =
@@ -871,14 +914,14 @@ type YouGuessColsBars =
   member y.setLogger(logger) = { y with logger = Some logger }
   member y.setLabel(top:string) = y.setTitle(top) // TODO: Deprecated
   member y.setMaximum(max:float) = if y.kind = Bars then y.setAxisX(maxValue=box max) else y.setAxisY(maxValue=box max) // TODO: Deprecated
-
+  member y.setInteractive(state) = { y with interactive = state }
   member y.show(outputId) =   
     InteractiveHelpers.showApp outputId y.options y.data
-      (fun data -> YouGuessColsHelpers.initState (y.kind = Bars) data (unbox (if y.kind = Bars then y.options.xAxis.maxValue else y.options.yAxis.maxValue)))
+      (fun data -> YouGuessColsHelpers.initState (not y.interactive) (y.kind = Bars) data (unbox (if y.kind = Bars then y.options.xAxis.maxValue else y.options.yAxis.maxValue)))
       (fun _ size -> 
           match y.kind with 
-          | Bars -> YouGuessColsHelpers.renderBars true size y.options 
-          | Cols -> YouGuessColsHelpers.renderCols size y.options.title)
+          | Bars -> YouGuessColsHelpers.renderBars y.interactive true size y.options
+          | Cols -> YouGuessColsHelpers.renderCols y.interactive size y.options.title)
       (fun _ -> YouGuessColsHelpers.update (InteractiveHelpers.createLogger outputId y.logger) )
 
 type YouGuessLine = 
@@ -893,6 +936,7 @@ type YouGuessLine =
       knownLabel : string option
       guessLabel : string option 
       logger : (obj -> unit) option
+      interactive : bool
   // [copy-paste]
       options : ChartOptions }  
   member y.setEmptyMessage(message) =
@@ -919,6 +963,7 @@ type YouGuessLine =
   member y.setLabels(?top, ?known, ?guess) = 
     { y with knownLabel = orElse known y.knownLabel; guessLabel = orElse guess y.guessLabel; options = { y.options with title = orElse top y.options.title } }
   member y.setMarkers(markers) = { y with markers = Some markers }
+  member y.setInteractive(state) = { y with interactive = state }
   member y.show(outputId) = Async.StartImmediate <| async {
     let markers = defaultArg y.markers (series<string, float>.create(async.Return [||], "", "", ""))
     let! markers = markers.data |> Async.AwaitFuture
@@ -926,14 +971,14 @@ type YouGuessLine =
     return! InteractiveHelpers.showAppAsync outputId y.options y.data
       (fun data ->
           let clipx = match y.clip with Some v -> v | _ -> dateOrNumberAsNumber (fst (data.[data.Length / 2]))
-          YouDrawHelpers.initState (Array.sortBy (fst >> dateOrNumberAsNumber) data) clipx)
-      (fun data size ->           
+          YouDrawHelpers.initState (not y.interactive) (Array.sortBy (fst >> dateOrNumberAsNumber) data) clipx)
+      (fun data size trig ->           
           let lc, dc, gc, mc = 
             defaultArg y.knownColor "#606060", defaultArg y.unknownColor "#FFC700", 
             defaultArg y.drawColor "#808080", defaultArg y.markerColor "#C65E31"    
           let data = Array.sortBy (fst >> dateOrNumberAsNumber) data
           let co = { y.options with xAxis = { y.options.xAxis with minValue = Some (box (dateOrNumberAsNumber (fst data.[0]))); maxValue = Some (box (dateOrNumberAsNumber (fst data.[data.Length-1]))) } }
-          YouDrawHelpers.render co size markers (defaultArg y.knownLabel "", defaultArg y.guessLabel "") (lc,dc,gc,mc)) 
+          YouDrawHelpers.render y.interactive co size markers (defaultArg y.knownLabel "", defaultArg y.guessLabel "") (lc,dc,gc,mc) trig) 
       (fun _ -> YouDrawHelpers.handler (InteractiveHelpers.createLogger outputId y.logger)) } 
 
 type YouGuessSortBars = 
@@ -941,29 +986,31 @@ type YouGuessSortBars =
     { data : series<string, float> 
       maxValue : float option 
       size : float option * float option 
-      logger : (obj -> unit) option }
+      logger : (obj -> unit) option 
+      interactive : bool }
   member y.setLogger(logger) = { y with logger = Some logger }
   member y.setMaximum(max) = { y with maxValue = Some max }
   member y.setSize(?width, ?height) = 
     { y with size = (orElse width (fst y.size), orElse height (snd y.size)) }
+  member y.setInteractive(state) = { y with interactive = state }
   member y.show(outputId) = 
     InteractiveHelpers.showApp outputId { ChartOptions.Default with size = y.size } y.data
-      (YouGuessSortHelpers.initState y.maxValue)
-      (fun _ size -> YouGuessSortHelpers.renderBars size)
+      (YouGuessSortHelpers.initState (not y.interactive) y.maxValue)
+      (fun _ size -> YouGuessSortHelpers.renderBars y.interactive size)
       (fun _ -> YouGuessSortHelpers.update (InteractiveHelpers.createLogger outputId y.logger))
 
 type youguess = 
   static member columns(data:series<string, float>) = 
-    { YouGuessColsBars.data = data; kind = Cols; options = ChartOptions.Default; logger = None }
+    { YouGuessColsBars.data = data; kind = Cols; options = ChartOptions.Default; logger = None; interactive = true }
   static member bars(data:series<string, float>) = 
-    { YouGuessColsBars.data = data; kind = Bars; options = ChartOptions.Default; logger = None }
+    { YouGuessColsBars.data = data; kind = Bars; options = ChartOptions.Default; logger = None; interactive = true }
   static member sortBars(data:series<string, float>) = 
-    { YouGuessSortBars.data = data; maxValue = None; size = None, None; logger = None }
+    { YouGuessSortBars.data = data; maxValue = None; size = None, None; logger = None; interactive = true }
   static member line(data:series<obj, float>) =
     { YouGuessLine.data = data; clip = None; 
       markerColor = None; guessLabel = None; knownLabel = None; markers = None
       knownColor = None; unknownColor = None; drawColor = None; 
-      options = ChartOptions.Default; logger = None }
+      options = ChartOptions.Default; logger = None; interactive = true }
 
 // ------------------------------------------------------------------------------------------------
 // Compost Charts API
@@ -974,6 +1021,7 @@ type CompostBubblesChartSet =
     { data : series<obj, obj> 
       selectY : obj -> obj
       selectX : obj -> obj
+      selectLabel : option<obj -> obj>
       selectSize : option<obj -> obj>
       bubbleColor : string option
   // [copy-paste]
@@ -996,19 +1044,21 @@ type CompostBubblesChartSet =
   member y.setColors(?bubbleColor) = 
     { y with bubbleColor = defaultArg bubbleColor y.bubbleColor }
   member y.show(outputId) = 
-    InteractiveHelpers.showStaticApp outputId y.options y.data
-      (fun data size -> 
-        let ss = match y.selectSize with Some f -> (fun x -> Some(f x)) | _ -> (fun _ -> None)
-        let data = data |> Array.map (fun (_, v) -> y.selectX v, y.selectY v, ss v)
+    InteractiveHelpers.showApp outputId y.options y.data
+      (fun data -> -1)
+      (fun data size trigger selectedBubble -> 
+        let ss f = match f with Some f -> (fun x -> Some(f x)) | _ -> (fun _ -> None)
+        let data = data |> Array.map (fun (_, v) -> y.selectX v, y.selectY v, ss y.selectSize v, ss y.selectLabel v)
         let bc = defaultArg y.bubbleColor "#20a030"
-        Charts.renderBubbles y.options size bc data)
+        Charts.renderBubbles trigger selectedBubble y.options size bc data)
+      (fun _ _ evt -> evt)
 
 type CompostBubblesChart<'k, 'v>(data:series<'k, 'v>) = 
-  member c.set(x:'v -> obj, y:'v -> obj, ?size:'v -> obj) = 
+  member c.set(x:'v -> obj, y:'v -> obj, ?size:'v -> obj, ?label:'v -> obj) = 
     { CompostBubblesChartSet.data = unbox data
       selectX = unbox x; selectY = unbox y
       selectSize = unbox size; bubbleColor = None 
-      options = ChartOptions.Default }
+      options = ChartOptions.Default; selectLabel = unbox label }
 
 
 type CompostColBarChart =
