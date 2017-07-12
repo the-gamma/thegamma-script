@@ -1,3 +1,4 @@
+ * 0.1.14 - Fix parsing of chains with calls
  * 0.1.13 - Compatibility fix for schema in REST provider
  * 0.1.12 - Support inline numbers, add labels to bubbles
  * 0.1.11 - Placeholder for empty charts, auto-trigger completion, Safari and IE fixes
