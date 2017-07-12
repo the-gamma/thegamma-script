@@ -13,3 +13,5 @@ bin
 *.suo
 *.bak
 debug.log
+*.VC.opendb
+*.VC.db

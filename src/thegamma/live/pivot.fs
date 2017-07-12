@@ -42,7 +42,7 @@ let pickPivotTransformations expr =
     | _ -> None     
   let tryTransform =
     match expr with
-    | { Node = Expr.Call({ Entity = Some { Kind = EntityKind.Member _; Meta = m } }, _) }
+    | { Node = Expr.Call({ Entity = Some { Kind = EntityKind.MemberAccess({ Kind = EntityKind.Member _; Meta = m }) } }, _) } 
     | { Entity = Some { Kind = EntityKind.MemberAccess { Kind = EntityKind.Member _; Meta = m } } } -> 
         match pickMetaByType "http://schema.thegamma.net/pivot" "Transformations" m with
         | Some m -> Some(unbox<TypeProviders.Pivot.Transformation list> m)
@@ -97,6 +97,7 @@ let createPivotSections (ch:NestedChain) =
           else tfs |> List.filter (function Pivot.Empty -> false | _ -> true)
         if List.isEmpty tfs then None else Some(node, tfs)
     | None -> None )
+  Log.trace("live", "Transformations: %O", [| for n, tfs in tfss -> n.Node, transformName (List.head tfs) + " " + string tfs.Length |])
   match tfss with
   | (e, tfs)::tfss -> loop [] (List.head tfs, [e], List.length tfs) tfss
   | [] -> []
@@ -141,6 +142,13 @@ let withPivotState (pivotState:PivotEditorState) state =
   { state with State = pivotState }
 
 let findPreview (ch:NestedChain) trigger globals (ent:Entity) = 
+  let msg = 
+    match ent.Kind with 
+    | EntityKind.MemberAccess({Kind = EntityKind.Member(_, {Kind=EntityKind.MemberName n})}) -> n.Name
+    | EntityKind.Call _ -> "call"
+    | _ -> "whatever"
+
+  Log.trace("live", "Get preview for: %O", msg)    
   let nm = { Name.Name="preview" }
   let prevDom = 
     ch.Chain 
@@ -595,7 +603,11 @@ let renderPivot triggerEvent (state:LiveState<_>) =
           let secSymbol = (sec.Nodes |> List.head).Entity.Value.Symbol
           let identRange = 
             match sec.Nodes with
-            | { Node = Expr.Variable n | Expr.Member(_, { Node = Expr.Variable n }) }::_ -> n.Range
+            | { Node 
+                  = Expr.Variable n 
+                  | Expr.Member(_, { Node = Expr.Variable n }) 
+                  | Expr.Call({ Node = Expr.Variable n }, _) 
+                  | Expr.Call({ Node = Expr.Member(_, { Node = Expr.Variable n })}, _) }::_ -> n.Range
             | _ -> failwith "Unexpected node in pivot call chain" 
 
           h?li ["class" => if selected then "selected" else ""] [
