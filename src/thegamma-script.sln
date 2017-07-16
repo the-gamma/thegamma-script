@@ -27,6 +27,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{3E492EDE
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "thegamma-tests", "..\tests\thegamma-tests\thegamma-tests.fsproj", "{EE8310C8-1F2B-4F9C-83F6-5D188B7517B2}"
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "thegamma-console", "thegamma-console\thegamma-console.fsproj", "{1C3AB775-AB10-428E-BFEB-B42CCFD28130}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -49,6 +51,10 @@ Global
 		{EE8310C8-1F2B-4F9C-83F6-5D188B7517B2}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{EE8310C8-1F2B-4F9C-83F6-5D188B7517B2}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{EE8310C8-1F2B-4F9C-83F6-5D188B7517B2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1C3AB775-AB10-428E-BFEB-B42CCFD28130}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1C3AB775-AB10-428E-BFEB-B42CCFD28130}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1C3AB775-AB10-428E-BFEB-B42CCFD28130}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1C3AB775-AB10-428E-BFEB-B42CCFD28130}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

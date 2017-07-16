@@ -237,6 +237,9 @@ type Context =
     InputFields : Field list
     Fields : Field list }
 
+type CompletionItemData = 
+  { hidden : bool }
+
 let rec makeProperty ctx name tfs = 
   let meta1 = { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box tfs  }
   let meta2 = { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box ctx.Fields  }
@@ -294,7 +297,7 @@ and makeDataMember ctx name isPreview tfs =
     [ yield { Context = "http://schema.thegamma.net/pivot"; Type = "Transformations"; Data = box tfs }
       yield { Context = "http://schema.thegamma.net/pivot"; Type = "Fields"; Data = box ctx.Fields  }
       if isPreview then
-        yield { Context = "http://schema.thegamma.net"; Type = "CompletionItem"; Data = JsInterop.createObj ["hidden", box true] }]
+        yield { Context = "http://schema.thegamma.net"; Type = "CompletionItem"; Data = box { CompletionItemData.hidden = true } } ]
   { Member.Name = name; Type = dataTyp; Metadata = meta; Emitter = makeDataEmitter isPreview isSeries convValues tfs }
 
 and handleGetSeriesRequest ctx rest k v = 
@@ -417,9 +420,10 @@ and handleFilterEqNeqRequest ctx rest (fld, eq) op conds = async {
   let tfs = 
     if ctx.IgnoreFiltersInRange then tfs |> List.filter (function FilterBy _ -> false | _ -> true)
     else tfs
-  let url = ctx.Root + "?" + (GetRange(fld)::tfs |> List.rev |> Transform.toUrl |> Fable.Import.JS.encodeURIComponent)
-  let! options = Http.Request("GET", url)
-  let options = jsonParse<string[]> options
+  let url = ctx.Root + "?" + (GetRange(fld)::tfs |> List.rev |> Transform.toUrl |> System.Uri.EscapeUriString)
+  use wc = new System.Net.WebClient()
+  let! options = wc.AsyncDownloadString(System.Uri(url))
+  let options = Newtonsoft.Json.JsonConvert.DeserializeObject<string[]>(options)
   return
     [ for opt in options do
         yield makeProperty ctx opt (FilterBy(op, (eq, fld, opt)::conds)::rest) ] 
