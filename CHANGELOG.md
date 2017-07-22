@@ -1,3 +1,4 @@
+ * 0.1.15 - Interactive (solved comments, better line), + on strings, filter by dates in pivot
  * 0.1.14 - Fix parsing of chains with calls
  * 0.1.13 - Compatibility fix for schema in REST provider
  * 0.1.12 - Support inline numbers, add labels to bubbles

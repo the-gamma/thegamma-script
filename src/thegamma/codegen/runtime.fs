@@ -34,6 +34,8 @@ type RuntimeContext(root:string, cookies:string, trace:string) =
 
 type PivotContext(root, calls) = 
   member x.addCall(callid:string, values:obj[]) =
+    let values = values |> Array.map (fun v ->
+      if isDate v then box (toISOString v) else v)
     PivotContext(root, Array.append [| callid, values |] calls)
 
   member x.getData(conv:obj -> obj, tfs:string, isPreview) = async {

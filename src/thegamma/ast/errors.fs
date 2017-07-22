@@ -79,10 +79,11 @@ module Parser =
 
     
 module TypeChecker = 
-  let numericOperatorExpectsNumbers op idx typ rng =
+  let numericOperatorExpectsNumbers op idx typs typ rng =
     { Number = 301; Range = rng 
       Message = 
-        sprintf "Both operands of binary operator '%s' should be numbers but the %s operand was %s instead." 
+        sprintf "Both operands of binary operator '%s' should be %s but the %s operand was %s instead." 
+          (String.concat " or " (List.map formatTypeInfo typs))
           (formatToken (TokenKind.Operator op)) (if idx = 0 then "left" else "right") (formatTypeInfo typ) }
 
   let variableNotInScope name rng =

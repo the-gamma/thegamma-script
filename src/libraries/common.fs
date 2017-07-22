@@ -21,6 +21,9 @@ let isNumber(n:obj) : bool = failwith "!"
 [<Emit("($0 instanceof Date)")>]
 let isDate(n:obj) : bool = failwith "!"
 
+[<Emit("$0.toISOString()")>]
+let toISOString(o:obj) : string = failwith "!"
+
 [<Emit("new Date($0)")>]
 let asDate(n:float) : System.DateTime = failwith "!"
 
@@ -103,8 +106,8 @@ let isLocalHost() =
 
 let mutable enabledCategories = 
   if not (isLocalHost ()) then set []
-  //else set [] 
-  else set ["*"] 
+  else set [] 
+  //else set ["*"] 
 type Log =
   static member setEnabled(cats) = enabledCategories <- cats
 

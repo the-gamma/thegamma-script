@@ -397,13 +397,18 @@ module YouDrawHelpers =
     | ShowResults
     | Draw of float * float
 
+  type Status = 
+    | Autofilled of float
+    | Set of float
+    | NotSet
+    
   type YouDrawState = 
     { Completed : bool
       Clip : float
       Data : (float * float)[]
       XData : obj[]
       YData : obj[]
-      Guessed : (float * option<float>)[] 
+      Guessed : (float * Status)[] 
       IsKeyDate : bool }
 
   let initState completed data clipx = 
@@ -418,12 +423,12 @@ module YouDrawHelpers =
       Guessed = 
         [| for x, y in numData do 
             if x > clipx then 
-              if completed then yield x, Some y 
-              else yield x, None |] }
+              if completed then yield x, Set y 
+              else yield x, NotSet |] }
 
   let handler log state evt = 
     let collectData () = state.Data |> Array.map (fun (k, v) -> [| box k; box v |]) |> box
-    let collectGuesses () = state.Guessed |> Seq.choose (fun (k, v) -> if v.IsSome then Some [| box k; box v.Value |] else None) |> Array.ofSeq |> box
+    let collectGuesses () = state.Guessed |> Seq.choose (function (k, Set v) -> Some [| box k; box v |] | _ -> None) |> Array.ofSeq |> box
     match evt with
     | ShowResults -> 
         log "completed" [ "guess", collectGuesses(); "values", collectData() ]
@@ -433,9 +438,12 @@ module YouDrawHelpers =
         let nearest, _ = indexed |> Array.minBy (fun (_, (x, _)) -> abs (downX - x))
         { state with
             Guessed = indexed |> Array.map (fun (i, (x, y)) -> 
-              if i = nearest then (x, Some downY) else (x, y)) }
+              match y with
+              | _ when i = nearest -> (x, Set downY) 
+              | NotSet when i > nearest -> (x, Autofilled downY)
+              | _ -> (x, y) ) }
 
-  let render interactive chartOptions (width, height) (markers:(float*obj)[]) (leftLbl, rightLbl) 
+  let render (solvedComment:string option) interactive chartOptions (width, height) (markers:(float*obj)[]) (leftLbl, rightLbl) 
     (leftClr,rightClr,guessClr,markClr) trigger state = 
 
     let all = 
@@ -447,7 +455,7 @@ module YouDrawHelpers =
          for x, y in state.Data do if x > state.Clip then yield Cont x, Cont y |]
     let guessed = 
       [| yield Array.last known
-         for x, y in state.Guessed do if y.IsSome then yield Cont x, Cont y.Value |]
+         for x, y in state.Guessed do match y with Set v | Autofilled v -> yield Cont x, Cont v | _ -> () |]
 
 
     let loy = match chartOptions.yAxis.minValue with Some v -> unbox v | _ -> state.Data |> Seq.map snd |> Seq.min
@@ -527,12 +535,16 @@ module YouDrawHelpers =
     
     h?div ["style"=>"text-align:center;padding-top:20px"] [
       yield Compost.createSvg (width, height) chart
-      if interactive then
+      if state.Completed && solvedComment.IsSome then
+        yield h?div ["style"=>"padding-bottom:20px"] [
+          h?p ["class"=>"solved"] [text solvedComment.Value]
+        ]
+      elif interactive then
         yield h?div ["style"=>"padding-bottom:20px"] [
           h?button [
               yield "type" => "button"
               yield "click" =!> fun _ _ -> trigger ShowResults
-              if state.Guessed |> Seq.last |> snd = None then
+              if state.Guessed |> Seq.last |> snd = NotSet then
                 yield "disabled" => "disabled"
             ] [ text "Show me how I did" ]
           ]
@@ -580,7 +592,7 @@ module YouGuessColsHelpers =
     | Animate -> { state with CompletionStep = min 1.0 (state.CompletionStep + 0.05) }
     | Update(k, v) -> { state with Guesses = Map.add k v state.Guesses }
 
-  let renderCols interactive (width, height) topLabel trigger state = 
+  let renderCols (solvedComment:string option) interactive (width, height) topLabel trigger state = 
     if state.Completed && state.CompletionStep < 1.0 then
       window.setTimeout((fun () -> trigger Animate), 50) |> ignore
     let chart = 
@@ -639,7 +651,11 @@ module YouGuessColsHelpers =
 
     h?div ["style"=>"text-align:center;padding-top:20px"] [
       yield Compost.createSvg (width, height) chart
-      if interactive then 
+      if state.Completed && solvedComment.IsSome then
+        yield h?div ["style"=>"padding-bottom:20px"] [
+          h?p ["class"=>"solved"] [text solvedComment.Value]
+        ]
+      elif interactive then 
         yield h?div ["style"=>"padding-bottom:20px"] [
           h?button [
               yield "type" => "button"
@@ -651,7 +667,7 @@ module YouGuessColsHelpers =
     ]
 
 
-  let renderBars interactive inlineLabels size chartOptions trigger state = 
+  let renderBars (solvedComment:string option) interactive inlineLabels size chartOptions trigger state = 
     if state.Completed && state.CompletionStep < 1.0 then
       window.setTimeout((fun () -> trigger Animate), 50) |> ignore
 
@@ -724,7 +740,11 @@ module YouGuessColsHelpers =
     
     h?div ["style"=>"text-align:center;padding-top:20px"] [
       yield Compost.createSvg size ctx.Chart
-      if interactive then 
+      if state.Completed && solvedComment.IsSome then
+        yield h?div ["style"=>"padding-bottom:20px"] [
+          h?p ["class"=>"solved"] [text solvedComment.Value]
+        ]
+      elif interactive then 
         yield h?div ["style"=>"padding-bottom:20px"] [
           h?button [
               yield "type" => "button"
@@ -770,8 +790,8 @@ module YouGuessSortHelpers =
     let collectData () = state.Data |> Array.map (fun (k, v) -> [| box k; box v |]) |> box
     let collectGuesses () = 
       state.Assignments |> Seq.map (fun (KeyValue(vk, k)) -> 
-        let i = state.Data |> Seq.findIndex (fun (k, _) -> k = vk)
-        [| box k; box i |]) |> Array.ofSeq |> box
+        let v = state.Data |> Seq.pick (fun (k, v) -> if k = vk then Some v else None)
+        [| box k; box v |]) |> Array.ofSeq |> box
     match evt with
     | Animate -> { state with CompletionStep = min 1.0 (state.CompletionStep + 0.05) }
     | ShowResults -> 
@@ -793,7 +813,7 @@ module YouGuessSortHelpers =
           |> Seq.tryHead
         { state with Assignments = newAssigns; Selected = defaultArg newSelected state.Selected }
   
-  let renderBars interactive (width, height) trigger (state:YouGuessState) = 
+  let renderBars (solvedComment:string option) interactive (width, height) trigger (state:YouGuessState) = 
     if state.Completed && state.CompletionStep < 1.0 then
       window.setTimeout((fun () -> trigger Animate), 50) |> ignore
     let chart = 
@@ -868,7 +888,11 @@ module YouGuessSortHelpers =
 
     h?div ["style"=>"text-align:center;padding-top:20px"] [
       yield Compost.createSvg (width, height) all
-      if interactive then
+      if state.Completed && solvedComment.IsSome then
+        yield h?div ["style"=>"padding-bottom:20px"] [
+          h?p ["class"=>"solved"] [text solvedComment.Value]
+        ]
+      elif interactive then
         yield h?div ["style"=>"padding-bottom:20px"] [
           h?button [
               yield "type" => "button"
@@ -894,6 +918,7 @@ type YouGuessColsBars =
       data : series<string, float> 
       logger : (obj -> unit) option
       interactive : bool
+      solvedComment : string option
   // [copy-paste]
       options : ChartOptions }  
   member y.setEmptyMessage(message) =
@@ -911,6 +936,7 @@ type YouGuessColsBars =
     let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset; labelMinimalSize = orElse labelMinimalSize y.options.yAxis.labelMinimalSize  }
     { y with options = { y.options with yAxis = ax } }
   // [/copy-paste]
+  member y.setSolvedComment(comment) = { y with solvedComment = Some comment }
   member y.setLogger(logger) = { y with logger = Some logger }
   member y.setLabel(top:string) = y.setTitle(top) // TODO: Deprecated
   member y.setMaximum(max:float) = if y.kind = Bars then y.setAxisX(maxValue=box max) else y.setAxisY(maxValue=box max) // TODO: Deprecated
@@ -920,8 +946,8 @@ type YouGuessColsBars =
       (fun data -> YouGuessColsHelpers.initState (not y.interactive) (y.kind = Bars) data (unbox (if y.kind = Bars then y.options.xAxis.maxValue else y.options.yAxis.maxValue)))
       (fun _ size -> 
           match y.kind with 
-          | Bars -> YouGuessColsHelpers.renderBars y.interactive true size y.options
-          | Cols -> YouGuessColsHelpers.renderCols y.interactive size y.options.title)
+          | Bars -> YouGuessColsHelpers.renderBars y.solvedComment y.interactive true size y.options
+          | Cols -> YouGuessColsHelpers.renderCols y.solvedComment y.interactive size y.options.title)
       (fun _ -> YouGuessColsHelpers.update (InteractiveHelpers.createLogger outputId y.logger) )
 
 type YouGuessLine = 
@@ -937,6 +963,7 @@ type YouGuessLine =
       guessLabel : string option 
       logger : (obj -> unit) option
       interactive : bool
+      solvedComment : string option
   // [copy-paste]
       options : ChartOptions }  
   member y.setEmptyMessage(message) =
@@ -954,6 +981,7 @@ type YouGuessLine =
     let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset; labelMinimalSize = orElse labelMinimalSize y.options.yAxis.labelMinimalSize  }
     { y with options = { y.options with yAxis = ax } }
   // [/copy-paste]
+  member y.setSolvedComment(comment) = { y with solvedComment = Some comment }
   member y.setLogger(logger) = { y with logger = Some logger }
   member y.setRange(min, max) = y.setAxisY(min, max) // TODO: Deprecated
   member y.setClip(clip) = { y with clip = Some (dateOrNumberAsNumber clip) }
@@ -978,7 +1006,7 @@ type YouGuessLine =
             defaultArg y.drawColor "#808080", defaultArg y.markerColor "#C65E31"    
           let data = Array.sortBy (fst >> dateOrNumberAsNumber) data
           let co = { y.options with xAxis = { y.options.xAxis with minValue = Some (box (dateOrNumberAsNumber (fst data.[0]))); maxValue = Some (box (dateOrNumberAsNumber (fst data.[data.Length-1]))) } }
-          YouDrawHelpers.render y.interactive co size markers (defaultArg y.knownLabel "", defaultArg y.guessLabel "") (lc,dc,gc,mc) trig) 
+          YouDrawHelpers.render y.solvedComment y.interactive co size markers (defaultArg y.knownLabel "", defaultArg y.guessLabel "") (lc,dc,gc,mc) trig) 
       (fun _ -> YouDrawHelpers.handler (InteractiveHelpers.createLogger outputId y.logger)) } 
 
 type YouGuessSortBars = 
@@ -987,7 +1015,9 @@ type YouGuessSortBars =
       maxValue : float option 
       size : float option * float option 
       logger : (obj -> unit) option 
-      interactive : bool }
+      interactive : bool 
+      solvedComment : string option }
+  member y.setSolvedComment(comment) = { y with solvedComment = Some comment }
   member y.setLogger(logger) = { y with logger = Some logger }
   member y.setMaximum(max) = { y with maxValue = Some max }
   member y.setSize(?width, ?height) = 
@@ -996,21 +1026,21 @@ type YouGuessSortBars =
   member y.show(outputId) = 
     InteractiveHelpers.showApp outputId { ChartOptions.Default with size = y.size } y.data
       (YouGuessSortHelpers.initState (not y.interactive) y.maxValue)
-      (fun _ size -> YouGuessSortHelpers.renderBars y.interactive size)
+      (fun _ size -> YouGuessSortHelpers.renderBars y.solvedComment y.interactive size)
       (fun _ -> YouGuessSortHelpers.update (InteractiveHelpers.createLogger outputId y.logger))
 
 type youguess = 
   static member columns(data:series<string, float>) = 
-    { YouGuessColsBars.data = data; kind = Cols; options = ChartOptions.Default; logger = None; interactive = true }
+    { YouGuessColsBars.data = data; kind = Cols; options = ChartOptions.Default; logger = None; interactive = true; solvedComment = None }
   static member bars(data:series<string, float>) = 
-    { YouGuessColsBars.data = data; kind = Bars; options = ChartOptions.Default; logger = None; interactive = true }
+    { YouGuessColsBars.data = data; kind = Bars; options = ChartOptions.Default; logger = None; interactive = true; solvedComment = None }
   static member sortBars(data:series<string, float>) = 
-    { YouGuessSortBars.data = data; maxValue = None; size = None, None; logger = None; interactive = true }
+    { YouGuessSortBars.data = data; maxValue = None; size = None, None; logger = None; interactive = true; solvedComment = None }
   static member line(data:series<obj, float>) =
     { YouGuessLine.data = data; clip = None; 
       markerColor = None; guessLabel = None; knownLabel = None; markers = None
       knownColor = None; unknownColor = None; drawColor = None; 
-      options = ChartOptions.Default; logger = None; interactive = true }
+      options = ChartOptions.Default; logger = None; interactive = true; solvedComment = None }
 
 // ------------------------------------------------------------------------------------------------
 // Compost Charts API

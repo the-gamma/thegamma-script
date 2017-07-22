@@ -153,14 +153,20 @@ and typeCheckEntity ctx (e:Entity) =
 
   // Operators and lists depend on the types of operands and elements...
   | EntityKind.Operator(l, operator, r) ->      
+      let operandTypes = 
+        ( match operator with
+          | Operator.Equals -> [PrimitiveType.Number; PrimitiveType.String; PrimitiveType.Date; PrimitiveType.Bool]
+          | Operator.Plus -> [PrimitiveType.Number; PrimitiveType.String]
+          | _ -> [PrimitiveType.Number] ) |> List.map Type.Primitive 
+
       [l; r] |> List.iteri (fun idx operand ->
-        let typ = getType ctx operand 
-        if not (typesEqual typ (Type.Primitive PrimitiveType.Number)) then
-          Errors.TypeChecker.numericOperatorExpectsNumbers operator idx typ |> addError ctx operand )
+        let typ = getType ctx operand
+        if operandTypes |> List.forall (fun opt -> not (typesEqual typ opt)) then
+          Errors.TypeChecker.numericOperatorExpectsNumbers operator idx operandTypes typ |> addError ctx operand )
       match operator with
       | Operator.Equals | Operator.LessThan | Operator.GreaterThan 
-      | Operator.LessThanOrEqual | Operator.GreaterThanOrEqual -> Type.Primitive PrimitiveType.Bool
-      | _ -> Type.Primitive PrimitiveType.Number
+      | Operator.LessThanOrEqual | Operator.GreaterThanOrEqual -> Type.Primitive PrimitiveType.Bool      
+      | _ -> getType ctx l
 
   | EntityKind.List(elems) ->      
       let typs = elems |> List.map (getType ctx)

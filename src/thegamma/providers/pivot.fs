@@ -415,8 +415,10 @@ and handleFilterEqNeqRequest ctx rest (fld, eq) op conds = async {
     elif List.isEmpty conds then rest 
     else FilterBy(op, conds)::rest
   let tfs = 
-    if ctx.IgnoreFiltersInRange then tfs |> List.filter (function FilterBy _ -> false | _ -> true)
-    else tfs
+    tfs |> List.filter (function 
+      | FilterBy _ when ctx.IgnoreFiltersInRange -> false 
+      | FilterBy(_, conds) when conds |> List.exists (function ((Equals | NotEquals), _, _) -> false | _ -> true) -> false
+      | _ -> true)
   let url = ctx.Root + "?" + (GetRange(fld)::tfs |> List.rev |> Transform.toUrl |> Fable.Import.JS.encodeURIComponent)
   let! options = Http.Request("GET", url)
   let options = jsonParse<string[]> options
@@ -442,6 +444,10 @@ and handleFilterRequest ctx rest flid op conds =
           yield makeMethod ctx (prefix + field.Name + " is less than") (FilterBy(op, (LessThan, field.Name, flid)::conds)::rest) flid ["value", PrimitiveType.Number]
           yield makeMethod ctx (prefix + field.Name + " is greater than") (FilterBy(op, (GreaterThan, field.Name, flid)::conds)::rest) flid ["value", PrimitiveType.Number]
           yield makeMethod ctx (prefix + field.Name + " is in range") (FilterBy(op, (InRange, field.Name, flid)::conds)::rest) flid ["minimum", PrimitiveType.Number; "maximum", PrimitiveType.Number]
+        if field.Type = PrimitiveType.Date then
+          yield makeMethod ctx (prefix + field.Name + " is less than") (FilterBy(op, (LessThan, field.Name, flid)::conds)::rest) flid ["value", PrimitiveType.Date]
+          yield makeMethod ctx (prefix + field.Name + " is greater than") (FilterBy(op, (GreaterThan, field.Name, flid)::conds)::rest) flid ["value", PrimitiveType.Date]
+          yield makeMethod ctx (prefix + field.Name + " is in range") (FilterBy(op, (InRange, field.Name, flid)::conds)::rest) flid ["minimum", PrimitiveType.Date; "maximum", PrimitiveType.Date]
     if not (List.isEmpty conds) then
       yield makeProperty ctx "then" (Empty::FilterBy(op, conds)::rest) ]
   |> makeObjectType  
