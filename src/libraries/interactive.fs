@@ -169,6 +169,9 @@ module Internal =
   let applyStyle f chart = 
     Style(f, chart)
 
+  let applyStyleCtx f ctx = 
+    { ctx with Chart = Style(f, ctx.Chart) }
+
   let applyInteractive e chart = 
     Interactive(e, chart)
 
@@ -390,7 +393,7 @@ module Charts =
 // You Guess Line
 // ------------------------------------------------------------------------------------------------
 
-module YouDrawHelpers = 
+module YouGeussLineHelpers = 
   open Internal
 
   type YouDrawEvent = 
@@ -549,7 +552,123 @@ module YouDrawHelpers =
             ] [ text "Show me how I did" ]
           ]
     ]
-      
+
+// ------------------------------------------------------------------------------------------------
+// You Guess Line offset
+// ------------------------------------------------------------------------------------------------
+
+module YouGeussLineOffsetHelpers = 
+  open Internal
+
+  type YouDrawEvent = 
+    | ShowResults
+    | StopMoving
+    | StartMoving of float
+    | ContinueMoving of float
+
+  type YouDrawState = 
+    { Completed : bool
+      Data : (float * float)[]
+      XData : obj[]
+      YData : obj[]
+      IsKeyDate : bool
+      OffsetStart : float option
+      Offset : float }
+
+  let initState completed data = 
+    let isDate = data |> Seq.exists (fst >> isDate)
+    let numData = data |> Array.map (fun (k, v) -> dateOrNumberAsNumber k, v)
+    { Completed = completed
+      Data = numData
+      XData = Array.map (snd >> box) data
+      YData = Array.map (fst >> box) data
+      IsKeyDate = isDate 
+      Offset = 0. 
+      OffsetStart = None }
+
+  let handler log state evt = 
+    let collectData () = state.Data |> Array.map (fun (k, v) -> [| box k; box v |]) |> box
+    //let collectGuesses () = state.Guessed |> Seq.choose (function (k, Set v) -> Some [| box k; box v |] | _ -> None) |> Array.ofSeq |> box
+    match evt with
+    | StopMoving -> { state with OffsetStart = None }
+    | StartMoving y -> { state with OffsetStart = Some (y - state.Offset) }
+    | ContinueMoving y -> 
+        if state.OffsetStart.IsNone then state // should not happen
+        else { state with Offset = y - state.OffsetStart.Value }
+    | ShowResults -> 
+        log "completed" [ (*"guess", collectGuesses();*) "values", collectData() ]
+        { state with Completed = true }
+
+  let render (solvedComment:string option) interactive chartOptions (width, height) (markers:(float*obj)[]) lineColor trigger state = 
+
+    let all = 
+      [ for y, x in state.Data -> COV(CO x), COV(CO y) ]
+    let visiblePoints = 
+      [ for y, x in state.Data do 
+          let y = y + state.Offset
+          if y >= unbox chartOptions.yAxis.minValue.Value && y <= unbox chartOptions.yAxis.maxValue.Value then
+            yield COV(CO x), COV(CO y) ]
+
+    let range axis data = 
+      dateOrNumberAsNumber (defaultArg axis.minValue (box (Seq.min data))),
+      dateOrNumberAsNumber (defaultArg axis.maxValue (box (Seq.max data)))
+    let lx, hx = range chartOptions.xAxis (Seq.map snd state.Data)
+    let ly, hy = range chartOptions.yAxis (Seq.map fst state.Data)
+
+    let coreChart = 
+      Layered [
+        for y, str in markers do
+          let b = Bubble(COV(CO ((lx + hx)/2.)), COV(CO y), 4., 4.) 
+          yield b |> applyStyle (fun s -> { s with StrokeWidth = Pixels 0; Fill = Solid(0.8, HTML "purple") }) 
+
+        yield 
+          Shape [ 
+            COV(CO lx), COV(CO ly); COV(CO lx), COV(CO hy);
+            COV(CO hx), COV(CO hy); COV(CO hx), COV(CO ly) ]
+          |> applyStyle (Drawing.hideFill >> Drawing.hideStroke) 
+        yield Line all |> applyStyle (Drawing.hideFill >> Drawing.hideStroke)
+        if not (List.isEmpty visiblePoints) then yield Line visiblePoints
+      ] |> applyStyle(fun s -> 
+        { s with Cursor = 
+                  if state.OffsetStart.IsSome then "move,grabbing,-moz-grabbing,-webkit-grabbing" 
+                  else "move,grab,-moz-grab,-webkit-grab" }) 
+
+    let { Internal.ChartContext.Chart = chart } = 
+      coreChart
+      |> initChart (width, height) state.XData state.YData chartOptions 
+      |> applyScales 
+      |> applyLabels 
+      |> applyAxes true true
+
+    let chart =
+      chart |> applyInteractive
+          ( if state.Completed then []
+            else
+              [ MouseUp(fun _ _ -> trigger(StopMoving))
+                TouchEnd(fun _ _ -> trigger(StopMoving))
+                MouseMove(fun evt (Cont x, Cont y) -> 
+                  if (int evt.buttons) &&& 1 = 1 then trigger(ContinueMoving y) )
+                TouchMove(fun evt (Cont x, Cont y) -> trigger(ContinueMoving y) )
+                MouseDown(fun evt (Cont x, Cont y) -> trigger(StartMoving y) ) 
+                TouchStart(fun evt (Cont x, Cont y) -> trigger(StartMoving y) ) ])
+    
+    h?div ["style"=>"text-align:center;padding-top:20px"] [
+      yield Compost.createSvg (width, height) chart
+      if state.Completed && solvedComment.IsSome then
+        yield h?div ["style"=>"padding-bottom:20px"] [
+          h?p ["class"=>"solved"] [text solvedComment.Value]
+        ]
+      elif interactive then
+        yield h?div ["style"=>"padding-bottom:20px"] [
+          h?button [
+              yield "type" => "button"
+              yield "click" =!> fun _ _ -> trigger ShowResults
+              //if state.Guessed |> Seq.last |> snd = NotSet then
+                //yield "disabled" => "disabled"
+            ] [ text "Show me how I did" ]
+          ]
+    ]
+            
 // ------------------------------------------------------------------------------------------------
 // You Guess Bar & You Guess Column
 // ------------------------------------------------------------------------------------------------
@@ -953,7 +1072,7 @@ type YouGuessColsBars =
 type YouGuessLine = 
   private 
     { data : series<obj, float> 
-      markers : series<float, obj> option
+      markers : series<obj, obj> option
       clip : float option
       markerColor : string option
       knownColor : string option
@@ -995,19 +1114,65 @@ type YouGuessLine =
   member y.show(outputId) = Async.StartImmediate <| async {
     let markers = defaultArg y.markers (series<string, float>.create(async.Return [||], "", "", ""))
     let! markers = markers.data |> Async.AwaitFuture
-    let markers = markers |> Array.sortBy fst
+    let markers = markers |> Array.map (fun (k, v) -> dateOrNumberAsNumber k, v) |> Array.sortBy fst
     return! InteractiveHelpers.showAppAsync outputId y.options y.data
       (fun data ->
           let clipx = match y.clip with Some v -> v | _ -> dateOrNumberAsNumber (fst (data.[data.Length / 2]))
-          YouDrawHelpers.initState (not y.interactive) (Array.sortBy (fst >> dateOrNumberAsNumber) data) clipx)
+          YouGeussLineHelpers.initState (not y.interactive) (Array.sortBy (fst >> dateOrNumberAsNumber) data) clipx)
       (fun data size trig ->           
           let lc, dc, gc, mc = 
             defaultArg y.knownColor "#606060", defaultArg y.unknownColor "#FFC700", 
             defaultArg y.drawColor "#808080", defaultArg y.markerColor "#C65E31"    
           let data = Array.sortBy (fst >> dateOrNumberAsNumber) data
           let co = { y.options with xAxis = { y.options.xAxis with minValue = Some (box (dateOrNumberAsNumber (fst data.[0]))); maxValue = Some (box (dateOrNumberAsNumber (fst data.[data.Length-1]))) } }
-          YouDrawHelpers.render y.solvedComment y.interactive co size markers (defaultArg y.knownLabel "", defaultArg y.guessLabel "") (lc,dc,gc,mc) trig) 
-      (fun _ -> YouDrawHelpers.handler (InteractiveHelpers.createLogger outputId y.logger)) } 
+          YouGeussLineHelpers.render y.solvedComment y.interactive co size markers (defaultArg y.knownLabel "", defaultArg y.guessLabel "") (lc,dc,gc,mc) trig) 
+      (fun _ -> YouGeussLineHelpers.handler (InteractiveHelpers.createLogger outputId y.logger)) } 
+
+type YouGuessLineOffset = 
+  private 
+    { data : series<obj, float> 
+      markers : series<obj, obj> option
+      lineColor : string option 
+      logger : (obj -> unit) option
+      interactive : bool
+      solvedComment : string option
+  // [copy-paste]
+      options : ChartOptions }  
+  member y.setEmptyMessage(message) =
+    { y with options = { y.options with emptyMessage = Some message } }
+  member y.setTitle(?title) =
+    { y with options = { y.options with title = title } }
+  member y.setLegend(position) = 
+    { y with options = { y.options with legend = { position = position } } }
+  member y.setSize(?width, ?height) = 
+    { y with options = { y.options with size = (orElse width (fst y.options.size), orElse height (snd y.options.size)) } }
+  member y.setAxisX(?minValue, ?maxValue, ?label, ?labelOffset, ?labelMinimalSize) = 
+    let ax = { y.options.xAxis with minValue = orElse minValue y.options.xAxis.minValue; maxValue = orElse maxValue y.options.xAxis.maxValue; label = orElse label y.options.xAxis.label; labelOffset = orElse labelOffset y.options.xAxis.labelOffset; labelMinimalSize = orElse labelMinimalSize y.options.xAxis.labelMinimalSize }
+    { y with options = { y.options with xAxis = ax } }
+  member y.setAxisY(?minValue, ?maxValue, ?label, ?labelOffset, ?labelMinimalSize) = 
+    let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset; labelMinimalSize = orElse labelMinimalSize y.options.yAxis.labelMinimalSize  }
+    { y with options = { y.options with yAxis = ax } }
+  // [/copy-paste]
+  member y.setSolvedComment(comment) = { y with solvedComment = Some comment }
+  member y.setLogger(logger) = { y with logger = Some logger }
+  member y.setLineColor(draw) = { y with lineColor = Some draw }
+  member y.setMarkers(markers) = { y with markers = Some markers }
+  member y.setInteractive(state) = { y with interactive = state }
+  member y.show(outputId) = Async.StartImmediate <| async {
+    let markers = defaultArg y.markers (series<string, float>.create(async.Return [||], "", "", ""))
+    let! markers = markers.data |> Async.AwaitFuture
+    let markers = markers |> Array.map (fun (k, v) -> dateOrNumberAsNumber k, v) |> Array.sortBy fst
+    return! InteractiveHelpers.showAppAsync outputId y.options y.data
+      (fun data ->
+          YouGeussLineOffsetHelpers.initState (not y.interactive) (Array.sortBy (fst >> dateOrNumberAsNumber) data))
+      (fun data size trig ->           
+          let lc = defaultArg y.lineColor "#606060"
+          let data = Array.sortBy (fst >> dateOrNumberAsNumber) data
+          let lo = defaultArg y.options.yAxis.minValue (box (dateOrNumberAsNumber (fst data.[0])))
+          let hi = defaultArg y.options.yAxis.maxValue (box (dateOrNumberAsNumber (fst data.[data.Length-1])))
+          let co = { y.options with yAxis = { y.options.yAxis with minValue = Some lo; maxValue = Some hi } }          
+          YouGeussLineOffsetHelpers.render y.solvedComment y.interactive co size markers lc trig) 
+      (fun _ -> YouGeussLineOffsetHelpers.handler (InteractiveHelpers.createLogger outputId y.logger)) } 
 
 type YouGuessSortBars = 
   private 
@@ -1040,6 +1205,9 @@ type youguess =
     { YouGuessLine.data = data; clip = None; 
       markerColor = None; guessLabel = None; knownLabel = None; markers = None
       knownColor = None; unknownColor = None; drawColor = None; 
+      options = ChartOptions.Default; logger = None; interactive = true; solvedComment = None }
+  static member vlineOffset(data:series<obj, float>) =
+    { YouGuessLineOffset.data = data; markers = None; lineColor = None; 
       options = ChartOptions.Default; logger = None; interactive = true; solvedComment = None }
 
 // ------------------------------------------------------------------------------------------------

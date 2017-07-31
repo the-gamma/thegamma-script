@@ -186,6 +186,7 @@ let knownTypes =
 
         //"youguess", "youguess"
         "YouGuessLine", "YouGuessLine"
+        "YouGuessLineOffset", "YouGuessLineOffset"
         "YouGuessSortBars", "YouGuessSortBars"
         "YouGuessColsBars", "YouGuessColsBars"
 
@@ -223,6 +224,7 @@ let e =
       yield exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Instance
 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.YouGuessLine")) BindingFlags.Instance 
+      yield exportType ctx (asm.GetType("TheGamma.Interactive.YouGuessLineOffset")) BindingFlags.Instance 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.YouGuessColsBars")) BindingFlags.Instance 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.YouGuessSortBars")) BindingFlags.Instance 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.youguess")) BindingFlags.Instance 

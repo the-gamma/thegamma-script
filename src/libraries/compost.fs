@@ -176,7 +176,7 @@ module Svg =
       | None -> style, ""
 
     anim +
-    ( "cursor:" + style.Cursor + ";") +
+    ( String.concat "" [ for c in style.Cursor.Split(',') -> "cursor:" + c + ";" ] ) +
     ( "font:" + style.Font + ";" ) +
     ( let (so, clr) = style.StrokeColor 
       let (Pixels sw) = style.StrokeWidth
@@ -899,8 +899,8 @@ module Compost =
           "mouseup" =!> mouseHandler MouseEventKind.Up
           "mouseleave" =!> fun _ evt -> triggerEvent projected evt MouseLeave
           "touchmove" =!> touchHandler TouchEventKind.Move
-          "touchdown" =!> touchHandler TouchEventKind.Start
-          "touchup" =!> touchHandler TouchEventKind.End
+          "touchstart" =!> touchHandler TouchEventKind.Start
+          "touchend" =!> touchHandler TouchEventKind.End
         ] [
           let body = renderSvg renderCtx svg |> Array.ofSeq
           yield! defs
