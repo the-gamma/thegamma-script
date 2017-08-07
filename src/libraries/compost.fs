@@ -56,8 +56,8 @@ type EventHandler<[<Measure>] 'vx, [<Measure>] 'vy> =
   | MouseDown of (MouseEvent -> (Value<'vx> * Value<'vy>) -> unit)
   | Click of (MouseEvent -> (Value<'vx> * Value<'vy>) -> unit)
   | TouchStart of (TouchEvent -> (Value<'vx> * Value<'vy>) -> unit)
-  | TouchEnd of (TouchEvent -> (Value<'vx> * Value<'vy>) -> unit)
   | TouchMove of (TouchEvent -> (Value<'vx> * Value<'vy>) -> unit)
+  | TouchEnd of (TouchEvent -> unit)
   | MouseLeave of (MouseEvent -> unit)
 
 type Orientation = 
@@ -75,7 +75,7 @@ type Shape<[<Measure>] 'vx, [<Measure>] 'vy> =
   | Shape of seq<Value<'vx> * Value<'vy>>
   | Stack of Orientation * seq<Shape<'vx, 'vy>>
   | Layered of seq<Shape<'vx, 'vy>>
-  | Axes of bool * bool * Shape<'vx, 'vy>
+  | Axes of bool * bool * bool * bool * Shape<'vx, 'vy>
   | Interactive of seq<EventHandler<'vx, 'vy>> * Shape<'vx, 'vy>
   | Padding of (float * float * float * float) * Shape<'vx, 'vy>
   | Offset of (float * float) * Shape<'vx, 'vy>
@@ -387,7 +387,7 @@ module Scales =
         let scales = calculateShapeScales points
         Scaled(scales, scales, ScaledShape(points))
     
-    | Axes(showX, showY, shape) ->
+    | Axes(showTop, showRight, showBottom, showLeft, shape) ->
         let (Scaled(origScales & (sx, sy), _, _)) = calculateScales shape 
         let (lx, hx), (ly, hy) = getExtremes sx, getExtremes sy
         
@@ -402,18 +402,29 @@ module Scales =
               yield Line [x,ly; x,hy] |> LineStyle "#e4e4e4" 1.0 1
             for y in generateAxisSteps sy do
               yield Line [lx,y; hx,y] |> LineStyle "#e4e4e4" 1.0 1 
-            yield Line [lx,hy; lx,ly; hx,ly] |> LineStyle "black" 1.0 2
-            if showX then
+            if showTop then
+              yield Line [lx,hy; hx,hy] |> LineStyle "black" 1.0 2
+              for x, l in generateAxisLabels style.FormatAxisXLabel sx do
+                yield Offset((0., -10.), Text(x, hy, VerticalAlign.Baseline, HorizontalAlign.Center, 0.0, l)) |> FontStyle "9pt sans-serif"
+            if showRight then
+              yield Line [hx,hy; hx,ly] |> LineStyle "black" 1.0 2
+              for y, l in generateAxisLabels style.FormatAxisYLabel sy do
+                yield Offset((10., 0.), Text(hx, y, VerticalAlign.Middle, HorizontalAlign.Start, 0.0, l)) |> FontStyle "9pt sans-serif"
+            if showBottom then
+              yield Line [lx,ly; hx,ly] |> LineStyle "black" 1.0 2
               for x, l in generateAxisLabels style.FormatAxisXLabel sx do
                 yield Offset((0., 10.), Text(x, ly, VerticalAlign.Hanging, HorizontalAlign.Center, 0.0, l)) |> FontStyle "9pt sans-serif"
-            if showY then
+            if showLeft then
+              yield Line [lx,hy; lx,ly] |> LineStyle "black" 1.0 2
               for y, l in generateAxisLabels style.FormatAxisYLabel sy do
-                yield Offset((-10., 0.), Text(lx, y, VerticalAlign.Middle, HorizontalAlign.End, 0.0, l)) |> FontStyle "9pt sans-serif"            
+                yield Offset((-10., 0.), Text(lx, y, VerticalAlign.Middle, HorizontalAlign.End, 0.0, l)) |> FontStyle "9pt sans-serif"
             yield shape ] |> calculateScales
 
         match shape with 
         | Scaled(_, _, ScaledLayered(shapes)) ->
-            let padding = (0., 0., (if showX then 30. else 0.), (if showY then 50. else 0.))
+            let padding = 
+              (if showTop then 30. else 0.), (if showRight then 50. else 0.),
+              (if showBottom then 30. else 0.), (if showLeft then 50. else 0.) 
             Scaled(origScales, origScales, 
               ScaledPadding(padding, 
                 Scaled(origScales, origScales, 
@@ -718,11 +729,12 @@ module Events =
   open Projections
 
   type MouseEventKind = Click | Move | Up | Down
-  type TouchEventKind = Move | End | Start 
+  type TouchEventKind = Move | Start 
 
   type InteractiveEvent<[<Measure>] 'vx, [<Measure>] 'vy> = 
     | MouseEvent of MouseEventKind * (Value<'vx> * Value<'vy>)    
     | TouchEvent of TouchEventKind * (Value<'vx> * Value<'vy>)    
+    | TouchEnd
     | MouseLeave
 
   let projectEvent scales projection event =
@@ -731,6 +743,7 @@ module Events =
     | TouchEvent(kind, (COV x, COV y)) -> TouchEvent(kind, projectInv scales (x, y) (invertProj projection))
     | MouseEvent _
     | TouchEvent _ -> failwith "TODO: projectEvent - not continuous"
+    | TouchEnd -> TouchEnd
     | MouseLeave -> MouseLeave
 
   let inScale s v = 
@@ -743,6 +756,7 @@ module Events =
   let inScales (sx, sy) event =
     match event with
     | MouseLeave -> true
+    | TouchEnd -> true
     | MouseEvent(_, (x, y)) 
     | TouchEvent(_, (x, y)) -> inScale sx x && inScale sy y
 
@@ -769,12 +783,13 @@ module Events =
                 if jse <> null then jse.preventDefault()
                 f (unbox jse) pt
             | TouchEvent(TouchEventKind.Move, pt), TouchMove(f) 
-            | TouchEvent(TouchEventKind.Start, pt), TouchStart(f) 
-            | TouchEvent(TouchEventKind.End, pt), TouchEnd(f) -> 
+            | TouchEvent(TouchEventKind.Start, pt), TouchStart(f) ->
                 if jse <> null then jse.preventDefault()
                 f (unbox jse) pt
+            | TouchEnd, EventHandler.TouchEnd f -> f (unbox jse) 
             | MouseLeave, EventHandler.MouseLeave f -> f (unbox jse) 
             | MouseLeave, _ 
+            | TouchEnd, _
             | TouchEvent(_, _), _  
             | MouseEvent(_, _), _  -> ()
 
@@ -792,6 +807,14 @@ module Derived =
     yield! line
     yield lastX, COV (CO 0.0)
     yield firstX, COV (CO 0.0) }
+
+  let VArea(line) = Shape <| seq {
+    let line = Array.ofSeq line
+    let firstY, lastY = snd line.[0], snd line.[line.Length - 1]
+    yield COV (CO 0.0), firstY
+    yield! line
+    yield COV (CO 0.0), lastY
+    yield COV (CO 0.0), firstY }
 
   let Bar(x, y) = Shape <| seq {
     yield COV x, CAR(y, 0.0)
@@ -852,10 +875,33 @@ module Compost =
       FormatAxisXLabel = defaultFormat
       FormatAxisYLabel = defaultFormat }
 
-  let createSvg (width, height) viz = 
+  let rec mapShape f (Projected(pr, sc, s)) =
+    let s = 
+      match s with
+      | ProjectedStyle(sf, s) -> (ProjectedStyle(sf, mapShape f s))
+      | ProjectedStack(o, sx) -> (ProjectedStack(o, Array.map (mapShape f) sx))
+      | ProjectedLayered(sx) -> (ProjectedLayered(Array.map (mapShape f) sx))
+      | ProjectedInteractive(e, s) -> (ProjectedInteractive(e, mapShape f s))
+      | ProjectedOffset(o, s) -> (ProjectedOffset(o, mapShape f s))
+      | (ProjectedBubble _ as s) | (ProjectedLine _ as s) | (ProjectedShape _ as s) | (ProjectedText _  as s) -> s 
+    Projected(pr, sc, f s)
+
+  let createSvg revX revY (width, height) viz = 
     let scaled = calculateScales defstyle viz
-    let master = Scale((0.0, width), (height, 0.0))
+    let master = Scale((if revX then (width, 0.0) else (0.0, width)), (if revY then (0.0, height) else (height, 0.0)))
     let projected = calculateProjections scaled master
+    let projected = 
+      if not revX && not revY then projected else
+        projected |> mapShape (fun s -> 
+          match s with
+          | ProjectedText(x, y, v, h, r, s) -> 
+              let v = match v with VerticalAlign.Baseline when revY -> VerticalAlign.Hanging | VerticalAlign.Hanging when revY -> VerticalAlign.Baseline | v -> v
+              let h = match h with HorizontalAlign.Start when revX -> HorizontalAlign.End | HorizontalAlign.End when revX -> HorizontalAlign.Start | h -> h
+              ProjectedText(x, y, v, h, r, s)
+          | ProjectedOffset((ox, oy), s) ->               
+              ProjectedOffset(((if revX then -ox else ox), (if revY then -oy else oy)), s) 
+          | s -> s)
+
 
     let defs = ResizeArray<_>()
     let svg = drawShape { Definitions = defs; Style = defstyle } projected
@@ -900,7 +946,7 @@ module Compost =
           "mouseleave" =!> fun _ evt -> triggerEvent projected evt MouseLeave
           "touchmove" =!> touchHandler TouchEventKind.Move
           "touchstart" =!> touchHandler TouchEventKind.Start
-          "touchend" =!> touchHandler TouchEventKind.End
+          "touchend" =!> fun _ evt -> triggerEvent projected evt TouchEnd
         ] [
           let body = renderSvg renderCtx svg |> Array.ofSeq
           yield! defs
