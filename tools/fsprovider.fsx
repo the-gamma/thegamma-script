@@ -174,14 +174,16 @@ let recordTypes =
 
 let ignoredTypes = 
   [ "IEnumerable`1"; "FSharpAsync`1"; "ChartData"; "IComparer"; "IEqualityComparer"; "DomNode";
-    "YouGuessColsBarsKind"; "FSharpSet`1"; "FSharpList`1" ]
+    "YouGuessColsBarsKind"; "FSharpSet`1"; "FSharpList`1"; "FSharpMap`2" ]
         
 let knownTypes = 
   [ yield! 
       [ "table`2", "table"
+        "list`2", "list"
         "placeholder", "placeholder"
         "inline", "inline"
         "series`2", "series"
+        "pair`2", "pair"
         "val`1", "value"
 
         //"youguess", "youguess"
@@ -222,6 +224,9 @@ let e =
       yield { exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Static 
                 with instance = [| "table" |] }
       yield exportType ctx (asm.GetType("TheGamma.table`2")) BindingFlags.Instance
+      yield { exportType ctx (asm.GetType("TheGamma.list`2")) BindingFlags.Static 
+                with instance = [| "list" |] }
+      yield exportType ctx (asm.GetType("TheGamma.list`2")) BindingFlags.Instance
 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.YouGuessLine")) BindingFlags.Instance 
       yield exportType ctx (asm.GetType("TheGamma.Interactive.YouGuessLineOffset")) BindingFlags.Instance 
@@ -246,10 +251,14 @@ let e =
 
       yield { exportType ctx (asm.GetType("TheGamma.General.date")) BindingFlags.Static 
                 with instance = [| "date$1" |] }
+      yield { exportType ctx (asm.GetType("TheGamma.General.dateformat")) BindingFlags.Static 
+                with instance = [| "dateformat" |] }
       yield { exportType ctx (asm.GetType("TheGamma.General.math")) BindingFlags.Static 
                 with instance = [| "math" |] }
       yield { exportType ctx (asm.GetType("TheGamma.General.number")) BindingFlags.Static 
                 with instance = [| "number" |] }
+
+      yield exportType ctx (asm.GetType("TheGamma.General.pair`2")) BindingFlags.Instance 
 
       yield exportType ctx (asm.GetType("TheGamma.Series.series`2")) BindingFlags.Instance 
       yield { exportType ctx (asm.GetType("TheGamma.Series.series`2")) BindingFlags.Static 

@@ -219,8 +219,8 @@ and series<'k, 'v> =
       return zipAny v1 v2 }
     series<obj,obj>.create(data, s.keyName, "Values", s.seriesName + " and " + s2.seriesName)
 
-  member s.joinInner<'v2>(s2:series<'k, 'v2>) : series<'k, 'v * 'v2>=
-    s.joinOuter(s2).choose(function Some(v1), Some(v2) -> Some((v1, v2)) | _ -> None)
+  member s.joinInner<'v2>(s2:series<'k, 'v2>) : series<'k, TheGamma.General.pair<'v,'v2>> =
+    s.joinOuter(s2).choose(function Some(v1), Some(v2) -> Some(TheGamma.General.pair(v1, v2)) | _ -> None)
 
   member s.appendScalar(key:'k, value:'v) =
     s |> helpers.lift (fun arr -> Array.append arr [| key, value |])

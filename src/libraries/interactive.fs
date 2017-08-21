@@ -148,13 +148,18 @@ module Internal =
   // Helpers
   let arrayMap f s = Array.map f s // REVIEW: Hack to avoid Float64Array (which behaves oddly in Safari) see: https://github.com/zloirock/core-js/issues/285
 
-  let mapColor f (clr:string) = 
+  let parseColor (clr:string) = 
     let r = parseInt (clr.Substring(1,2)) 16
     let g = parseInt (clr.Substring(3,2)) 16
     let b = parseInt (clr.Substring(5,2)) 16
-    let r, g, b = f (float r, float g, float b)
+    float r, float g, float b
+
+  let formatColor (r, g, b) = 
     let fi n = (formatInt (int n) 16).PadLeft(2, '0')
     "#" + fi r + fi g + fi b
+
+  let mapColor f (clr:string) = 
+    formatColor (f (parseColor clr))
 
   type ScalePoints = 
     { Minimum : Value<1>; Maximum : Value<1>; Middle : Value<1>; PixelSize : float }
@@ -597,6 +602,7 @@ module YouGeussLineOffsetHelpers =
 
   type YouDrawState = 
     { Completed : bool
+      Interactive : bool
       Data : (float * float)[]
       XData : obj[]
       YData : obj[]
@@ -624,6 +630,7 @@ module YouGeussLineOffsetHelpers =
     let maxData = data |> Seq.map (fst >> dateOrNumberAsNumber) |> Seq.max
 
     { Completed = completed
+      Interactive = not completed
       ChartOptions = chartOptions
       Data = numData
       XData = Array.map (snd >> box) data
@@ -634,9 +641,9 @@ module YouGeussLineOffsetHelpers =
       OffsetStart = None
       XRange = lx, hx
       YRange = ly, hy 
-      OverlayHiding = false
-      OverlayOpacity = 0.
-      CompletionStep = 0. }
+      OverlayHiding = completed
+      OverlayOpacity = if completed then 1. else 0.
+      CompletionStep = if completed then 1. else 0. }
 
   let handler log state evt = 
     let collectData () = state.Data |> Array.map (fun (k, v) -> [| box k; box v |]) |> box
@@ -656,7 +663,7 @@ module YouGeussLineOffsetHelpers =
         { state with Completed = true }
     | Animate -> { state with CompletionStep = min 1.0 (state.CompletionStep + 0.05) }
 
-  let render (solvedComment:string option) interactive (width, height) (markers:(float*obj)[]) lineColor trigger state = 
+  let render (solvedComment:string option) interactive (width, height) labels (markers:(float*obj)[]) (guessClr, correctClr, markerClr) trigger state = 
     if state.Completed && state.CompletionStep < 1.0 then
       window.setTimeout((fun () -> trigger Animate), 50) |> ignore
     if state.OverlayHiding && state.OverlayOpacity < 1. then
@@ -668,34 +675,43 @@ module YouGeussLineOffsetHelpers =
       let hi = dateOrNumberAsNumber state.ChartOptions.yAxis.maxValue.Value - offset
       cropLine state.Data lo hi |> Array.map (fun (y, x) -> COV(CO x), COV(CO (y + offset)))
 
-    let correctClr = "#bcbd22"
-    let guessClr = "#808080"
     let coreChart = 
       Layered [
-        for y, str in markers do
-          let offx = lx + (hx - lx) * 1.2
+        for (y, str), label in Seq.zip markers labels do
           let _, inx = state.Data |> Seq.map (fun (y, x) -> y + state.Offset * (1.0 - state.CompletionStep), x) |> interpolateAt y
-          let b = Bubble(COV(CO offx), COV(CO y), 4., 4.) 
-          let t = Offset((0., 5.), Text(COV(CO offx), COV(CO y), VerticalAlign.Hanging, HorizontalAlign.End, 0.0, "Event"))
-          yield t |> applyStyle (fun s -> { s with StrokeWidth = Pixels 0; Fill = Solid(0.8, HTML "purple") }) 
-          let l = Line [COV(CO inx), COV(CO y); COV(CO offx), COV(CO y)] 
-          yield l |> applyStyle (fun s -> { s with StrokeWidth = Pixels 2; StrokeColor = 0.8, HTML "purple" }) 
+          let b = Bubble(COV(CO hx), COV(CO y), 4., 4.) 
+          let t = Offset((0., 5.), Text(COV(CO hx), COV(CO y), VerticalAlign.Hanging, HorizontalAlign.End, 0.0, label))
+          yield t |> applyStyle (fun s -> { s with StrokeWidth = Pixels 0; Fill = Solid(0.8, HTML markerClr) }) 
+          let l = Line [COV(CO inx), COV(CO y); COV(CO hx), COV(CO y)] 
+          yield l |> applyStyle (fun s -> { s with StrokeWidth = Pixels 2; StrokeColor = 0.8, HTML markerClr }) 
 
-        yield Style(
-          (fun s -> { s with StrokeColor = (1.0, HTML guessClr); StrokeDashArray = [ Integer 5; Integer 5 ] }), 
-          Line (visiblePoints state.Offset) )
+        if not state.Completed then
+          yield Style(
+            (fun s -> { s with Fill = Solid(0.5, HTML guessClr) }), 
+            VShiftedArea(lx, visiblePoints state.Offset) )
+        if state.Interactive then
+          yield Style(
+            (fun s -> { s with StrokeColor = (1.0, HTML guessClr); StrokeDashArray = [ Integer 5; Integer 5 ] }), 
+            Line(visiblePoints state.Offset) )
 
         if state.Completed then 
+          let r1, g1, b1 = parseColor guessClr
+          let r2, g2, b2 = parseColor correctClr
+          let dc c1 c2 = (1.0 - state.CompletionStep) * c1 + state.CompletionStep * c2
+          let clr = formatColor (dc r1 r2, dc g1 g2, dc b1 b2)
           let correct = visiblePoints (state.Offset * (1.0 - state.CompletionStep))
           yield Style(
-            (fun s -> { s with StrokeColor = (1.0, HTML correctClr) }), 
+            (fun s -> { s with Fill = Solid(0.5, HTML clr) }), 
+            VShiftedArea(lx, correct) )
+          yield Style(
+            (fun s -> { s with StrokeColor = (1.0, HTML clr) }), 
             Layered [ Line correct]) 
         
         yield 
           Shape [ 
             COV(CO lx), COV(CO ly); COV(CO lx), COV(CO hy);
             COV(CO hx), COV(CO hy); COV(CO hx), COV(CO ly) ]
-          |> applyStyle (fun x -> { x with Fill = Solid(0.9 * (1. - state.OverlayOpacity), HTML "#eaeaea") })
+          |> applyStyle (fun x -> { x with Fill = Solid(0.75 * (1. - state.OverlayOpacity), HTML "#eaeaea") })
 
       ] |> applyStyle(fun s -> 
         let cursor = 
@@ -712,7 +728,7 @@ module YouGeussLineOffsetHelpers =
       |> applyAxes false false true true
 
     let chart =
-      Padding((0., 100., 0., 0.), chart)
+      Padding((20., 0., 0., 0.), chart)
       |> applyInteractive
           ( if state.Completed then []
             else
@@ -1213,9 +1229,12 @@ type YouGuessLineOffset =
   private 
     { data : series<obj, float> 
       markers : series<obj, obj> option
-      lineColor : string option 
+      labels : string[]
       logger : (obj -> unit) option
       interactive : bool
+      lineColor : string option 
+      guessColor : string option
+      markerColor : string option
       solvedComment : string option
   // [copy-paste]
       options : ChartOptions }  
@@ -1234,9 +1253,10 @@ type YouGuessLineOffset =
     let ax = { y.options.yAxis with minValue = orElse minValue y.options.yAxis.minValue; maxValue = orElse maxValue y.options.yAxis.maxValue; label = orElse label y.options.yAxis.label; labelOffset = orElse labelOffset y.options.yAxis.labelOffset; labelMinimalSize = orElse labelMinimalSize y.options.yAxis.labelMinimalSize  }
     { y with options = { y.options with yAxis = ax } }
   // [/copy-paste]
+  member y.setLabels(labels) = { y with labels = labels }
   member y.setSolvedComment(comment) = { y with solvedComment = Some comment }
   member y.setLogger(logger) = { y with logger = Some logger }
-  member y.setLineColor(draw) = { y with lineColor = Some draw }
+  member y.setColors(?draw, ?solved, ?marker) = { y with guessColor = orElse draw y.guessColor; lineColor = orElse solved y.lineColor; markerColor = orElse marker y.markerColor }
   member y.setMarkers(markers) = { y with markers = Some markers }
   member y.setInteractive(state) = { y with interactive = state }
   member y.show(outputId) = Async.StartImmediate <| async {
@@ -1251,8 +1271,10 @@ type YouGuessLineOffset =
           let co = { y.options with yAxis = { y.options.yAxis with minValue = Some lo; maxValue = Some hi } }
           YouGeussLineOffsetHelpers.initState (not y.interactive) co (Array.sortBy (fst >> dateOrNumberAsNumber) data))
       (fun data size trig ->           
-          let lc = defaultArg y.lineColor "#606060"
-          YouGeussLineOffsetHelpers.render y.solvedComment y.interactive size markers lc trig) 
+          let lc = defaultArg y.lineColor "#bcbd22"
+          let gc = defaultArg y.guessColor "#808080"
+          let mc = defaultArg y.markerColor "#800080"
+          YouGeussLineOffsetHelpers.render y.solvedComment y.interactive size y.labels markers (gc, lc, mc) trig) 
       (fun _ -> YouGeussLineOffsetHelpers.handler (InteractiveHelpers.createLogger outputId y.logger)) } 
 
 type YouGuessSortBars = 
@@ -1289,6 +1311,7 @@ type youguess =
       options = ChartOptions.Default; logger = None; interactive = true; solvedComment = None }
   static member vlineOffset(data:series<obj, float>) =
     { YouGuessLineOffset.data = data; markers = None; lineColor = None; 
+      guessColor = None; markerColor = None; labels = [| for c in 'A' .. 'Z' -> string c |]
       options = ChartOptions.Default; logger = None; interactive = true; solvedComment = None }
 
 // ------------------------------------------------------------------------------------------------

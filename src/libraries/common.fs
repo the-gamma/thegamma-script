@@ -33,6 +33,9 @@ let dateOrNumberAsNumber(n:obj) : float = failwith "!"
 [<Emit("""($0.toLocaleString("en-US",{day:"numeric",year:"numeric",month:"short"}))""")>]
 let formatDate(d:obj) : string = failwith "!"
 
+[<Emit("""$0.toLocaleString("en-GB",{day:"numeric",year:"numeric",month:"long"})""")>]
+let formatLongDate(d:obj) : string = failwith "!"
+
 [<Emit("""($0.toLocaleString("en-US",{hour:"numeric",minute:"numeric",second:"numeric"}))""")>]
 let formatTime(d:obj) : string = failwith "!"
 
@@ -106,7 +109,7 @@ let isLocalHost() =
 
 let mutable enabledCategories = 
   if not (isLocalHost ()) then set []
-  else set [] 
+  else set ["TYPECHECKER"; "PROVIDERS"] 
   //else set ["*"] 
 type Log =
   static member setEnabled(cats) = enabledCategories <- cats

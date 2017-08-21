@@ -220,7 +220,6 @@ module Scales =
     | Categorical(vals) ->  CAR(vals.[0], 0.0), CAR(vals.[vals.Length-1], 1.0)
 
   /// Given a range, return a new aligned range together with the magnitude  
-  /// (that is 10^n such that it fits in lo .. hi less than 10 times)
   let calculateMagnitudeAndRange (lo:float, hi:float) = 
     let magnitude = 10. ** round (log10 (hi - lo))
     let magnitude = magnitude / 2.
@@ -229,7 +228,7 @@ module Scales =
   /// Get number of decimal points to show for the given range
   let decimalPoints range = 
     let magnitude, _ = calculateMagnitudeAndRange range
-    max 0. (-(log10 (magnitude * 2.0)))
+    max 0. (ceil (-(log10 magnitude)))
 
   /// Extend the given range to a nicely adjusted size
   let adjustRange range = snd (calculateMagnitudeAndRange range)
@@ -816,6 +815,14 @@ module Derived =
     yield COV (CO 0.0), lastY
     yield COV (CO 0.0), firstY }
 
+  let VShiftedArea(offs, line) = Shape <| seq {
+    let line = Array.ofSeq line
+    let firstY, lastY = snd line.[0], snd line.[line.Length - 1]
+    yield COV (CO offs), firstY
+    yield! line
+    yield COV (CO offs), lastY
+    yield COV (CO offs), firstY }
+
   let Bar(x, y) = Shape <| seq {
     yield COV x, CAR(y, 0.0)
     yield COV x, CAR(y, 1.0)
@@ -862,8 +869,8 @@ module Compost =
           match scale with
           | Continuous(CO l, CO h) -> decimalPoints (unbox l, unbox h)
           | _ -> 0.
-        Common.niceNumber (unbox v) (int dec)    
-    
+        Common.niceNumber (System.Math.Round(unbox<float> v, int dec)) (int dec)    
+
   let defstyle = 
     { Fill = Solid(1.0, RGB(196, 196, 196))
       StrokeColor = (1.0, RGB(256, 0, 0))

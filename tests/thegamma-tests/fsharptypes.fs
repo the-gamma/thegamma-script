@@ -73,6 +73,12 @@ let ftyp n tya mems =
 let fnamed n tya = 
   { NamedType.kind = "named"; name = n; typargs = Array.ofList tya }
 
+let pair = 
+  ftyp "pair" [fpar "a"; fpar "b"] [
+    fmeth "first" [] (fpar "a") []
+    fmeth "second" [] (fpar "b") []
+  ]
+
 let series = 
   ftyp "series" [fpar "a"] [
     fmeth "make" [fpar "b"] (fnamed "series" [fpar "b"]) [
@@ -89,6 +95,8 @@ let series =
     fmeth "sort" [] (fnamed "series" [fpar "a"]) [
       "fast", true, fbool
       "reverse", true, fbool ]
+    fmeth "join" [fpar "b"] (fnamed "series" [fnamed "pair" [fpar "a"; fpar "b"]]) [
+      "s", false, fnamed "series" [fpar "b"] ]
     fmeth "head" [] (fpar "a") []
   ]
 
@@ -101,6 +109,7 @@ let table =
 
 let types = System.Collections.Generic.Dictionary<_, _>()
 let lookupNamed n = types.[n]
+types.Add("pair", importProvidedType "http://demo" lookupNamed pair)
 types.Add("table", importProvidedType "http://demo" lookupNamed table)
 types.Add("series", importProvidedType "http://demo" lookupNamed series)
 
@@ -189,3 +198,12 @@ let ``Report error when generic method type cannot be inferred`` () =
   """
   let actual = check code (isVariable "res") vars
   actual |> assertErrors [310,"(1, true)"]
+
+[<Test>]
+let ``Type check call to join method that returns a pair`` () =
+  let code = """
+    let res = series.make([1]).join(series.make(["a"])).head().first()
+  """
+  let actual = check code (isVariable "res") vars
+  actual |> assertType (Type.Primitive PrimitiveType.Number)
+  actual |> assertErrors []

@@ -148,10 +148,10 @@ let zzz() =
   let s3 : Shape<1,1> = Bar(CO 50.0, CA "C")
   let s = 
     Layered
-      [ OuterScale(None, Some(Continuous(CO 0.0, CO 2.0)), Axes(true, true, s1)) 
-        OuterScale(None, Some(Continuous(CO 2.0, CO 3.0)), Axes(true, true, s2))
+      [ OuterScale(None, Some(Continuous(CO 0.0, CO 2.0)), Axes(false, false, true, true, s1)) 
+        OuterScale(None, Some(Continuous(CO 2.0, CO 3.0)), Axes(false, false, true, true, s2))
         OuterScale(None, Some(Continuous(CO 3.0, CO 4.0)), Padding((0.,0.,0.,100.), s3)) ]
-  let svg = Compost.createSvg (500.0, 500.0) s
+  let svg = Compost.createSvg false false (500.0, 500.0) s
   preview (render svg)
 
   render svg

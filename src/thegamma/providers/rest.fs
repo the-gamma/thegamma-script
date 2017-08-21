@@ -191,7 +191,7 @@ let rec createRestType lookupNamed resolveProvider root cookies url =
               let matched = Seq.zip parameters tys
               let newCookies = 
                 matched |> Seq.choose (function
-                  | pa, (_, Some value) when pa.kind = "static" -> Some(pa.cookie.Value + "=" + string value)
+                  | pa, (_, Some value) when pa.kind = "static" -> Some(pa.cookie.Value + "=" + Fable.Import.JS.encodeURIComponent(string value))
                   | _ -> None) 
               let cookies = Seq.append [cookies] newCookies |> String.concat "&"
               createReturnType cookies

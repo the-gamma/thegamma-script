@@ -15,10 +15,29 @@ type html =
   static member img(url:string) = 
     box (h?img [ "src" => url ] [])
 
+type list<'k,'v> =
+  { data : series<'k,'v> 
+    listTag : string
+    elementTag : string
+    itemFormat : 'v -> obj }
+  member t.show(outputId) = Async.StartImmediate <| async {
+    let! vs = t.data.data |> Async.AwaitFuture
+    let els = [ for _, v in vs -> sprintf "<%s>%s</%s>" t.elementTag (string (t.itemFormat v)) t.elementTag ]
+    document.getElementById(outputId).innerHTML <-
+      sprintf "<%s>%s</%s>" t.listTag (String.concat "" els) t.listTag }
+  member t.setTags(list, element) = 
+    { t with listTag = list; elementTag = element }
+  member t.setFormat(f:'v -> obj) = 
+    { t with itemFormat = f }
+  static member create(data:series<_, _>) = 
+    { data = data; listTag = "ol"; elementTag = "li"
+      itemFormat = fun o -> box o }
+
 type table<'k,'v> =
   { data : series<'k,'v>
     showKey : bool option 
     emptyText : string
+    columnFormatters : Map<string, obj>
     hiddenColumns : Set<string>
     addedColumns : list<string * ('v -> obj)> }
 
@@ -26,6 +45,7 @@ type table<'k,'v> =
     { table.data = data
       emptyText = "No data available"
       hiddenColumns = Set.empty
+      columnFormatters = Map.empty
       addedColumns = []
       showKey = None }
 
@@ -34,7 +54,11 @@ type table<'k,'v> =
       hiddenColumns = t.hiddenColumns
       addedColumns = t.addedColumns
       emptyText = defaultArg emptyText t.emptyText
+      columnFormatters = t.columnFormatters
       showKey = match showKey with None -> t.showKey | sk -> sk }
+
+  member t.setFormat(column, formatter) = 
+    { t with columnFormatters = t.columnFormatters.Add(column, formatter) }
 
   member t.hideColumns(names:string[]) =
     { t with hiddenColumns = Set.ofArray names }
@@ -91,7 +115,8 @@ type table<'k,'v> =
                 let formattedVals =
                   [ if isObject v then 
                       for kv in filteredProperties v do
-                        if isDate kv.value then yield text (formatDateTime kv.value)
+                        if t.columnFormatters.ContainsKey kv.key then yield text ((unbox<_ -> _> t.columnFormatters.[kv.key]) kv.value)
+                        elif isDate kv.value then yield text (formatDateTime kv.value)
                         elif not (isNumber kv.value) then yield text (kv.value.ToString())
                         elif isNaN (unbox kv.value) then yield text ""
                         else yield text (niceNumber kv.value 2) 

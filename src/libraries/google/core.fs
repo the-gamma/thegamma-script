@@ -172,6 +172,6 @@ module ChartDataOperations =
     let data = GoogleCharts.createTable()
     data.addColumn("number", v1.seriesName) |> ignore
     data.addColumn("number", v2.seriesName) |> ignore
-    let! vals = v1.joinInner(v2).map(fun (v1,v2) -> [| box v1; box v2 |]).data |> Async.AwaitFuture
+    let! vals = v1.joinInner(v2).map(fun v -> [| box v.first; box v.second |]).data |> Async.AwaitFuture
     vals |> Array.map snd |> data.addRows |> ignore
     return data } }

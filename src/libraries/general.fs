@@ -22,5 +22,12 @@ type date =
   static member date(year,month,day) = DateTime(year,month,day)
   static member time(year,month,day,hour,minute,second) = DateTime(year,month,day,hour,minute,second)
 
+type dateformat = 
+  static member longDate(dt:obj) : string = formatLongDate (unbox<System.DateTime> dt)
+  
 type number = 
   static member format(n:float, ?decimals) = niceNumber n (defaultArg decimals 999) 
+
+type pair<'t1, 't2> internal (v1:'t1, v2:'t2) = 
+  member x.first = v1
+  member x.second = v2
