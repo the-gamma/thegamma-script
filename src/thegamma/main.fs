@@ -281,6 +281,9 @@ type gamma(ctx:TheGammaContext) =
             endLine = e.Range.End.Line; endColumn = e.Range.End.Column }) 
       |> f )
 
+  member x.createBlocks(id) = 
+    Blocks.createBlockEditor ctx.checkingService ctx.providers.globals id
+
   member x.createEditor(id, source, options) =
 
     // Create editor using the size of the #id element, or size given by the user.

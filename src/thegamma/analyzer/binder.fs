@@ -162,7 +162,7 @@ let bindProgram ctx (program:Program) =
     program.Body.Node |> List.fold (fun (ctx, nodes) cmd -> 
       let ctx, node = bindCommand ctx cmd
       ctx, node::nodes) (ctx, [])  
-  bindEntity ctx (EntityKind.Program(ents)),
+  bindEntity ctx (EntityKind.Program(ents)) |> setEntity ctx program.Body,
   BindingResult(ctx.Bound.ToArray())
   
 /// Create a new binding context - this stores cached entities

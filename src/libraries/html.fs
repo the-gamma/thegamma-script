@@ -122,6 +122,48 @@ let renderTo (node:HTMLElement) dom =
   let el, f = render dom
   node.appendChild(el) |> ignore
   f()
+
+let createVirtualDomAsyncApp id initial r u = 
+  let event = new Event<'T>()
+  let trigger e = event.Trigger(e)  
+  let mutable container = document.createElement("div") :> Node
+  document.getElementById(id).innerHTML <- ""
+  document.getElementById(id).appendChild(container) |> ignore
+  let mutable tree = Fable.Core.JsInterop.createObj []
+  let mutable state = initial
+
+  let handleEvent evt = Async.StartImmediate <| async {
+    match evt with 
+    | Some e -> 
+        let! ns = u state e 
+        state <- ns
+    | _ -> ()
+    let newTree = r trigger state |> renderVirtual
+    let patches = Virtualdom.diff tree newTree
+    container <- Virtualdom.patch container patches
+    tree <- newTree }
+  
+  handleEvent None
+  event.Publish.Add(Some >> handleEvent)
+
+let createVirtualDomApp id initial r u = 
+  let event = new Event<'T>()
+  let trigger e = event.Trigger(e)  
+  let mutable container = document.createElement("div") :> Node
+  document.getElementById(id).innerHTML <- ""
+  document.getElementById(id).appendChild(container) |> ignore
+  let mutable tree = Fable.Core.JsInterop.createObj []
+  let mutable state = initial
+
+  let handleEvent evt = 
+    state <- match evt with Some e -> u state e | _ -> state
+    let newTree = r trigger state |> renderVirtual
+    let patches = Virtualdom.diff tree newTree
+    container <- Virtualdom.patch container patches
+    tree <- newTree
+  
+  handleEvent None
+  event.Publish.Add(Some >> handleEvent)
   
 let text s = Text(s)
 let (=>) k v = k, Attribute(v)

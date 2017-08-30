@@ -842,25 +842,6 @@ module Compost =
   open Events
   open Svg
     
-  let app id initial r u = 
-    let event = new Event<'T>()
-    let trigger e = event.Trigger(e)  
-    let mutable container = document.createElement("div") :> Node
-    document.getElementById(id).innerHTML <- ""
-    document.getElementById(id).appendChild(container) |> ignore
-    let mutable tree = Fable.Core.JsInterop.createObj []
-    let mutable state = initial
-
-    let handleEvent evt = 
-      state <- match evt with Some e -> u state e | _ -> state
-      let newTree = r trigger state |> renderVirtual
-      let patches = Virtualdom.diff tree newTree
-      container <- Virtualdom.patch container patches
-      tree <- newTree
-  
-    handleEvent None
-    event.Publish.Add(Some >> handleEvent)
-
   let defaultFormat scale value = 
     match value with
     | CAR(CA s, _) -> s

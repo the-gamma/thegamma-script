@@ -66,7 +66,7 @@ module InteractiveHelpers =
         ( match opts.size with _, Some h -> h | _ -> max 400. (element.clientWidth / 2.) ) 
       do
         try
-          Compost.app outputId (initial data) (render data size) (update data)
+          createVirtualDomApp outputId (initial data) (render data size) (update data)
         with e ->
           Log.exn("GUI", "Interactive rendering failed: %O", e) } 
 
