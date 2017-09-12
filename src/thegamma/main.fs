@@ -140,6 +140,8 @@ let evaluate ctx code outputId = async {
   TheGamma.Series.series<int, int>.values([| 1 |]) |> ignore
   TheGamma.placeholder.create("") |> ignore
   TheGamma.Interactive.youguess.line |> ignore
+  TheGamma.General.test("") |> ignore
+
   Log.trace("interpreter", "Main evaluating: %O", code)
   return eval code }
 

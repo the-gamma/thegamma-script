@@ -31,3 +31,10 @@ type number =
 type pair<'t1, 't2> internal (v1:'t1, v2:'t2) = 
   member x.first = v1
   member x.second = v2
+
+type test(s1:string) = 
+  static member create(text) = test(text)
+  member x.append(s2) = test(s1 + s2)
+  member x.show(outputId) = 
+    Fable.Import.Browser.document.getElementById(outputId)
+      .innerHTML <- sprintf "<h1 style='color:blue'>%s</h1>" s1

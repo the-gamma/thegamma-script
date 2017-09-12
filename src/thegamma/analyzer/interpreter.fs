@@ -41,6 +41,7 @@ let evaluateExpression (_stored:RuntimeValue[]) (expr:Expression) =
     TheGamma.Series.series<int, int>.values([| 1 |]) |> ignore    
     TheGamma.placeholder.create("") |> ignore
     TheGamma.Interactive.youguess.line |> ignore
+    TheGamma.General.test("") |> ignore
 
     // HACK (2/2) The name `_stored` may appear in the generated code!
     _stored.Length |> ignore

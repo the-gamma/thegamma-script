@@ -185,6 +185,7 @@ let knownTypes =
         "series`2", "series"
         "pair`2", "pair"
         "val`1", "value"
+        "test", "test"
 
         //"youguess", "youguess"
         "YouGuessLine", "YouGuessLine"
@@ -248,6 +249,10 @@ let e =
       yield exportType ctx (asm.GetType("TheGamma.Interactive.compost")) BindingFlags.Instance 
       yield { exportType ctx (asm.GetType("TheGamma.Interactive.compost")) BindingFlags.Static 
                 with instance = [| "compost" |] }
+
+      yield exportType ctx (asm.GetType("TheGamma.General.test")) BindingFlags.Instance 
+      yield { exportType ctx (asm.GetType("TheGamma.General.test")) BindingFlags.Static 
+                with instance = [| "test" |] }
 
       yield { exportType ctx (asm.GetType("TheGamma.General.date")) BindingFlags.Static 
                 with instance = [| "date$1" |] }
