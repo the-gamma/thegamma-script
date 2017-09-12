@@ -161,7 +161,8 @@ let createBlockEditor svc globals id = Async.StartImmediate <| async {
     let state = State.Create(svc, globals)
     let! state = 
       //["olympics"; "group data"; "by Games"; "average Year"]
-      ["olympics"; "paging"; "take"]
+      //["olympics"; "paging"; "take"]
+      ["enigma"]
       |> List.fold (fun st s -> async { let! st = st in return! update st (AddElement(s)) }) (async.Return state)
     createVirtualDomAsyncApp id state render update
   with e -> 
