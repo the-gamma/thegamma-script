@@ -647,8 +647,6 @@ module YouGeussLineOffsetHelpers =
 
   let handler log state evt = 
     let collectData () = state.Data |> Array.map (fun (k, v) -> [| box k; box v |]) |> box
-    //let collectGuesses () = state.Guessed |> Seq.choose (function (k, Set v) -> Some [| box k; box v |] | _ -> None) |> Array.ofSeq |> box
-    printfn "offset=%A" state.Offset
     match evt with
     | StopMoving -> { state with OffsetStart = None }
     | HideOverlay -> { state with OverlayOpacity = state.OverlayOpacity + 0.1 }
@@ -659,7 +657,7 @@ module YouGeussLineOffsetHelpers =
         if state.OffsetStart.IsNone then state // should not happen
         else { state with Offset = min hi (max lo (y - state.OffsetStart.Value)) }
     | ShowResults -> 
-        log "completed" [ (*"guess", collectGuesses();*) "values", collectData() ]
+        log "completed" [ "offset", box state.Offset; "values", collectData() ]
         { state with Completed = true }
     | Animate -> { state with CompletionStep = min 1.0 (state.CompletionStep + 0.05) }
 
