@@ -1,3 +1,6 @@
+ * 0.1.21 - Include libraries.json in the release
+ * 0.1.20 - Fix failed release
+ * 0.1.19 - Log offset in YouGuess offset chart
  * 0.1.18 - Dates, joins, line offset colors, lists, encode cookies in REST provider
  * 0.1.15 - Interactive (solved comments, better line), + on strings, filter by dates in pivot
  * 0.1.14 - Fix parsing of chains with calls
