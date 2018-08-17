@@ -1,3 +1,4 @@
+ * 0.1.22 - Fix Firefox bug in interactive charts
  * 0.1.21 - Include libraries.json in the release
  * 0.1.20 - Fix failed release
  * 0.1.19 - Log offset in YouGuess offset chart

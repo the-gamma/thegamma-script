@@ -44,7 +44,7 @@ let createTree ns tag args children =
       | k, Property o ->
           props.Add(k, o)
       | k, Event f ->
-          props.Add ("on" + k, box (fun o -> f (getProperty o "target") (event()) ))
+          props.Add ("on" + k, box (fun o -> f (getProperty o "target") o ))
     let attrs = JsInterop.createObj attrs
     let ns = if ns = null || ns = "" then [] else ["namespace", box ns]
     let props = JsInterop.createObj (Seq.append (ns @ ["attributes", attrs]) props)
