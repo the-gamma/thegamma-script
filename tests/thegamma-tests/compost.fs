@@ -141,6 +141,7 @@ let zzzzzz() =
   Events.triggerEvent projected null (Events.MouseEvent(Events.Click, (COV (CO 250.), COV (CO 350.))))
   Events.triggerEvent projected null (Events.MouseEvent(Events.Click, (COV (CO 250.), COV (CO 400.))))
 
+(*
 [<Test>]
 let zzz() = 
   let s1 : Shape<1,1> = Stack(Vertical, [ Bar(CO 50.0, CA "A"); Bar(CO 100.0, CA "B") ])
@@ -155,3 +156,4 @@ let zzz() =
   preview (render svg)
 
   render svg
+  *)
