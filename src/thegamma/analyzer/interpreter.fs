@@ -35,6 +35,7 @@ let evaluateExpression (_stored:RuntimeValue[]) (expr:Expression) =
     TheGamma.TypeProvidersRuntime.RuntimeContext("lol", "", "troll") |> ignore
     TheGamma.TypeProvidersRuntime.trimLeft |> ignore
     TheGamma.TypeProvidersRuntime.convertTupleSequence |> ignore
+    TheGamma.TypeProvidersRuntime.convertSequence |> ignore
     TheGamma.GoogleCharts.chart.bar |> ignore
     TheGamma.table<int, int>.create(s) |> ignore
     TheGamma.General.date.now() |> ignore

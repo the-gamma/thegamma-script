@@ -135,6 +135,8 @@ let evaluate ctx code outputId = async {
   TheGamma.TypeProvidersRuntime.RuntimeContext("lol", "", "troll") |> ignore
   TypeProvidersRuntime.trimLeft |> ignore
   TheGamma.GoogleCharts.chart.bar |> ignore
+  TheGamma.TypeProvidersRuntime.convertTupleSequence |> ignore
+  TheGamma.TypeProvidersRuntime.convertSequence |> ignore
   TheGamma.table<int, int>.create(s) |> ignore
   TheGamma.General.date.now() |> ignore
   TheGamma.Series.series<int, int>.values([| 1 |]) |> ignore
