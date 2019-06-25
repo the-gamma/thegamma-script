@@ -80,7 +80,8 @@ let trimLeft c (s:string) = s.ToCharArray() |> Array.skipWhile ((=) c) |> System
 let trimRight c (s:string) = s.ToCharArray() |> Array.rev |> Array.skipWhile ((=) c) |> Array.rev |> System.String
 
 let concatUrl (a:string) (b:string) =
-  (trimRight '/' a) + "/" + (trimLeft '/' b)
+  if b.StartsWith("http://") || b.StartsWith("https://") then b
+  else (trimRight '/' a) + "/" + (trimLeft '/' b)
 
 let load url cookies = async {
   let! json = Http.Request("GET", url, cookies=cookies)

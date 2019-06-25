@@ -1,3 +1,4 @@
+ * 0.1.26 - Support absolute links in REST provider nested types
  * 0.1.22 - Fix Firefox bug in interactive charts
  * 0.1.21 - Include libraries.json in the release
  * 0.1.20 - Fix failed release
