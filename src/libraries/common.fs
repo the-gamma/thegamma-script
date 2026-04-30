@@ -1,8 +1,9 @@
 ﻿module TheGamma.Common
 
 open Fable.Core
-open Fable.Import.JS
-open Fable.Import.Browser
+open Fable.Core.JsInterop
+open Browser
+open Browser.Types
 open System.Collections.Generic
 module FsOption = Microsoft.FSharp.Core.Option
 
@@ -145,22 +146,25 @@ type Log =
   static member error(category:string, msg:string, [<System.ParamArray>] args) = 
     Log.message("ERROR", category, msg, args)
 
+[<Emit("""(function(meth, url, data, cookies, cont, econt) {
+  var headers = {};
+  if (cookies && cookies !== '') headers['X-Cookie'] = cookies;
+  var opts = {method:meth, headers:headers};
+  if (meth !== 'GET' && meth !== 'HEAD') opts.body = data || '';
+  fetch(url, opts)
+    .then(function(r) {
+      if (r.ok) return r.text();
+      throw new Error(meth + ' ' + url + ' failed: ' + r.status + ' ' + r.statusText);
+    })
+    .then(function(t) { cont(t); })
+    .catch(function(e) { econt(e); });
+})($0, $1, $2, $3, $4, $5)""")>]
+let private fetchReq (meth:string) (url:string) (data:string) (cookies:string) (cont:string->unit) (econt:exn->unit) : unit = failwith "JS"
+
 type Http =
-  /// Send HTTP request asynchronously
   static member Request(meth, url, ?data, ?cookies) =
     Async.FromContinuations(fun (cont, econt, _) ->
-      let xhr = XMLHttpRequest.Create()
-      xhr.``open``(meth, url, true)
-      match cookies with 
-      | Some cookies when cookies <> "" -> xhr.setRequestHeader("X-Cookie", cookies)
-      | _ -> ()
-      xhr.onreadystatechange <- fun _ ->
-        if xhr.readyState > 3. && xhr.status = 200. then
-          cont(xhr.responseText)
-        if xhr.readyState > 3. && xhr.status = 0. then
-          econt(System.Exception(meth + " " + url + " failed: " + xhr.statusText))
-        obj()
-      xhr.send(defaultArg data "") )
+      fetchReq meth url (defaultArg data "") (defaultArg cookies "") cont econt)
 
 type Future<'T> = 
   abstract Then : ('T -> unit) -> unit

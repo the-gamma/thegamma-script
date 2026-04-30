@@ -1,62 +1,55 @@
-﻿#if INTERACTIVE
-#r "../../src/thegamma/bin/Debug/thegamma.dll"
-#r "../../packages/NUnit/lib/net45/nunit.framework.dll"
-#else
-[<NUnit.Framework.TestFixture>]
 module TheGamma.Tests.Formatter
-#endif
+
+open Fable.Mocha
 open TheGamma
 open TheGamma.Ast
-open NUnit.Framework
 
 // --------------------------------------------------------------------------------------
 // Helpers for writing tests for parser
 // --------------------------------------------------------------------------------------
 
-/// Type-safe assertion
-let equal (expected:'T) (actual:'T) = Assert.AreEqual(expected, actual)
+let equal (expected:'T) (actual:'T) =
+  if expected <> actual then failwithf "Expected '%A' but was '%A'" expected actual
 
-/// Tokenize & parse test code
-let parse (code:string) = 
-  let code = code.Replace("\r", "").Replace("\n    ","\n")
+let parse (code:string) =
+  let code = code.Replace("\r", "").Replace("\n      ","\n")
   code, Parser.parseProgram code |> fst
 
 // --------------------------------------------------------------------------------------
 // TESTS: Parser keeps all the whitespace
 // --------------------------------------------------------------------------------------
 
-[<Test>]
-let ``Whitespace preserved in sample call chain (dot at the start)``() =
-  let code, prog = parse """
-    let z = olympics
-      .'by athlete'
-        .'United States'.'Michael Phelps'.data
-      .'group data'.'by Athlete'.'sum Gold'.then
-      .paging.skip(10).take(10)
-      .'get series'
-        .'with key Athlete'.'and value Gold'"""
-  equal code (Ast.formatProgram prog)
+let tests = testList "Formatter" [
+  testCase "Whitespace preserved in sample call chain (dot at the start)" <| fun () ->
+    let code, prog = parse """
+      let z = olympics
+        .'by athlete'
+          .'United States'.'Michael Phelps'.data
+        .'group data'.'by Athlete'.'sum Gold'.then
+        .paging.skip(10).take(10)
+        .'get series'
+          .'with key Athlete'.'and value Gold'"""
+    equal code (Ast.formatProgram prog)
 
-[<Test>]
-let ``Whitespace preserved including placeholder``() =
-  let code, prog = parse """
-    let z = olympics
-      .'by athlete'
-        .'United States'.'Michael Phelps'.data
-      .'group data'.[foo:'by Athlete'].'sum Gold'.then
-      .paging.skip(10).take(10)
-      .'get series'
-        .'with key Athlete'.'and value Gold'"""
-  equal code (Ast.formatProgram prog)
+  testCase "Whitespace preserved including placeholder" <| fun () ->
+    let code, prog = parse """
+      let z = olympics
+        .'by athlete'
+          .'United States'.'Michael Phelps'.data
+        .'group data'.[foo:'by Athlete'].'sum Gold'.then
+        .paging.skip(10).take(10)
+        .'get series'
+          .'with key Athlete'.'and value Gold'"""
+    equal code (Ast.formatProgram prog)
 
-[<Test>]
-let ``Whitespace preserved in sample call chain (dot at the end)``() =
-  let code, prog = parse """
-    let z = olympics.
-      'by athlete'.
-         'United States'.'Michael Phelps'.data.
-      'group data'.'by Athlete'.'sum Gold'.then.
-      paging.skip(10).take(10).
-      'get series'.
-        'with key Athlete'.'and value Gold'"""
-  equal code (Ast.formatProgram prog)
+  testCase "Whitespace preserved in sample call chain (dot at the end)" <| fun () ->
+    let code, prog = parse """
+      let z = olympics.
+        'by athlete'.
+           'United States'.'Michael Phelps'.data.
+        'group data'.'by Athlete'.'sum Gold'.then.
+        paging.skip(10).take(10).
+        'get series'.
+          'with key Athlete'.'and value Gold'"""
+    equal code (Ast.formatProgram prog)
+]

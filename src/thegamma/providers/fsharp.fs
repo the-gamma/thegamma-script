@@ -8,7 +8,14 @@ open TheGamma.Babel
 open TheGamma.Babel.BabelOperators
 open TheGamma.Common
 open Fable.Import
+open Fable.Core
 open ProviderHelpers
+
+// Fable 4.x: interface type tests fail at runtime; use property checks instead
+[<Emit("typeof $0.FullName === 'string' && typeof $0.TypeParameterCount === 'number'")>]
+let isGenericTypeDefinition (o: obj) : bool = failwith "JS"
+[<Emit("$0.TypeDefinition !== undefined && $0.TypeArguments !== undefined")>]
+let isGenericType (o: obj) : bool = failwith "JS"
 
 // ------------------------------------------------------------------------------------------------
 // Records that represent the JSON with metadata about the F# types
@@ -103,31 +110,36 @@ and TypeSchema =
 // ------------------------------------------------------------------------------------------------
 
 let rec mapGenericType typ g =
-  match typ with 
-  | Type.Delayed(f) -> 
+  match typ with
+  | Type.Delayed(f) ->
       Type.Delayed(Async.CreateNamedFuture "applyTypes" <| async {
         let! res = Async.AwaitFuture f
         return mapGenericType res g })
-  | Type.Object(:? GenericTypeDefinition as gtd) -> 
+  | Type.Object obj when isGenericTypeDefinition (box obj) ->
+      let gtd = unbox<GenericTypeDefinition> (box obj)
       Type.Object(gtd.Apply([ for t in g gtd -> TypeSchema.Primitive t]).Substitute(fun _ -> None))
   | t -> t
 
 let rec applyTypes typ tyargs =
-  match typ with 
-  | Type.Delayed(f) -> 
+  match typ with
+  | Type.Delayed(f) ->
       Type.Delayed(Async.CreateNamedFuture "applyTypes" <| async {
         let! res = Async.AwaitFuture f
         return applyTypes res tyargs })
-  | Type.Object(:? GenericTypeDefinition as gtd) -> 
+  | Type.Object obj when isGenericTypeDefinition (box obj) ->
+      let gtd = unbox<GenericTypeDefinition> (box obj)
       Type.Object(gtd.Apply([ for t in tyargs -> TypeSchema.Primitive t]).Substitute(fun _ -> None))
   | _ -> failwith "applyTypes: Expected generic type definition"
       
 let rec unifyTypes ctx schemas tys = 
   match schemas, tys with
   | [], [] -> Some ctx
-  | TypeSchema.GenericType(gs)::ss, Type.Object(:? GenericType as gt)::ts 
-      when gt.TypeDefinition.FullName = gs.TypeDefinition.FullName && 
-        List.length gs.TypeArguments = List.length gt.TypeArguments ->
+  | TypeSchema.GenericType(gs)::ss, Type.Object obj::ts
+      when isGenericType (box obj) &&
+        (let gt = unbox<GenericType> (box obj) in
+         gt.TypeDefinition.FullName = gs.TypeDefinition.FullName &&
+         List.length gs.TypeArguments = List.length gt.TypeArguments) ->
+      let gt = unbox<GenericType> (box obj)
       unifyTypes ctx (gs.TypeArguments @ ss) (gt.TypeArguments @ ts)
   | TypeSchema.Primitive(t1)::ss, t2::ts when Types.typesEqual t1 t2 -> unifyTypes ctx ss ts
   | TypeSchema.Parameter(n)::ss, t::ts -> unifyTypes ((n,t)::ctx) ss ts
@@ -207,10 +219,11 @@ let importProvidedType url lookupNamed exp =
         let t = (unbox<NamedType> t)
         let tyargs = List.ofArray (Array.map mapType t.typargs)
         match lookupNamed t.name with
-        | Type.Object (:? GenericTypeDefinition as gtd) -> 
-            if gtd.TypeParameterCount <> List.length tyargs then 
+        | Type.Object obj when isGenericTypeDefinition (box obj) ->
+            let gtd = unbox<GenericTypeDefinition> (box obj)
+            if gtd.TypeParameterCount <> List.length tyargs then
               failwith "provideFSharpType: Named type has mismatching nuumber of arguments"
-            gtd.Apply tyargs |> TypeSchema.GenericType 
+            gtd.Apply tyargs |> TypeSchema.GenericType
         | t -> TypeSchema.Primitive t
     | "parameter" -> TypeSchema.Parameter (unbox<GenericParameterType> t).name
     | "array" -> TypeSchema.List(mapType (unbox<ArrayType> t).element)
@@ -299,12 +312,12 @@ let importProvidedType url lookupNamed exp =
                         member x.TypeArguments = List.map (substituteTypeParams assigns ) tyargs
                         member x.TypeDefinition = td
                         member x.Members = members.Value
-                        member x.TypeEquals t2 = 
-                          match t2 with
-                          | :? GenericType as gt ->
-                              gt.TypeDefinition.FullName = x.TypeDefinition.FullName &&
-                                Types.listsEqual x.TypeArguments gt.TypeArguments Types.typesEqual
-                          | _ -> false }
+                        member x.TypeEquals t2 =
+                          if isGenericType (box t2) then
+                            let gt = unbox<GenericType> (box t2)
+                            gt.TypeDefinition.FullName = x.TypeDefinition.FullName &&
+                              Types.listsEqual x.TypeArguments gt.TypeArguments Types.typesEqual
+                          else false }
                   member x.TypeArguments = tyargs } } :> _
     
   objectType |> Type.Object

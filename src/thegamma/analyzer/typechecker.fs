@@ -273,7 +273,7 @@ let collectTypeErrors (entity:Entity) =
 let typeCheckProgram (globals:Entity list) (bound:Binder.BindingResult) evaluate prog = async {
   Log.trace("typechecker", "Type checking program")
   try
-    let rangeLookup = dict [ for r, e in bound.Entities -> e.Symbol, r ]
+    let rangeLookup = bound.Entities |> Seq.map (fun (r, e) -> e.Symbol, r) |> Seq.distinctBy fst |> dict
     let vars = dict [ for e in globals -> e.Name, e ]
     let ctx = { Globals = vars; Errors = ResizeArray<_>(); Ranges = rangeLookup; Evaluate = evaluate }
     let! _ = typeCheckEntityAsync ctx prog 

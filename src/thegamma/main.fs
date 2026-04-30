@@ -1,10 +1,9 @@
 ﻿module TheGamma.Main
 
 open Fable.Core
-open Fable.Core.Extensions
 open Fable.Import
-open Fable.Helpers
-open Fable.Import.Browser
+open Browser
+open Browser.Types
 
 open TheGamma
 open TheGamma.Ast
@@ -16,6 +15,9 @@ open TheGamma.TypeProviders
 open TheGamma.Live.Common
 
 module FsOption = Microsoft.FSharp.Core.Option
+
+[<Emit("$0.style[$1] = $2")>]
+let private setStyle (el:obj) (prop:string) (value:string) : unit = failwith "JS"
 
 // ------------------------------------------------------------------------------------------------
 // Global provided types
@@ -205,13 +207,12 @@ let rec serializeType typ =
   | Type.List(t) -> 
       [ "kind", box "array"
         "type", serializeType t ] |> JsInterop.createObj
-  | Type.Object(obj) -> 
+  | Type.Object(obj) ->
       [ yield "kind", box "object"
-        match obj with
-        | :? FSharpProvider.GenericType as gt -> 
-            yield "generics", gt.TypeArguments |> Seq.map serializeType |> Array.ofSeq |> box
-        | _ -> ()
-        yield "members", obj.Members |> Array.map (fun m -> m.Name) |> box ] 
+        if FSharpProvider.isGenericType (box obj) then
+          let gt = unbox<FSharpProvider.GenericType> (box obj)
+          yield "generics", gt.TypeArguments |> Seq.map serializeType |> Array.ofSeq |> box
+        yield "members", obj.Members |> Array.map (fun m -> m.Name) |> box ]
       |> JsInterop.createObj
 
 let rec serializeEntity (rng:Range option) (ent:Entity) =
@@ -324,8 +325,8 @@ type gamma(ctx:TheGammaContext) =
         dim.width <- width
         dim.height <- height
         ed.layout(dim)
-        el.style.height <- string dim.height + "px" 
-        el.style.width <- string dim.width + "px" 
+        setStyle el "height" (string dim.height + "px")
+        setStyle el "width" (string dim.width + "px")
 
     if options.autoHeight = Some true then
       ed.getModel().onDidChangeContent(fun _ -> autosizeEditor ()) |> ignore     

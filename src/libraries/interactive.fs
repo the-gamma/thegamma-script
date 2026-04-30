@@ -1,8 +1,8 @@
 ﻿namespace TheGamma.Interactive
 
 open Fable.Core
-open Fable.Helpers
-open Fable.Import.Browser
+open Browser
+open Browser.Types
 
 open TheGamma.Common
 open TheGamma.Series

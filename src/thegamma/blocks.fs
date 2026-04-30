@@ -1,6 +1,7 @@
 ﻿module TheGamma.Blocks
 
-open Fable.Import.Browser
+open Browser
+open Browser.Types
 open TheGamma.Common
 open TheGamma.Html
 open TheGamma.Ast
@@ -32,10 +33,11 @@ type State =
     { CheckingService = svc; Globals = globals
       Entity = None; Chain = []; Completions = [||] }
 
-let getTypeName state = 
+let getTypeName state =
   match state.Entity with
-  | Some { Type = Some(Type.Object(:? GenericType as s)) } -> s.TypeDefinition.FullName
-  | _ -> "object" 
+  | Some { Type = Some(Type.Object obj) } when isGenericType (box obj) ->
+      (unbox<GenericType> (box obj)).TypeDefinition.FullName
+  | _ -> "object"
 
 
 let formatChain chain = 

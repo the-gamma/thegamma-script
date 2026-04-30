@@ -5,7 +5,8 @@ open TheGamma
 open TheGamma.Common
 open TheGamma.Series
 open TheGamma.Html
-open Fable.Import.Browser
+open Browser
+open Browser.Types
 
 type Emit = Fable.Core.EmitAttribute
 

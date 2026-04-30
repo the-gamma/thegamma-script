@@ -1,9 +1,10 @@
 ﻿module TheGamma.Html
 
 open Fable.Core
-open Fable.Helpers
-open Fable.Import.Browser
 open Fable.Core.JsInterop
+open Fable.Helpers
+open Browser
+open Browser.Types
 open TheGamma.Common
 
 module FsOption = FSharp.Core.Option
@@ -111,7 +112,7 @@ let rec render node =
         match a with
         | Property(o) -> setProperty el k o
         | Attribute(v) -> el.setAttribute(k, v)
-        | Event(f) -> el.addEventListener(k, U2.Case1(EventListener(f el)))
+        | Event(f) -> el.addEventListener(k, !!(fun (e: Event) -> f el e))
       let onRender () = 
         for _, f in rc do f()
         f |> FsOption.iter (fun f -> f el)

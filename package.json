@@ -1,32 +1,27 @@
 {
   "name": "thegamma-script",
   "version": "0.1.26",
+  "type": "module",
   "description": "The Gamma project",
   "scripts": {
-    "pretest": "fable tests",
-    "test": "mocha dist/tests/thegamma-tests",
-    "justtest": "mocha dist/tests/thegamma-tests",
-    "prepublish": "npm run build",
-    "build": "fable --target es2015 src && fable --target commonjs src && fable --target min src && fable --target dev src",
-    "watch": "fable -w --target dev src"
+    "test": "dotnet fable tests/thegamma-tests/thegamma-tests.fsproj --outDir dist/tests && npx mocha --experimental-vm-modules dist/tests/tests.js",
+    "build": "dotnet fable src/thegamma/thegamma.fsproj --outDir dist && rollup -c",
+    "bundle": "rollup -c",
+    "watch": "dotnet fable src/thegamma/thegamma.fsproj --outDir dist --watch"
   },
   "author": "Tomas Petricek",
   "license": "MIT",
   "dependencies": {
     "babel-standalone": "^6.18.1",
-    "fable-core": "^0.7.26",
     "monaco-editor": "^0.7.0",
     "virtual-dom": "^2.1.1"
   },
   "devDependencies": {
-    "babel-plugin-transform-runtime": "^6.15.0",
-    "babel-runtime": "^6.18.0",
-    "fable-compiler": "^0.7.42",
-    "fable-plugins-nunit": "^0.7.3",
-    "mocha": "^3.1.2",
-    "pmm": "^1.3.1",
-    "rollup-plugin-commonjs": "^5.0.5",
-    "rollup-plugin-uglify": "^1.0.1"
+    "@rollup/plugin-commonjs": "^29.0.2",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-terser": "^1.0.0",
+    "mocha": "^10.0.0",
+    "rollup": "^4.60.2"
   },
   "repository": {
     "type": "git",
@@ -41,7 +36,5 @@
     "url": "https://github.com/the-gamma/thegamma-script/issues"
   },
   "homepage": "http://thegamma.net",
-  "main": "./dist/commonjs/main.js",
-  "module": "./dist/es2015/main/main.js",
-  "jsnext:main": "./dist/es2015/main/main.js"
+  "main": "./dist/main.js"
 }

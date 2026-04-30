@@ -1,6 +1,7 @@
 ﻿namespace TheGamma.Series
 
 open Fable.Core
+open Browser
 open TheGamma.Common
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -273,7 +274,7 @@ type ``inline`` =
     { value = unbox value }
   member i.show(outputId) = Async.StartImmediate <| async {
     let! v = i.value.value
-    Fable.Import.Browser.document.getElementById(outputId).innerText <- string v }
+    document.getElementById(outputId).innerText <- string v }
 
 
 (*

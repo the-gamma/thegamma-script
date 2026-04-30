@@ -9,6 +9,7 @@ open TheGamma.Babel.BabelOperators
 open TheGamma.Common
 open TheGamma.TypeProviders.ProviderHelpers
 open Fable.Import
+open Browser
 
 // ------------------------------------------------------------------------------------------------
 // Types to represent JSON data returned by REST service
@@ -149,7 +150,7 @@ let rec getTypeAndEmitter (lookupNamed:string -> Type) ty =
         |> TheGamma.Type.Object 
       obj, id
   | _ -> 
-      Browser.console.log("getTypeAndEmitter: Cannot handle %O", ty)
+      console.log("getTypeAndEmitter: Cannot handle %O", ty)
       failwith "getTypeAndEmitter: Cannot handle type"
 
 // ------------------------------------------------------------------------------------------------
@@ -192,7 +193,7 @@ let rec createRestType lookupNamed resolveProvider root cookies url =
               let matched = Seq.zip parameters tys
               let newCookies = 
                 matched |> Seq.choose (function
-                  | pa, (_, Some value) when pa.kind = "static" -> Some(pa.cookie.Value + "=" + Fable.Import.JS.encodeURIComponent(string value))
+                  | pa, (_, Some value) when pa.kind = "static" -> Some(pa.cookie.Value + "=" + Fable.Core.JS.encodeURIComponent(string value))
                   | _ -> None) 
               let cookies = Seq.append [cookies] newCookies |> String.concat "&"
               createReturnType cookies

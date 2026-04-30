@@ -2,14 +2,15 @@
 
 open Fable.Core
 open Fable.Import.monaco
-open Fable.Import.Browser
+open Browser
+open Browser.Types
 
 open TheGamma.Common
 open TheGamma.Services
 open TheGamma.TypeChecker
 open Fable.Core.JsInterop
 
-[<Emit("var i = 1; eval('monaco$' + i + ' = monaco'); monaco = monaco;")>]
+[<Emit("if (typeof monaco !== 'undefined') { var i = 1; eval('monaco$' + i + ' = monaco'); monaco = monaco; }")>]
 let hack : unit = ()
 hack
 

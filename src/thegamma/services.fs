@@ -1,6 +1,8 @@
 ﻿module TheGamma.Services
 
 open Fable.Import
+open Fable.Helpers
+open Browser
 open TheGamma.Html
 open TheGamma.Common
 open TheGamma.Ast
@@ -99,9 +101,12 @@ type CheckingService(article, globals:Future<Entity list>) =
 // ------------------------------------------------------------------------------------------------
 
 open Fable.Core
-open Fable.Helpers
-open Fable.Import.Browser
+open Browser
+open Browser.Types
 open TheGamma.Live.Common
+
+[<Emit("$0.style[$1] = $2")>]
+let private setStyle (el:obj) (prop:string) (value:string) : unit = failwith "JS"
 
 type PreviewService(checker:CheckingService, globals:Future<list<Entity>>, ed:monaco.editor.ICodeEditor, livePreviews) =
 
@@ -122,10 +127,10 @@ type PreviewService(checker:CheckingService, globals:Future<list<Entity>>, ed:mo
     let mutable zoneId = -1.
     let zone = JsInterop.createEmpty<monaco.editor.IViewZone>
     
-    let node = document.createElement_div()
-    node.style.width <- "1000px"
-    node.style.height <- "1000px"
-    container <- document.createElement_div() :> Node    
+    let node = document.createElement("div")
+    setStyle node "width" "1000px"
+    setStyle node "height" "1000px"
+    container <- document.createElement("div") :> Node    
     tree <- JsInterop.createObj []    
     node.appendChild(container) |> ignore
     ed.changeViewZones(fun accessor ->  

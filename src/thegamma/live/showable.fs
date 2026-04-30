@@ -5,7 +5,8 @@ module TheGamma.Live.Showable
 
 open Fable.Core
 open Fable.Import
-open Fable.Import.Browser
+open Browser
+open Browser.Types
 
 open TheGamma
 open TheGamma.Ast

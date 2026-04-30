@@ -5,7 +5,8 @@ module TheGamma.Live.Pivot
 
 open Fable.Core
 open Fable.Import
-open Fable.Import.Browser
+open Browser
+open Browser.Types
 
 open TheGamma
 open TheGamma.Ast
@@ -462,8 +463,8 @@ let renderAddPropertyMenu trigger f nodes =
     | _ -> () ]
 
 let renderSection triggerEvent section = 
-  let trigger action = fun _ (e:Event) -> e.cancelBubble <- true; triggerEvent (CustomEvent(action))
-  let triggerWith f = fun el (e:Event) -> e.cancelBubble <- true; triggerEvent (CustomEvent(f el))
+  let trigger action = fun _ (e:Event) -> e.stopPropagation(); triggerEvent (CustomEvent(action))
+  let triggerWith f = fun el (e:Event) -> e.stopPropagation(); triggerEvent (CustomEvent(f el))
   let getNodeNameAndSymbol = function
     | Some { Entity = Some e; Node = Expr.Member(_, { Node = Expr.Variable n }) } -> n.Node.Name, Some e.Symbol
     | _ -> "", None
@@ -587,8 +588,8 @@ let renderSection triggerEvent section =
     | _ -> () ]
 
 let renderPivot triggerEvent (state:LiveState<_>) = 
-  let trigger action = fun _ (e:Event) -> e.cancelBubble <- true; triggerEvent (CustomEvent(action))
-  let triggerWith f = fun el (e:Event) -> e.cancelBubble <- true; triggerEvent (CustomEvent(f el))
+  let trigger action = fun _ (e:Event) -> e.stopPropagation(); triggerEvent (CustomEvent(action))
+  let triggerWith f = fun el (e:Event) -> e.stopPropagation(); triggerEvent (CustomEvent(f el))
   let selSec = state.State.Sections |> List.tryFind (fun sec -> 
     sec.Nodes |> List.exists (fun secEnt -> state.State.SelectedEntity.Symbol = secEnt.Entity.Value.Symbol) )
   let firstNode = state.State.FirstNode

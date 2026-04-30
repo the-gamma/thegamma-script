@@ -419,7 +419,7 @@ and handleFilterEqNeqRequest ctx rest (fld, eq) op conds = async {
       | FilterBy _ when ctx.IgnoreFiltersInRange -> false 
       | FilterBy(_, conds) when conds |> List.exists (function ((Equals | NotEquals), _, _) -> false | _ -> true) -> false
       | _ -> true)
-  let url = ctx.Root + "?" + (GetRange(fld)::tfs |> List.rev |> Transform.toUrl |> Fable.Import.JS.encodeURIComponent)
+  let url = ctx.Root + "?" + (GetRange(fld)::tfs |> List.rev |> Transform.toUrl |> Fable.Core.JS.encodeURIComponent)
   let! options = Http.Request("GET", url)
   let options = jsonParse<string[]> options
   return

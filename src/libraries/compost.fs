@@ -2,8 +2,8 @@
 
 open TheGamma
 open TheGamma.Html
-open Fable.Import.Browser
-open Fable.Helpers
+open Browser
+open Browser.Types
 
 // ------------------------------------------------------------------------------------------------
 // Domain that users see

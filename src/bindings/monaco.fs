@@ -3,8 +3,8 @@
 open System
 open System.Text.RegularExpressions
 open Fable.Core
-open Fable.Import.JS
-open Fable.Import.Browser 
+open Fable.Core.JS
+open Browser.Types
 
 module monaco =
     type IDisposable =

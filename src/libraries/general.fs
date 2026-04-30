@@ -4,7 +4,8 @@ open System
 open TheGamma
 open TheGamma.Html
 open TheGamma.Common
-open Fable.Import.Browser
+open Browser
+open Browser.Types
 open Fable.Core
 
 type math = 
@@ -19,7 +20,7 @@ type math =
 
 type date = 
   static member now() = DateTime.Now
-  static member date(year,month,day) = DateTime(year,month,day)
+  static member date(year:int,month:int,day:int) = DateTime(year,month,day)
   static member time(year,month,day,hour,minute,second) = DateTime(year,month,day,hour,minute,second)
 
 type dateformat = 
